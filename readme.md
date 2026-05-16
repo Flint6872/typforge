@@ -1,5 +1,5 @@
 <div style="text-align: center;">
-  <img src="assets/TypForge-logo.png" alt="Alt text" width="600" height="200">
+  <img src="assets/TypForge-logo.png" alt="Alt text" width="500" height="200">
 </div>
 
   
