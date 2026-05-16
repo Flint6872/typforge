@@ -1,0 +1,72 @@
+name: Release Automation
+
+on:
+  push:
+    tags:
+      - "v*" # Triggers automatically when you push a tag like v1.0.0
+
+jobs:
+  build-and-release:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_name: typforge-linux.tar.gz
+            binary_name: typforge
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_name: typforge-windows.zip
+            binary_name: typforge.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive_name: typforge-macos-intel.zip
+            binary_name: typforge
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Release Binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package Directory and Compress
+        shell: bash
+        run: |
+          # 1. Create a clean workspace staging folder
+          mkdir typforge-payload
+
+          # 2. Copy the binary and your existing repository folders
+          cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} typforge-payload/
+          cp -r themes typforge-payload/
+          cp -r documents typforge-payload/
+
+          # 3. Compress based on the operating system
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            # Windows target zipped
+            powershell -Command "Compress-Archive -Path typforge-payload/* -DestinationPath ${{ matrix.archive_name }}"
+          elif [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            # Linux target tarballed (preserves permissions)
+            tar -czf ${{ matrix.archive_name }} -C typforge-payload .
+          else
+            # macOS target zipped
+            cd typforge-payload && zip -r ../${{ matrix.archive_name }} ./* && cd ..
+          fi
+
+      - name: Publish Artifacts to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.archive_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

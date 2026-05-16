@@ -3011,6 +3011,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.5.1"
+source = "git+https://github.com/Flint6872/gpui-component#8f2abf25e00ac74e0074a1745a91b3d76871ef3b"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3098,6 +3099,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.5.1"
+source = "git+https://github.com/Flint6872/gpui-component#8f2abf25e00ac74e0074a1745a91b3d76871ef3b"
 dependencies = [
  "proc-macro2",
  "quote",
