@@ -14,7 +14,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
             archive_name: typforge-linux.tar.gz
             binary_name: typforge
           - os: windows-latest
@@ -22,7 +22,7 @@ jobs:
             archive_name: typforge-windows.zip
             binary_name: typforge.exe
           - os: macos-latest
-            target: x86_64-apple-darwin
+            target: aarch64-apple-darwin,x86_64-apple-darwin
             archive_name: typforge-macos-intel.zip
             binary_name: typforge
 

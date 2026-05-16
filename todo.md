@@ -71,3 +71,5 @@ To get true multi-stop radial gradients or rainbow circles in GPUI, we would eve
 *   The core rendering logic for Typst documents within GPUI views is being defined, including coordinate system mappings and font synchronization.
     *   Refer to: `typforge/crates/typst-gpui/.zed/rules.md` for detailed API and coordinate system rules.
     *   Refer to: `typforge/crates/typst-gpui/.zed/project.md` for the broader project objective and roadmap.
+git tag v0.0.1
+git push origin v0.0.1
