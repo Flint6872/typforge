@@ -5,6 +5,10 @@ on:
     tags:
       - "v*" # Triggers automatically when you push a tag like v1.0.0
 
+# --- Opt-in to Node 24 globally to silence deprecation warnings ---
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-and-release:
     name: Build for ${{ matrix.os }}
@@ -22,24 +26,51 @@ jobs:
             archive_name: typforge-windows.zip
             binary_name: typforge.exe
           - os: macos-latest
-            target: aarch64-apple-darwin,x86_64-apple-darwin
-            archive_name: typforge-macos-intel.zip
+            target: universal-apple-darwin # Custom handle for sequential macOS compilation
+            archive_name: typforge-macos.zip
             binary_name: typforge
 
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
 
+      # Installs both targets on macOS, otherwise installs the native matrix target
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin x86_64-apple-darwin' || matrix.target }}
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
+      # Install MUSL dependencies ONLY on Linux runners
+      - name: Install MUSL tools (Linux only)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools g++-x86-64-linux-gnu
+
+      # Compiles targets properly (handles MUSL overrides & macOS Universal stitch engine)
       - name: Build Release Binary
-        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CC: ${{ matrix.os == 'ubuntu-latest' && 'gcc' || '' }}
+          CXX: ${{ matrix.os == 'ubuntu-latest' && 'g++' || '' }}
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            # 1. Compile both segments sequentially
+            cargo build --release --target aarch64-apple-darwin
+            cargo build --release --target x86_64-apple-darwin
+
+            # 2. Stitch them into a fat universal binary inside our target directory
+            mkdir -p target/universal-apple-darwin/release
+            lipo -create \
+              target/aarch64-apple-darwin/release/typforge \
+              target/x86_64-apple-darwin/release/typforge \
+              -output target/universal-apple-darwin/release/typforge
+          else
+            # Standard execution path for Windows and Linux
+            cargo build --release --target ${{ matrix.target }}
+          fi
 
       - name: Package Directory and Compress
         shell: bash
@@ -64,9 +95,40 @@ jobs:
             cd typforge-payload && zip -r ../${{ matrix.archive_name }} ./* && cd ..
           fi
 
+      # Official, Node 24-ready script automation to manage the release artifacts safely
       - name: Publish Artifacts to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: actions/github-script@v7
         with:
-          files: ${{ matrix.archive_name }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = '${{ matrix.archive_name }}';
+
+            // Get release by tag
+            const tag = context.ref.replace('refs/tags/', '');
+            let release;
+            try {
+              release = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: tag,
+              });
+            } catch (e) {
+              // Create release if it doesn't exist yet
+              release = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tag,
+                name: tag,
+                draft: false,
+                prerelease: false,
+              });
+            }
+
+            // Upload the asset
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.data.id,
+              name: path,
+              data: fs.readFileSync(path),
+            });
