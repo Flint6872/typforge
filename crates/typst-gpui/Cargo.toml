@@ -1,0 +1,24 @@
+[package]
+name = "typst-gpui"
+version = "0.0.3"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+gpui.workspace = true
+gpui-component.workspace = true
+
+#added for line rendering
+lyon_path = "1.0.16"         # Ensure this is present
+lyon_tessellation = "1.0.16" # Ensure this is present (as you referenced it)
+
+typst.workspace = true
+typst-pdf = "0.14.2"
+
+typsdocx = { path = "../typsdocx" }
+
+parking_lot.workspace = true
+
+[lib]
+path = "src/lib.rs"
