@@ -12,10 +12,10 @@ pub fn init(cx: &mut App) {
 
     // If you are running from workspace root, we need to go into the crate
     if themes_dir.ends_with("typforge0.0.1") {
-        themes_dir = themes_dir.join("crates/typforge/assets/themes");
+        themes_dir = themes_dir.join("./themes");
     } else {
         // If you are already in the crate folder
-        themes_dir = themes_dir.join("assets/themes");
+        themes_dir = themes_dir.join("./themes");
     }
 
     eprintln!("Diagnostic: Checking for themes in {:?}", themes_dir);

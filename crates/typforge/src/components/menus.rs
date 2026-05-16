@@ -19,9 +19,9 @@ pub fn setup_menus(cx: &mut App) {
     // Manually scan directory for theme JSONs
     let mut themes_dir = std::env::current_dir().unwrap();
     if themes_dir.ends_with("typforge0.0.1") {
-        themes_dir = themes_dir.join("crates/typforge/assets/themes");
+        themes_dir = themes_dir.join("./themes");
     } else {
-        themes_dir = themes_dir.join("assets/themes");
+        themes_dir = themes_dir.join("./themes");
     }
 
     if let Ok(entries) = std::fs::read_dir(themes_dir) {

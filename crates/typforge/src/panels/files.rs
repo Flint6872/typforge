@@ -26,7 +26,7 @@ pub struct FilesPanel {
 
 impl FilesPanel {
     pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let default_project_root = PathBuf::from("crates/typforge/documents");
+        let default_project_root = PathBuf::from("./documents");
 
         eprintln!(
             "FilesPanel: Attempting to use project root: {:?}",

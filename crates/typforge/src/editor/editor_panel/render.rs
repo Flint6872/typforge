@@ -11,6 +11,9 @@ impl Render for EditorPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active_file_path = self.active_file_path.clone();
 
+        let font_size = px(16.0 * self.zoom_level);
+        let line_height = font_size * 1.5;
+
         // 1. Create the base Editor UI
         let editor_element = if let Some(ref active_path) = active_file_path {
             if let Some(file) = self.open_files.iter().find(|f| f.path == *active_path) {
@@ -18,8 +21,8 @@ impl Render for EditorPanel {
                 //let editor_panel_handle = cx.entity().clone();
 
                 CodeEditor::new(file.editor_state.clone(), file.language.clone(), Vec::new())
-                    .font_size(px(25.0 * self.zoom_level))
-                    .line_height(px(35.0 * self.zoom_level))
+                    .font_size(font_size)
+                    .line_height(line_height)
                     .h_full()
                     .on_mouse_move(cx.listener(
                         move |this_entity, event: &MouseMoveEvent, _, cx| {
