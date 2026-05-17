@@ -59,6 +59,8 @@ jobs:
           # Use musl-gcc wrapper for Linux so that vendored C dependencies build under MUSL
           CC: ${{ matrix.os == 'ubuntu-latest' && 'musl-gcc' || '' }}
           CXX: ${{ matrix.os == 'ubuntu-latest' && 'g++' || '' }}
+          # FIXES BOTH font-kit AND zed-font-kit (yeslogic-fontconfig-sys) for MUSL
+          RUST_FONTCONFIG_DLOPEN: on
         run: |
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
             # 1. Compile both segments sequentially
