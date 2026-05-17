@@ -50,6 +50,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools g++-x86-64-linux-gnu
+          sudo apt-get install --only-upgrade libfontconfig1-dev fontconfig
 
       # Compiles targets properly (handles MUSL overrides & macOS Universal stitch engine)
       - name: Build Release Binary

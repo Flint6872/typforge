@@ -9,7 +9,7 @@ chrono = "0.4.44"
 
 gpui.workspace = true
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
-    # "font-kit", #removed due to linux build issues
+    "font-kit",
     "x11",
     "wayland",
     "runtime_shaders",
