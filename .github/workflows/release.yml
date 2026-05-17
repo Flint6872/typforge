@@ -72,7 +72,7 @@ jobs:
               -output target/universal-apple-darwin/release/typforge
           elif [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             # Cross-compile for MUSL and pass feature to statically vendor OpenSSL source
-            cargo build --release --target ${{ matrix.target }} --features openssl-sys/vendored
+            cargo build --release --target ${{ matrix.target }} --features typst-kit/vendor-openssl
           else
             # Standard execution path for Windows
             cargo build --release --target ${{ matrix.target }}
