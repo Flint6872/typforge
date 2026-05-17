@@ -40,6 +40,7 @@ jobs:
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin x86_64-apple-darwin' || matrix.target }}
 
+      # Speeds up subsequent compilation tasks
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
@@ -52,8 +53,10 @@ jobs:
 
       # Compiles targets properly (handles MUSL overrides & macOS Universal stitch engine)
       - name: Build Release Binary
+        shell: bash
         env:
-          CC: ${{ matrix.os == 'ubuntu-latest' && 'gcc' || '' }}
+          # Use musl-gcc wrapper for Linux so that vendored C dependencies build under MUSL
+          CC: ${{ matrix.os == 'ubuntu-latest' && 'musl-gcc' || '' }}
           CXX: ${{ matrix.os == 'ubuntu-latest' && 'g++' || '' }}
         run: |
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
@@ -67,11 +70,15 @@ jobs:
               target/aarch64-apple-darwin/release/typforge \
               target/x86_64-apple-darwin/release/typforge \
               -output target/universal-apple-darwin/release/typforge
+          elif [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            # Cross-compile for MUSL and pass feature to statically vendor OpenSSL source
+            cargo build --release --target ${{ matrix.target }} --features openssl-sys/vendored
           else
-            # Standard execution path for Windows and Linux
+            # Standard execution path for Windows
             cargo build --release --target ${{ matrix.target }}
           fi
 
+      # Packages and structures payload properly
       - name: Package Directory and Compress
         shell: bash
         run: |
@@ -80,8 +87,8 @@ jobs:
 
           # 2. Copy the binary and your existing repository folders
           cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} typforge-payload/
-          cp -r themes typforge-payload/
-          cp -r documents typforge-payload/
+          cp -r themes typforge-payload/ || true
+          cp -r documents typforge-payload/ || true
 
           # 3. Compress based on the operating system
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
