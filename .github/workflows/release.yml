@@ -1,5 +1,4 @@
 name: Release Automation
-
 on:
   push:
     tags:
@@ -21,14 +20,17 @@ jobs:
             target: x86_64-unknown-linux-musl
             archive_name: typforge-linux.tar.gz
             binary_name: typforge
+            use_cross: true # Custom flag to isolate cross execution
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             archive_name: typforge-windows.zip
             binary_name: typforge.exe
+            use_cross: false
           - os: macos-latest
-            target: universal-apple-darwin # Custom handle for sequential macOS compilation
+            target: universal-apple-darwin
             archive_name: typforge-macos.zip
-            binary_name: typforge
+            binary_name: typforge.exe # Resolved suffix reference for packaging loop
+            use_cross: false
 
     steps:
       - name: Checkout source code
@@ -44,25 +46,18 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      # Install MUSL dependencies ONLY on Linux runners
-      - name: Install MUSL tools (Linux only)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools g++-x86-64-linux-gnu
-          sudo apt-get install -y build-essential
-          sudo apt-get install -y libfontconfig1-dev pkg-config
-          sudo apt-get install -y libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
-          sudo apt-get install --only-upgrade libfontconfig1-dev fontconfig
+      # Installs and configures cross command layer ONLY when use_cross is true
+      - name: Install Cross Toolchain
+        if: matrix.use_cross
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          target: ${{ matrix.target }}
 
-      # Compiles targets properly (handles MUSL overrides & macOS Universal stitch engine)
+      # Compiles targets properly (handles macOS Universal stitch engine and Linux Cross containerization)
       - name: Build Release Binary
         shell: bash
         env:
-          # Use musl-gcc wrapper for Linux so that vendored C dependencies build under MUSL
-          CC: ${{ matrix.os == 'ubuntu-latest' && 'musl-gcc' || '' }}
-          CXX: ${{ matrix.os == 'ubuntu-latest' && 'g++' || '' }}
-          # FIXES BOTH font-kit AND zed-font-kit (yeslogic-fontconfig-sys) for MUSL
+          # FIXES BOTH font-kit AND zed-font-kit (yeslogic-fontconfig-sys) for MUSL inside container
           RUST_FONTCONFIG_DLOPEN: on
         run: |
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
@@ -76,9 +71,9 @@ jobs:
               target/aarch64-apple-darwin/release/typforge \
               target/x86_64-apple-darwin/release/typforge \
               -output target/universal-apple-darwin/release/typforge
-          elif [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            # Cross-compile for MUSL and pass feature to statically vendor OpenSSL source
-            cargo build --release --target ${{ matrix.target }} --features typst-kit/vendor-openssl
+          elif [ "${{ matrix.use_cross }}" = "true" ]; then
+            # Build using cross instead of cargo. Toolchain & compiler variables are handled inside the container.
+            cross build --release --target ${{ matrix.target }} --features typst-kit/vendor-openssl
           else
             # Standard execution path for Windows
             cargo build --release --target ${{ matrix.target }}
