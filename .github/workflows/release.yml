@@ -69,6 +69,8 @@ jobs:
                 fontconfig \
                 libzstd-dev \
                 libbz2-dev
+        env:
+          RUST_FONTCONFIG_DLOPEN: "on"
 
       # Compiles targets properly
       - name: Build Release Binary
