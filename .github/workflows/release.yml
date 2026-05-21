@@ -66,7 +66,9 @@ jobs:
                 libssl-dev \
                 libfontconfig1-dev \
                 libfreetype6-dev \
-                fontconfig
+                fontconfig \
+                libzstd-dev \
+                libbz2-dev
 
       # Compiles targets properly
       - name: Build Release Binary
