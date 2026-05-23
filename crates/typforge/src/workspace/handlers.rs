@@ -364,6 +364,17 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         }
     }
 
+    pub(crate) fn handle_reload_settings(
+        &mut self,
+        _action: &actions::ReloadSettings,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        crate::settings::load_settings(cx);
+        crate::components::theme::apply_settings_theme(cx);
+        cx.notify(); // Or cx.notify() to redraw everything
+    }
+
     // fn handle_undo(&mut self, _: &actions::EditUndo, window: &mut Window, cx: &mut Context<Self>) {
     //     self.editor_panel
     //         .update(cx, |editor: &mut EditorPanel, editor_cx| {

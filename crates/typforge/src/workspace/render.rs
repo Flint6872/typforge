@@ -1,4 +1,4 @@
-use crate::workspace::TypstNoteView;
+use crate::{actions::ReloadSettings, workspace::TypstNoteView};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::{ActiveTheme, button::Button, h_flex};
@@ -99,6 +99,9 @@ impl<W: typst_gpui::TypstGpuiWorld> Render for TypstNoteView<W> {
             .on_action(cx.listener(Self::handle_export_pdf))
             //export to docx
             .on_action(cx.listener(Self::handle_export_docx))
+            //reload settings
+            .on_action(cx.listener(Self::handle_reload_settings))
+            //  cx.listener(Self::handle_reload_settings))
             //.child(self.dock_area.clone())
             .child(
                 // 2. Title Bar

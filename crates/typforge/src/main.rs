@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::{
     components::{lsp::LspClient, menus::setup_menus, theme},
     key_bindings::bind_keys,
+    settings::load_settings,
     typst_world::GpuiWorld,
 };
 
@@ -24,6 +25,7 @@ mod components;
 pub mod editor;
 mod key_bindings;
 mod panels;
+mod settings;
 mod typst_world;
 
 mod workspace;
@@ -49,8 +51,10 @@ fn main() -> Result<()> {
         // cx.run_migrations();
 
         gpui_component::init(cx);
+        load_settings(cx);
         bind_keys(cx);
         theme::init(cx);
+        theme::apply_settings_theme(cx);
         setup_menus(cx);
 
         #[cfg(not(target_os = "macos"))]

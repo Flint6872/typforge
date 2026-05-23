@@ -26,6 +26,7 @@ actions!(
         FileExportPdf,
         FileExportDocx,
         PackageManager,
+        ReloadSettings,
         // ChangeTheme,
     ]
 );
