@@ -46,6 +46,8 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
                 match receiver.await {
                     Ok(Ok(Some(paths))) => {
                         if let Some(path) = paths.into_iter().next() {
+
+                            
                             window_handle
                                 .update(&mut cx_for_async_block, |_, window, app_cx| {
                                     editor_panel_handle.update(app_cx, |editor, editor_cx| {
@@ -76,13 +78,14 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        println!("Action: FolderOpen triggered!");
-        // Note: Ensure `files_panel` is added to your TypstNoteView struct
         let files_panel_handle = self.files_panel.clone();
         let window_handle = window.window_handle();
 
-        cx.spawn(move |_this, spawned_async_cx: &mut AsyncApp| {
-            let mut cx = spawned_async_cx.clone();
+        // Use cx.spawn, but we don't move the original `cx` into the closure.
+        // Instead, we rely on the `AsyncApp` provided by `spawn` to perform updates.
+        cx.spawn(move |_, spawned_async_cx: &mut AsyncApp| {
+            let mut cx_for_async = spawned_async_cx.clone();
+
             async move {
                 let options = PathPromptOptions {
                     files: false,
@@ -91,34 +94,47 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
                     prompt: Some("Open Directory".into()),
                 };
 
-                let receiver = cx.update(|app_cx| app_cx.prompt_for_paths(options));
+                // Use the cloned AsyncApp to prompt
+                let receiver = cx_for_async.update(|app_cx| app_cx.prompt_for_paths(options));
 
-                // Await once and store the result
-                match receiver.await {
-                    Ok(Ok(Some(paths))) => {
-                        if let Some(path) = paths.into_iter().next() {
-                            window_handle
-                                .update(&mut cx, |_, _window, app_cx| {
-                                    files_panel_handle.update(app_cx, |files_panel, files_cx| {
-                                        files_panel.set_project_root(path, files_cx);
-                                    });
-                                })
-                                .ok();
-                        }
-                    }
-                    Ok(Ok(None)) => {
-                        println!("Directory selection cancelled.");
-                    }
-                    Ok(Err(e)) => {
-                        eprintln!("Error in path prompt: {:?}", e);
-                    }
-                    Err(e) => {
-                        eprintln!("Error awaiting paths (channel closed): {:?}", e);
+                if let Ok(Ok(Some(paths))) = receiver.await {
+                    if let Some(path) = paths.into_iter().next() {
+                        let path_str = path.to_string_lossy().to_string();
+
+                        // Update the global state via the AsyncApp clone
+                        cx_for_async.update(|app_cx| {
+                            let mut settings =
+                                app_cx.global::<crate::settings::AppSettings>().clone();
+                            settings.default_save_folder = Some(path_str);
+                            app_cx.set_global(settings);
+                        });
+
+                        // Update the file panel
+                        window_handle
+                            .update(&mut cx_for_async, |_, _, app_cx| {
+                                files_panel_handle.update(app_cx, |files_panel, files_cx| {
+                                    files_panel.set_project_root(path, files_cx);
+                                });
+                            })
+                            .ok();
                     }
                 }
             }
         })
         .detach();
+    }
+
+    pub(crate) fn handle_file_save(
+        &mut self,
+        _action: &actions::FileSave,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        println!("Action: FileSave triggered!"); // Debug print
+        self.editor_panel
+            .update(cx, |editor: &mut EditorPanel, editor_cx| {
+                editor.save_active_file(_window, editor_cx);
+            });
     }
 
     pub(crate) fn handle_file_save_as(
@@ -131,31 +147,40 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         let editor_panel_handle = self.editor_panel.clone();
         let window_handle = window.window_handle();
 
-        // Capture the current path context before spawning
+        // 1. Capture the current path context
         let active_file_path = editor_panel_handle.read(cx).active_file_path.clone();
+
+        // 2. Capture the default_save_folder from settings before spawning
+        let default_save_folder = cx
+            .global::<crate::settings::AppSettings>()
+            .default_save_folder
+            .as_ref()
+            .map(std::path::PathBuf::from);
 
         cx.spawn(move |_, spawned_async_cx: &mut AsyncApp| {
             let mut cx_for_async_block = spawned_async_cx.clone();
 
             async move {
-                // Prepare directory and filename hints
-                let (dir, name) = if let Some(ref p) = active_file_path {
-                    (
-                        p.parent().unwrap_or(std::path::Path::new(".")),
-                        p.file_name().and_then(|n| n.to_str()),
-                    )
+                // 3. Determine the directory:
+                // Priority: Active File Folder > Settings Default Folder > Current Directory
+                let dir = if let Some(ref p) = active_file_path {
+                    p.parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| std::path::PathBuf::from("."))
+                } else if let Some(ref d) = default_save_folder {
+                    d.clone()
                 } else {
-                    (std::path::Path::new("."), None)
+                    std::path::PathBuf::from(".")
                 };
 
-                // Request the prompt - returns Receiver<Result<Option<PathBuf>, Error>>
-                let receiver =
-                    cx_for_async_block.update(|app_cx| app_cx.prompt_for_new_path(dir, name));
+                let name = active_file_path
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str());
 
-                // Triple unwrap directly from the receiver await:
-                // 1. Ok() from the oneshot channel (not cancelled)
-                // 2. Ok() from the prompt logic (no internal error)
-                // 3. Some(path) from the user selection (not cancelled by user)
+                let receiver =
+                    cx_for_async_block.update(|app_cx| app_cx.prompt_for_new_path(&dir, name));
+
                 if let Ok(Ok(Some(path))) = receiver.await {
                     window_handle
                         .update(&mut cx_for_async_block, |_, window, app_cx| {
@@ -194,18 +219,6 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         cx.quit();
     }
 
-    pub(crate) fn handle_file_save(
-        &mut self,
-        _action: &actions::FileSave,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        println!("Action: FileSave triggered!"); // Debug print
-        self.editor_panel
-            .update(cx, |editor: &mut EditorPanel, editor_cx| {
-                editor.save_active_file(_window, editor_cx);
-            });
-    }
 
     pub(crate) fn handle_export_pdf(
         &mut self,
