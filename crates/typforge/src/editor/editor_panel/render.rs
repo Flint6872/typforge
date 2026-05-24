@@ -1,6 +1,6 @@
 use crate::editor::{CodeEditor, DraggedTab, EditorPanel, FileContentUpdated, TabDrag};
 use gpui::*;
-use gpui_component::{ActiveTheme, StyledExt, h_flex};
+use gpui_component::{ActiveTheme, StyledExt, h_flex, scroll::ScrollableElement};
 
 use std::time::Duration;
 use tokio::time::Instant;
@@ -114,107 +114,113 @@ impl Render for EditorPanel {
             )
             .flex_col()
             .child(
-                // Tab Bar
-                h_flex()
-                    .items_baseline()
-                    .v_flex()
+                // Scrollable Tab Bar Container
+                div()
+                    .w_full()
+                    //.overflow_scrollbar()
                     .bg(cx.theme().foreground)
-                    .child(if self.open_files.is_empty() {
-                        div()
-                            .px_4()
-                            .text_color(cx.theme().background)
-                            .child("No files open")
-                    } else {
-                        h_flex().children(self.open_files.iter().enumerate().map(|(ix, f)| {
-                            let is_active = Some(&f.path) == active_file_path.as_ref();
-                            let path = f.path.clone();
+                    .child(h_flex().flex_nowrap().items_baseline().children(
+                        if self.open_files.is_empty() {
+                            vec![
+                                div()
+                                    .px_4()
+                                    .text_color(cx.theme().background)
+                                    .child("No files open")
+                                    .into_any_element(),
+                            ]
+                        } else {
+                            self.open_files
+                                .iter()
+                                .enumerate()
+                                .map(|(ix, f)| {
+                                    let is_active = Some(&f.path) == active_file_path.as_ref();
+                                    let path = f.path.clone();
 
-                            div()
-                                .bg(cx.theme().tab_bar) //tab color
-                                .text_color(if is_active {
-                                    cx.theme().tab_foreground
-                                } else {
-                                    cx.theme().background
-                                }) //tab text color
-                                .id(("tab", ix))
-                                .flex()
-                                .items_baseline()
-                                //.gap_2()
-                                .px_3()
-                                //.h_full()
-                                .cursor_pointer()
-                                .bg(if is_active {
-                                    cx.theme().tab_active
-                                } else {
-                                    cx.theme().tab_foreground
-                                })
-                                .border_r_1()
-                                .border_color(cx.theme().tab_bar_segmented)
-                                // 1. Click to Switch
-                                .on_click(cx.listener({
-                                    let path = path.clone();
-                                    move |this, _, _win, cx| {
-                                        this.active_file_path = Some(path.clone());
-                                        cx.notify(); // Notify UI about tab change
-
-                                        // ADD THIS: Emit content update when tab is selected
-                                        if let Some(active_file_index) =
-                                            this.open_files.iter().position(|f| f.path == path)
-                                        {
-                                            let active_file = &this.open_files[active_file_index];
-                                            let content = active_file
-                                                .editor_state
-                                                .read(cx)
-                                                .text()
-                                                .to_string();
-                                            cx.emit(FileContentUpdated {
-                                                path: Some(path.clone()),
-                                                content,
-                                            });
-                                        }
-                                    }
-                                }))
-                                // 2. Drag to Reorder
-                                .on_drag(TabDrag { from_index: ix }, {
-                                    let tab_name = f.tab_name();
-                                    // Closure now takes 4 arguments and returns an Entity
-                                    move |_drag, _point, _window, cx| {
-                                        cx.new(|_| DraggedTab {
-                                            name: tab_name.clone(),
-                                        })
-                                    }
-                                })
-                                .on_drop(cx.listener(move |this, drag: &TabDrag, _win, cx| {
-                                    this.move_tab(drag.from_index, ix, cx);
-                                }))
-                                .child(f.tab_name())
-                                // Display an error indicator on the tab if there are diagnostics
-                                .child(if !f.diagnostics.is_empty() {
                                     div()
-                                        .ml_1()
-                                        .w_2()
-                                        .h_2()
-                                        .rounded_full()
-                                        .bg(rgb(0xFF0000)) // Red dot for errors
+                                        .flex_shrink_0() // Prevents tabs from squishing
+                                        .bg(cx.theme().tab_bar)
+                                        .text_color(if is_active {
+                                            cx.theme().tab_foreground
+                                        } else {
+                                            cx.theme().background
+                                        })
+                                        .id(("tab", ix))
+                                        .flex()
+                                        .items_baseline()
+                                        .px_3()
+                                        .cursor_pointer()
+                                        .bg(if is_active {
+                                            cx.theme().tab_active
+                                        } else {
+                                            cx.theme().tab_foreground
+                                        })
+                                        .border_r_1()
+                                        .border_color(cx.theme().tab_bar_segmented)
+                                        .on_click(cx.listener({
+                                            let path = path.clone();
+                                            move |this, _, _win, cx| {
+                                                this.active_file_path = Some(path.clone());
+                                                cx.notify();
+                                                if let Some(active_file_index) = this
+                                                    .open_files
+                                                    .iter()
+                                                    .position(|f| f.path == path)
+                                                {
+                                                    let content = this.open_files
+                                                        [active_file_index]
+                                                        .editor_state
+                                                        .read(cx)
+                                                        .text()
+                                                        .to_string();
+                                                    cx.emit(FileContentUpdated {
+                                                        path: Some(path.clone()),
+                                                        content,
+                                                    });
+                                                }
+                                            }
+                                        }))
+                                        .on_drag(TabDrag { from_index: ix }, {
+                                            let tab_name = f.tab_name();
+                                            move |_drag, _point, _window, cx| {
+                                                cx.new(|_| DraggedTab {
+                                                    name: tab_name.clone(),
+                                                })
+                                            }
+                                        })
+                                        .on_drop(cx.listener(
+                                            move |this, drag: &TabDrag, _win, cx| {
+                                                this.move_tab(drag.from_index, ix, cx);
+                                            },
+                                        ))
+                                        .child(f.tab_name())
+                                        .child(if !f.diagnostics.is_empty() {
+                                            div()
+                                                .ml_1()
+                                                .w_2()
+                                                .h_2()
+                                                .rounded_full()
+                                                .bg(rgb(0xFF0000))
+                                                .into_any_element()
+                                        } else {
+                                            div().into_any_element()
+                                        })
+                                        .child(
+                                            div()
+                                                .id(("close", ix))
+                                                .hover(|s| {
+                                                    s.bg(cx.theme().button_primary_hover)
+                                                        .rounded_sm()
+                                                })
+                                                .child(" X")
+                                                .on_click(cx.listener(move |this, _, _win, cx| {
+                                                    this.close_file(path.clone(), cx);
+                                                })),
+                                        )
                                         .into_any_element()
-                                } else {
-                                    div().into_any_element()
                                 })
-                                // 3. Close Button
-                                .child(
-                                    div()
-                                        .id(("close", ix))
-                                        .hover(|s| {
-                                            s.bg(cx.theme().button_primary_hover).rounded_sm()
-                                        })
-                                        .child(" X")
-                                        //.child(IconName::Close)
-                                        .on_click(cx.listener(move |this, _, _win, cx| {
-                                            this.close_file(path.clone(), cx);
-                                        })),
-                                )
-                        }))
-                    }),
+                                .collect::<Vec<_>>()
+                        },
+                    )),
             )
             .child(
                 div()
