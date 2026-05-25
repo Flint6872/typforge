@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+//#![windows_subsystem = "windows"]
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -25,6 +25,7 @@ mod components;
 pub mod editor;
 mod key_bindings;
 mod panels;
+mod ribbon;
 mod settings;
 mod typst_world;
 

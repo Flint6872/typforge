@@ -6,9 +6,11 @@ use std::sync::Arc;
 
 // Import necessary types
 use crate::{
+    actions::RibbonAction,
     components::lsp::LspClient,
     editor::{FileContentUpdated, editor_panel::EditorPanel},
     panels::{FilesPanel, OpenFileEvent},
+    ribbon::panel::RibbonPanel,
 };
 use gpui_component::{
     dock::{DockArea, DockItem},
@@ -23,6 +25,7 @@ use typstography::PublishDiagnosticsParams;
 pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld> {
     pub dock_area: Entity<DockArea>,
     pub menu_bar: Option<Entity<AppMenuBar>>,
+    pub ribbon_panel: Entity<RibbonPanel>,
     pub editor_panel: Entity<EditorPanel>,
     pub preview_panel: Entity<PreviewPanel<W>>,
     pub files_panel: Entity<FilesPanel>,
@@ -50,12 +53,23 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         });
 
         let preview_panel = cx.new(|cx| PreviewPanel::new(shared_world_arc, window, cx));
+        let ribbon_panel = cx.new(|cx| RibbonPanel::new(cx));
 
         // --- Handles to be captured by closures ---
         let window_handle = window.window_handle();
         let editor_panel_entity_clone_for_subscriptions = editor_panel_entity.clone();
         let preview_panel_clone_for_subscriptions = preview_panel.clone();
         let files_panel_clone_for_subscriptions = files_panel.clone();
+
+        // --- 1. Ribbon Event Subscription ---
+        // This subscription listens to actions coming from our Ribbon UI
+        cx.subscribe(
+            &ribbon_panel,
+            move |this_note_view, _emitter, event, cx_for_note_view| {
+                this_note_view.handle_ribbon_action(event, cx_for_note_view);
+            },
+        )
+        .detach();
 
         // --- 2. Editor -> Preview Synchronization (via FileContentUpdated events) ---
         // This listener ensures that any change originating from the EditorPanel
@@ -263,11 +277,16 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         Self {
             dock_area: dock_area_entity,
             menu_bar,
+            ribbon_panel,
             editor_panel: editor_panel_entity,
             preview_panel,
             files_panel,
             window_handle, // Store the handle
             lsp_client,
         }
+    }
+
+    pub fn handle_ribbon_action(&mut self, action: &RibbonAction, _cx: &mut Context<Self>) {
+        println!("DEBUG: [Ribbon Event Captured] Action: {:?}", action);
     }
 }

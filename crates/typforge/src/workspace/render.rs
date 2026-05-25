@@ -158,6 +158,9 @@ impl<W: typst_gpui::TypstGpuiWorld> Render for TypstNoteView<W> {
                         .child(menu_bar),
                 )
             })
+            // --- 3. Render Ribbon Panel ---
+            // Positioned cleanly underneath the window menu bar, stretching full-width.
+            .child(self.ribbon_panel.clone())
             .child(
                 // 2. Main Body Area (Horizontal Flex) - Now handled by DockArea
                 self.dock_area.clone(),
