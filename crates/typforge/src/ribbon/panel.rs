@@ -1,6 +1,6 @@
 // crates/typforge/src/ribbon/panel.rs
 
-use crate::{actions::RibbonAction, components::theme};
+use crate::actions::RibbonAction;
 use gpui::*;
 use gpui_component::{ActiveTheme, ThemeColor};
 
@@ -13,13 +13,13 @@ pub enum RibbonTab {
 
 pub struct RibbonPanel {
     active_tab: RibbonTab,
-    selected_font: String,
-    font_size: f32,
-    is_bold: bool,
-    is_italic: bool,
-    paper_size: String,
-    is_flipped: bool,
-    columns: usize,
+    pub selected_font: String,
+    pub font_size: f32,
+    pub is_bold: bool,
+    pub is_italic: bool,
+    pub paper_size: String,
+    pub is_flipped: bool,
+    pub columns: usize,
 }
 
 impl RibbonPanel {
@@ -133,137 +133,7 @@ impl RibbonPanel {
             .child(label)
     }
 
-    fn render_home_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors;
-
-        div()
-            .flex()
-            .items_center()
-            .gap_3()
-            // Font Group
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .bg(colors.secondary)
-                    .rounded_md()
-                    .px_2()
-                    .py_1()
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(colors.foreground)
-                            .child(self.selected_font.clone()),
-                    ),
-            )
-            // Font Size
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .bg(colors.secondary)
-                    .rounded_md()
-                    .px_2()
-                    .py_1()
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(colors.foreground)
-                            .child(format!("{} pt", self.font_size)),
-                    ),
-            )
-            // Separator
-            .child(div().w(px(1.0)).h_6().bg(colors.border))
-            // Buttons
-            .child(self.render_icon_button(
-                "B",
-                self.is_bold,
-                colors,
-                cx.listener(|_, _, _, cx| {
-                    cx.emit(RibbonAction::ToggleBold);
-                }),
-            ))
-            .child(self.render_icon_button(
-                "I",
-                self.is_italic,
-                colors,
-                cx.listener(|_, _, _, cx| {
-                    cx.emit(RibbonAction::ToggleItalic);
-                }),
-            ))
-    }
-
-    fn render_layout_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_flipped_val = self.is_flipped;
-        let columns_val = self.columns;
-        let colors = cx.theme().colors;
-        div()
-            .flex()
-            .items_center()
-            .gap_3()
-            // Orientation Toggle
-            .child(self.render_icon_button(
-                if is_flipped_val {
-                    "Landscape"
-                } else {
-                    "Portrait"
-                },
-                false,
-                colors, // Pass colors
-                cx.listener(move |_, _: &MouseDownEvent, _, cx| {
-                    cx.emit(RibbonAction::SetFlipped(!is_flipped_val));
-                }),
-            ))
-            // Columns
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_size(px(12.0))
-                            .text_color(colors.muted_foreground) // Use muted theme color
-                            .child("Columns:"),
-                    )
-                    .child(self.render_icon_button(
-                        "1 Column",
-                        columns_val == 1,
-                        colors, // Pass colors
-                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
-                            cx.emit(RibbonAction::SetColumns(1));
-                        }),
-                    ))
-                    .child(self.render_icon_button(
-                        "2 Columns",
-                        columns_val == 2,
-                        colors, // Pass colors
-                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
-                            cx.emit(RibbonAction::SetColumns(2));
-                        }),
-                    )),
-            )
-    }
-
-    fn render_insert_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = cx.theme().colors;
-
-        div()
-            .flex()
-            .items_center()
-            .gap_3()
-            // Grid Preset Button
-            .child(self.render_icon_button(
-                "Insert 3x3 Grid",
-                false,
-                colors,
-                cx.listener(|_, _: &MouseDownEvent, _, cx| {
-                    cx.emit(RibbonAction::InsertGrid { rows: 3, cols: 3 });
-                }),
-            ))
-    }
-
-    fn render_icon_button(
+    pub fn render_icon_button(
         &self,
         label: &'static str,
         active: bool,

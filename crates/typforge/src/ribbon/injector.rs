@@ -228,23 +228,6 @@ fn toggle_wrapper(
     wrap_text(content, start, end, selected_text, prefix, suffix)
 }
 
-/// Finds if the selection is enclosed by the prefix/suffix
-fn find_outer_boundary(
-    content: &str,
-    start: usize,
-    end: usize,
-    prefix: &str,
-) -> (usize, usize, bool) {
-    let prev_start = content[..start].rfind(prefix);
-    let next_end = content[end..].find(prefix);
-
-    if let (Some(s), Some(e)) = (prev_start, next_end) {
-        (s, end + e + prefix.len(), true)
-    } else {
-        (start, end, false)
-    }
-}
-
 fn replace_range(
     content: &str,
     start: usize,
