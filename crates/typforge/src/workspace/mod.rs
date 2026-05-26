@@ -13,6 +13,7 @@ use crate::{
     ribbon::panel::RibbonPanel,
 };
 use gpui_component::{
+    RopeExt,
     dock::{DockArea, DockItem},
     menu::AppMenuBar,
 };
@@ -286,7 +287,52 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         }
     }
 
-    pub fn handle_ribbon_action(&mut self, action: &RibbonAction, _cx: &mut Context<Self>) {
-        println!("DEBUG: [Ribbon Event Captured] Action: {:?}", action);
+    pub fn handle_ribbon_action(&mut self, action: &RibbonAction, cx: &mut Context<Self>) {
+        let editor_panel = self.editor_panel.clone();
+        let window_handle = self.window_handle.clone();
+
+        let _ = window_handle
+            .update(cx, |_, window, app_cx| {
+                editor_panel.update(app_cx, |editor, editor_cx| {
+                    if let Some(active_path) = &editor.active_file_path {
+                        if let Some(file) = editor
+                            .open_files
+                            .iter_mut()
+                            .find(|f| &f.path == active_path)
+                        {
+                            // 1. Mutate editor text buffer
+                            file.editor_state.update(editor_cx, |state, input_cx| {
+                                let content = state.text().to_string();
+                                let selection = state.selected_range();
+
+                                // Get the new text and the range we WANT to be selected
+                                let (new_content, new_selection) =
+                                    crate::ribbon::injector::apply_ribbon_action(
+                                        &content, selection, action,
+                                    );
+
+                                // Set the new raw text inside the InputState
+                                state.set_value(new_content, window, input_cx);
+
+                                // Restore and re-apply the precise selection range
+                                state.set_selected_range(new_selection, input_cx);
+
+                                // Focus the input to keep focus active, WITHOUT collapsing the selection
+                                state.focus(window, input_cx);
+                            });
+
+                            file.has_unsaved_changes = true;
+
+                            // 2. Push changes to Preview Panel immediately
+                            let content = file.editor_state.read(editor_cx).text().to_string();
+                            editor_cx.emit(FileContentUpdated {
+                                path: Some(active_path.clone()),
+                                content,
+                            });
+                        }
+                    }
+                });
+            })
+            .log_err();
     }
 }
