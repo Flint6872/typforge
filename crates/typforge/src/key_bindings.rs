@@ -41,6 +41,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-+", actions::ZoomIn, GLOBAL_CONTEXT), // ctrl-+ is often ctrl-shift-=
         KeyBinding::new("ctrl--", actions::ZoomOut, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-0", actions::ResetZoom, GLOBAL_CONTEXT),
+        //Ribbon Panel
+        KeyBinding::new("ctrl-b", actions::ToggleBold, GLOBAL_CONTEXT),
+        KeyBinding::new("ctrl-i", actions::ToggleItalic, GLOBAL_CONTEXT),
         // Add more Windows/Linux specific global keybindings here
     ]);
 

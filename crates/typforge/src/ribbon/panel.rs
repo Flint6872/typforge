@@ -2,7 +2,10 @@
 
 use crate::actions::RibbonAction;
 use gpui::*;
-use gpui_component::{ActiveTheme, ThemeColor};
+use gpui_component::{
+    ActiveTheme, ThemeColor,
+    color_picker::{ColorPickerEvent, ColorPickerState},
+};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum RibbonTab {
@@ -17,13 +20,36 @@ pub struct RibbonPanel {
     pub font_size: f32,
     pub is_bold: bool,
     pub is_italic: bool,
+    #[allow(dead_code)] //will build this out at a later time
     pub paper_size: String,
     pub is_flipped: bool,
     pub columns: usize,
+    pub(super) text_color_picker: Entity<ColorPickerState>,
 }
 
 impl RibbonPanel {
-    pub fn new(_cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let text_color_picker = cx.new(|cx| {
+            ColorPickerState::new(window, cx).default_value(cx.theme().colors.foreground) // Match active theme text color
+        });
+
+        // Subscribe to color selection events
+        cx.subscribe(&text_color_picker, |_, _, event, cx| {
+            if let ColorPickerEvent::Change(Some(color)) = event {
+                // Convert GPUI Hsla to a Typst-friendly hex RGB string (e.g. rgb("#FF6B6B"))
+                let rgba = color.to_rgb();
+                let hex_color = format!(
+                    "rgb(\"#{:02x}{:02x}{:02x}\")",
+                    (rgba.r * 255.0).round() as u8,
+                    (rgba.g * 255.0).round() as u8,
+                    (rgba.b * 255.0).round() as u8
+                );
+
+                cx.emit(RibbonAction::SetTextColor(hex_color));
+            }
+        })
+        .detach();
+
         Self {
             active_tab: RibbonTab::Home,
             selected_font: "Liberation Sans".to_string(),
@@ -33,6 +59,7 @@ impl RibbonPanel {
             paper_size: "us-letter".to_string(),
             is_flipped: false,
             columns: 1,
+            text_color_picker,
         }
     }
 

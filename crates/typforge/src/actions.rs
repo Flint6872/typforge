@@ -28,6 +28,9 @@ actions!(
         PackageManager,
         ReloadSettings,
         // ChangeTheme,
+        // ribbon actions
+        ToggleBold,
+        ToggleItalic,
     ]
 );
 

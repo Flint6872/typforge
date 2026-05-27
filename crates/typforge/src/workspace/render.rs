@@ -1,4 +1,7 @@
-use crate::{actions::ReloadSettings, workspace::TypstNoteView};
+use crate::{
+    actions::{self, ReloadSettings},
+    workspace::TypstNoteView,
+};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::{ActiveTheme, button::Button, h_flex};
@@ -101,6 +104,14 @@ impl<W: typst_gpui::TypstGpuiWorld> Render for TypstNoteView<W> {
             .on_action(cx.listener(Self::handle_export_docx))
             //reload settings
             .on_action(cx.listener(Self::handle_reload_settings))
+            .on_action(cx.listener(|this, action: &actions::ToggleBold, _, cx| {
+                this.ribbon_panel
+                    .update(cx, |ribbon, cx| ribbon.handle_toggle_bold(action, cx));
+            }))
+            .on_action(cx.listener(|this, action: &actions::ToggleItalic, _, cx| {
+                this.ribbon_panel
+                    .update(cx, |ribbon, cx| ribbon.handle_toggle_italic(action, cx));
+            }))
             //  cx.listener(Self::handle_reload_settings))
             //.child(self.dock_area.clone())
             .child(

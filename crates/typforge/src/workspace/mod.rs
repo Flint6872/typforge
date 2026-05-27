@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 // Import necessary types
 use crate::{
-    actions::RibbonAction,
+    actions::{self, RibbonAction},
     components::lsp::LspClient,
     editor::{FileContentUpdated, editor_panel::EditorPanel},
     panels::{FilesPanel, OpenFileEvent},
@@ -54,7 +54,7 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         });
 
         let preview_panel = cx.new(|cx| PreviewPanel::new(shared_world_arc, window, cx));
-        let ribbon_panel = cx.new(|cx| RibbonPanel::new(cx));
+        let ribbon_panel = cx.new(|cx| RibbonPanel::new(window, cx));
 
         // --- Handles to be captured by closures ---
         let window_handle = window.window_handle();

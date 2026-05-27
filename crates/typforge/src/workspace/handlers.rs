@@ -46,8 +46,6 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
                 match receiver.await {
                     Ok(Ok(Some(paths))) => {
                         if let Some(path) = paths.into_iter().next() {
-
-                            
                             window_handle
                                 .update(&mut cx_for_async_block, |_, window, app_cx| {
                                     editor_panel_handle.update(app_cx, |editor, editor_cx| {
@@ -218,7 +216,6 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         println!("Action: FileQuit triggered!");
         cx.quit();
     }
-
 
     pub(crate) fn handle_export_pdf(
         &mut self,
