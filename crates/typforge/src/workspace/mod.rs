@@ -305,17 +305,21 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
                                 let content = state.text().to_string();
                                 let selection = state.selected_range();
 
-                                // Get the new text and the range we WANT to be selected
-                                let (new_content, new_selection) =
-                                    crate::ribbon::injector::apply_ribbon_action(
-                                        &content, selection, action,
-                                    );
+                                // Get the edit transaction details
+                                let edit = crate::ribbon::injector::apply_ribbon_action(
+                                    &content, selection, action,
+                                );
 
-                                // Set the new raw text inside the InputState
-                                state.set_value(new_content, window, input_cx);
+                                // Perform the edit with history tracking (for undo/redo support)
+                                state.replace_range_with_history(
+                                    edit.range,
+                                    &edit.new_text,
+                                    window,
+                                    input_cx,
+                                );
 
                                 // Restore and re-apply the precise selection range
-                                state.set_selected_range(new_selection, input_cx);
+                                state.set_selected_range(edit.new_selection, input_cx);
 
                                 // Focus the input to keep focus active, WITHOUT collapsing the selection
                                 state.focus(window, input_cx);

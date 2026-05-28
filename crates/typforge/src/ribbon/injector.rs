@@ -2,40 +2,44 @@
 
 use crate::actions::RibbonAction;
 use std::ops::Range;
+use typst::syntax::{LinkedNode, Side, SyntaxKind, parse};
+
+pub struct TextEdit {
+    pub range: Range<usize>,
+    pub new_text: String,
+    pub new_selection: Range<usize>,
+}
 
 /// Applies a RibbonAction to the source text.
-/// Returns the mutated document string and the adjusted selection range.
+/// Returns the localized TextEdit to apply.
 pub fn apply_ribbon_action(
     content: &str,
     selection: Range<usize>,
     action: &RibbonAction,
-) -> (String, Range<usize>) {
+) -> TextEdit {
     let start = selection.start.min(content.len());
     let end = selection.end.min(content.len());
-    let selected_text = &content[start..end];
+    let selection_clamped = start..end;
 
     match action {
         // --- 1. TEXT PARAMETERS (Smart Toggles & Mergers) ---
-        RibbonAction::ToggleBold => toggle_wrapper(content, start, end, selected_text, "*", "*"),
-        RibbonAction::ToggleItalic => toggle_wrapper(content, start, end, selected_text, "_", "_"),
-        RibbonAction::SetFont(font_family) => apply_text_param(
+        RibbonAction::ToggleBold => {
+            toggle_wrapper_ast(content, selection_clamped, SyntaxKind::Strong)
+        }
+        RibbonAction::ToggleItalic => {
+            toggle_wrapper_ast(content, selection_clamped, SyntaxKind::Emph)
+        }
+        RibbonAction::SetFont(font_family) => apply_text_param_ast(
             content,
-            start,
-            end,
-            selected_text,
+            selection_clamped,
             "font",
             &format!("\"{}\"", font_family),
         ),
-        RibbonAction::SetFontSize(size) => apply_text_param(
-            content,
-            start,
-            end,
-            selected_text,
-            "size",
-            &format!("{}pt", size),
-        ),
+        RibbonAction::SetFontSize(size) => {
+            apply_text_param_ast(content, selection_clamped, "size", &format!("{}pt", size))
+        }
         RibbonAction::SetTextColor(color) => {
-            apply_text_param(content, start, end, selected_text, "fill", color)
+            apply_text_param_ast(content, selection_clamped, "fill", color)
         }
 
         // --- 2. COMPLEX ELEMENTS (Cursor Injections) ---
@@ -57,241 +61,484 @@ pub fn apply_ribbon_action(
             }
             grid_markup.push_str(")\n");
 
-            let mut new_content = content.to_string();
-            new_content.insert_str(start, &grid_markup);
-
-            // Restore selection to cover the entire grid block
-            (new_content, start..(start + grid_markup.len()))
+            TextEdit {
+                range: start..start,
+                new_text: grid_markup.clone(),
+                new_selection: start..(start + grid_markup.len()),
+            }
         }
 
         // --- 3. PAGE PARAMETERS (Global Directive Setters) ---
         RibbonAction::SetPaper(paper) => {
-            let updated = update_or_insert_page_rule(content, "paper", &format!("\"{}\"", paper));
-            (updated, selection)
+            let (edit_range, edit_text) =
+                update_or_insert_page_rule_ast(content, "paper", &format!("\"{}\"", paper));
+            let new_selection = adjust_selection(edit_range.clone(), edit_text.len(), selection);
+            TextEdit {
+                range: edit_range,
+                new_text: edit_text,
+                new_selection,
+            }
         }
         RibbonAction::SetFlipped(flipped) => {
-            let updated = update_or_insert_page_rule(content, "flipped", &flipped.to_string());
-            (updated, selection)
+            let (edit_range, edit_text) =
+                update_or_insert_page_rule_ast(content, "flipped", &flipped.to_string());
+            let new_selection = adjust_selection(edit_range.clone(), edit_text.len(), selection);
+            TextEdit {
+                range: edit_range,
+                new_text: edit_text,
+                new_selection,
+            }
         }
         RibbonAction::SetColumns(cols) => {
-            let updated = update_or_insert_page_rule(content, "columns", &cols.to_string());
-            (updated, selection)
+            let (edit_range, edit_text) =
+                update_or_insert_page_rule_ast(content, "columns", &cols.to_string());
+            let new_selection = adjust_selection(edit_range.clone(), edit_text.len(), selection);
+            TextEdit {
+                range: edit_range,
+                new_text: edit_text,
+                new_selection,
+            }
         }
         RibbonAction::SetMargin(margin) => {
-            let updated = update_or_insert_page_rule(content, "margin", &format!("({})", margin));
-            (updated, selection)
+            let (edit_range, edit_text) =
+                update_or_insert_page_rule_ast(content, "margin", &format!("({})", margin));
+            let new_selection = adjust_selection(edit_range.clone(), edit_text.len(), selection);
+            TextEdit {
+                range: edit_range,
+                new_text: edit_text,
+                new_selection,
+            }
         }
     }
 }
 
-/// Wraps text inside a prefix and suffix, adjusting selection coordinates safely.
-fn wrap_text(
-    content: &str,
-    start: usize,
-    end: usize,
-    selected_text: &str,
-    prefix: &str,
-    suffix: &str,
-) -> (String, Range<usize>) {
-    let mut new_content = content[..start].to_string();
-    new_content.push_str(prefix);
-    new_content.push_str(selected_text);
-    new_content.push_str(suffix);
-    new_content.push_str(&content[end..]);
-
-    let new_start = start + prefix.len();
-    let new_end = new_start + selected_text.len();
-    (new_content, new_start..new_end)
-}
-
-/// Wraps selected text, or toggles (unwraps) it if already wrapped (inside OR outside the selection bounds).
-fn toggle_wrapper(
-    content: &str,
-    start: usize,
-    end: usize,
-    selected_text: &str,
-    prefix: &str,
-    suffix: &str,
-) -> (String, Range<usize>) {
-    let p_len = prefix.len();
-
-    // --- State Check: Are we inside an existing bold/italic block? ---
-    let outer_prefix_idx = content[..start].rfind(prefix);
-    let outer_suffix_idx = content[end..].find(suffix).map(|idx| end + idx);
-
-    let is_inside_block = if let (Some(pre), Some(suf)) = (outer_prefix_idx, outer_suffix_idx) {
-        // Verify there isn't a closing suffix between the prefix and our selection start
-        !content[pre + p_len..start].contains(suffix) && !content[end..suf].contains(prefix)
-    } else {
-        false
-    };
-
-    if is_inside_block {
-        // --- OPERATION: UNBOLD (Remove formatting from selection) ---
-        let pre_idx = outer_prefix_idx.unwrap();
-        let suf_idx = outer_suffix_idx.unwrap();
-
-        let before_text = &content[pre_idx + p_len..start];
-        let after_text = &content[end..suf_idx];
-
-        let mut reconstructed = String::new();
-
-        // Re-bold the left segment if it has content
-        if !before_text.is_empty() {
-            reconstructed.push_str(prefix);
-            reconstructed.push_str(before_text);
-            reconstructed.push_str(suffix);
-        }
-
-        // Leave the selected text completely unbolded (strip any stars inside it just in case)
-        let cleaned_selection = selected_text.replace(prefix, "");
-        reconstructed.push_str(&cleaned_selection);
-
-        // Re-bold the right segment if it has content
-        if !after_text.is_empty() {
-            reconstructed.push_str(prefix);
-            reconstructed.push_str(after_text);
-            reconstructed.push_str(suffix);
-        }
-
-        // Replace the entire outer block with our split/reconstructed version
-        let block_end = suf_idx + suffix.len();
-        let shift_start = pre_idx
-            + if before_text.is_empty() {
-                0
-            } else {
-                p_len + before_text.len() + suffix.len()
-            };
-        let new_range = shift_start..(shift_start + cleaned_selection.len());
-
-        let mut new_content = content[..pre_idx].to_string();
-        new_content.push_str(&reconstructed);
-        new_content.push_str(&content[block_end..]);
-
-        return (new_content, new_range);
-    }
-
-    // --- OPERATION: BOLD (Apply formatting, merge with adjacent blocks) ---
-    // Check if the selection borders existing bold markers immediately
-    let has_prefix_left = start >= p_len && &content[start - p_len..start] == prefix;
-    let has_suffix_right = end + p_len <= content.len() && &content[end..end + p_len] == suffix;
-
-    if has_prefix_left && has_suffix_right {
-        // Double-wrapped boundary edge case: e.g. *selection* -> strip outer stars
-        let unwrapped = selected_text.replace(prefix, "");
-        let mut new_content = content[..start - p_len].to_string();
-        new_content.push_str(&unwrapped);
-        new_content.push_str(&content[end + p_len..]);
-        return (
-            new_content,
-            (start - p_len)..(start - p_len + unwrapped.len()),
-        );
-    }
-
-    // Check if selection overlaps/touches a bold block on the right, e.g. "regular *text*"
-    if end + p_len <= content.len() && &content[end..end + p_len] == prefix {
-        // Merge selection into right block: "regular *text*" -> "*regular text*"
-        if let Some(right_suffix_idx) = content[end + p_len..]
-            .find(suffix)
-            .map(|idx| end + p_len + idx)
+/// Helper function to find a formatting ancestor node fully enclosing the target range
+fn find_formatting_node<'a>(
+    root: &'a LinkedNode<'a>,
+    range: Range<usize>,
+    kind: SyntaxKind,
+) -> Option<LinkedNode<'a>> {
+    let leaf = root
+        .leaf_at(range.start, Side::Before)
+        .or_else(|| root.leaf_at(range.start, Side::After))?;
+    let mut current = Some(leaf);
+    while let Some(node) = current {
+        if node.kind() == kind && node.range().start <= range.start && node.range().end >= range.end
         {
-            let right_inner = &content[end + p_len..right_suffix_idx];
-            let merged_block = format!("{}{}{}{}", prefix, selected_text, right_inner, suffix);
-
-            let mut new_content = content[..start].to_string();
-            new_content.push_str(&merged_block);
-            new_content.push_str(&content[right_suffix_idx + p_len..]);
-
-            let new_range = (start + p_len)..(start + p_len + selected_text.len());
-            return (new_content, new_range);
+            return Some(node);
         }
+        current = node.parent().cloned();
     }
-
-    // Check if selection overlaps/touches a bold block on the left, e.g. "*text* regular"
-    if start >= p_len && &content[start - p_len..start] == suffix {
-        // Merge selection into left block: "*text* regular" -> "*text regular*"
-        if let Some(left_prefix_idx) = content[..start - p_len].rfind(prefix) {
-            let left_inner = &content[left_prefix_idx + p_len..start - p_len];
-            let merged_block = format!("{}{}{}{}", prefix, left_inner, selected_text, suffix);
-
-            let mut new_content = content[..left_prefix_idx].to_string();
-            new_content.push_str(&merged_block);
-            new_content.push_str(&content[end..]);
-
-            let new_start = left_prefix_idx + p_len + left_inner.len();
-            let new_range = new_start..(new_start + selected_text.len());
-            return (new_content, new_range);
-        }
-    }
-
-    // Default Case: Simple wrap
-    wrap_text(content, start, end, selected_text, prefix, suffix)
+    None
 }
 
-fn replace_range(
-    content: &str,
-    start: usize,
-    end: usize,
-    new_text: &str,
-) -> (String, Range<usize>) {
-    let mut new_content = content[..start].to_string();
-    new_content.push_str(new_text);
-    new_content.push_str(&content[end..]);
-    (new_content, start..(start + new_text.len()))
+/// Recursively find all formatting nodes that overlap or touch the target range
+fn find_intersecting_formatting_nodes<'a>(
+    root: &LinkedNode<'a>,
+    range: Range<usize>,
+    kind: SyntaxKind,
+    nodes: &mut Vec<LinkedNode<'a>>,
+) {
+    if root.kind() == kind {
+        let node_range = root.range();
+        if node_range.start <= range.end && node_range.end >= range.start {
+            nodes.push(root.clone());
+            return;
+        }
+    }
+    for child in root.children() {
+        find_intersecting_formatting_nodes(&child, range.clone(), kind, nodes);
+    }
 }
 
-/// Intelligently sets parameters in a `#text(...)` block.
-/// If wrapped already, it mutates the existing `#text` block rather than double-nesting.
-fn apply_text_param(
-    content: &str,
-    start: usize,
-    end: usize,
-    selected_text: &str,
-    key: &str,
-    value: &str,
-) -> (String, Range<usize>) {
-    // Check if selection is wrapped in `#text(...)[...]`
-    if selected_text.starts_with("#text(") && selected_text.ends_with("]") {
-        if let Some(bracket_idx) = selected_text.find('[') {
-            let args_block = &selected_text[6..bracket_idx - 1]; // inside #text(...)
-            let inner_text = &selected_text[bracket_idx + 1..selected_text.len() - 1]; // inside [...]
+/// Helper to map original selection indexes to the new formatted string layout
+fn map_index(
+    orig_idx: usize,
+    combined_start: usize,
+    marker_ranges: &[Range<usize>],
+    marker_len: usize,
+) -> usize {
+    let mut markers_removed_before = 0;
+    for r in marker_ranges {
+        if r.end <= orig_idx {
+            markers_removed_before += r.len();
+        } else if r.start < orig_idx {
+            markers_removed_before += orig_idx - r.start;
+        }
+    }
+    combined_start + marker_len + (orig_idx - combined_start - markers_removed_before)
+}
 
-            let updated_args = merge_args(args_block, key, value);
-            let updated_wrapper = format!("#text({})[{}]", updated_args, inner_text);
+/// Toggles bold or italic using synchronous syntax trees.
+fn toggle_wrapper_ast(content: &str, range: Range<usize>, kind_to_toggle: SyntaxKind) -> TextEdit {
+    let tree = parse(content);
+    let root = LinkedNode::new(&tree);
 
-            let mut new_content = content[..start].to_string();
-            new_content.push_str(&updated_wrapper);
-            new_content.push_str(&content[end..]);
+    let marker_str = if kind_to_toggle == SyntaxKind::Strong {
+        "*"
+    } else {
+        "_"
+    };
+    let marker_len = marker_str.len();
 
-            return (new_content, start..(start + updated_wrapper.len()));
+    // 1. Check if we are inside a single formatting block (UNFORMAT operation)
+    if let Some(formatting_node) = find_formatting_node(&root, range.clone(), kind_to_toggle) {
+        let block_range = formatting_node.range();
+
+        let mut left_marker_len = marker_len;
+        if let Some(first_child) = formatting_node.children().next() {
+            left_marker_len = first_child.range().len();
+        }
+        let mut right_marker_len = marker_len;
+        if let Some(last_child) = formatting_node.children().last() {
+            right_marker_len = last_child.range().len();
+        }
+
+        if block_range.len() >= left_marker_len + right_marker_len {
+            let inner_start = block_range.start + left_marker_len;
+            let inner_end = block_range.end - right_marker_len;
+
+            let start_clamped = range.start.max(inner_start).min(inner_end);
+            let end_clamped = range.end.max(inner_start).min(inner_end);
+
+            let before_text = &content[inner_start..start_clamped];
+            let selected_text = &content[start_clamped..end_clamped];
+            let after_text = &content[end_clamped..inner_end];
+
+            let mut reconstructed = String::new();
+            if !before_text.is_empty() {
+                reconstructed.push_str(marker_str);
+                reconstructed.push_str(before_text);
+                reconstructed.push_str(marker_str);
+            }
+            reconstructed.push_str(selected_text);
+            if !after_text.is_empty() {
+                reconstructed.push_str(marker_str);
+                reconstructed.push_str(after_text);
+                reconstructed.push_str(marker_str);
+            }
+
+            let shift_start = block_range.start
+                + if before_text.is_empty() {
+                    0
+                } else {
+                    marker_len * 2 + before_text.len()
+                };
+            let new_range = shift_start..(shift_start + selected_text.len());
+            return TextEdit {
+                range: block_range,
+                new_text: reconstructed,
+                new_selection: new_range,
+            };
         }
     }
 
-    // Check if wrapping borders exist immediately outside the selection
-    if start >= 6 && end + 1 <= content.len() {
-        let has_suffix_outside = &content[end..end + 1] == "]";
-        let prefix_segment = &content[..start];
-        if let Some(hash_idx) = prefix_segment.rfind("#text(") {
-            if prefix_segment[hash_idx..].ends_with('[') {
-                let args_block = &prefix_segment[hash_idx + 6..start - 2]; // Extract arguments
-                let updated_args = merge_args(args_block, key, value);
+    // 2. We are outside or overlapping existing blocks (FORMAT / MERGE operation)
+    let mut intersecting_nodes = Vec::new();
+    find_intersecting_formatting_nodes(
+        &root,
+        range.clone(),
+        kind_to_toggle,
+        &mut intersecting_nodes,
+    );
 
-                let mut new_content = content[..hash_idx].to_string();
-                new_content.push_str(&format!("#text({})[{}", updated_args, selected_text));
-                new_content.push_str(&content[end..]);
+    if intersecting_nodes.is_empty() {
+        // Safe wrapped fallback
+        let selected_text = &content[range.clone()];
+        let reconstructed = format!("{}{}{}", marker_str, selected_text, marker_str);
 
-                let offset_shift = (hash_idx + 7 + updated_args.len()) as isize - start as isize;
-                let new_start = (start as isize + offset_shift) as usize;
-                let new_end = new_start + selected_text.len();
+        let new_start = range.start + marker_len;
+        let new_range = new_start..(new_start + range.len());
+        TextEdit {
+            range: range.clone(),
+            new_text: reconstructed,
+            new_selection: new_range,
+        }
+    } else {
+        // Collect combined bounds
+        let mut combined_start = range.start;
+        let mut combined_end = range.end;
+        for node in &intersecting_nodes {
+            let r = node.range();
+            combined_start = combined_start.min(r.start);
+            combined_end = combined_end.max(r.end);
+        }
 
-                return (new_content, new_start..new_end);
+        // Identify marker ranges to delete
+        let mut marker_ranges = Vec::new();
+        for node in &intersecting_nodes {
+            let r = node.range();
+            if r.len() >= marker_len * 2 {
+                marker_ranges.push(r.start..r.start + marker_len);
+                marker_ranges.push(r.end - marker_len..r.end);
+            }
+        }
+        marker_ranges.sort_by_key(|r| r.start);
+        marker_ranges.dedup();
+
+        // Extract inner content stripped of markers
+        let mut inner_text = String::new();
+        let mut current = combined_start;
+        for m_range in &marker_ranges {
+            if m_range.start >= current {
+                inner_text.push_str(&content[current..m_range.start]);
+                current = m_range.end;
+            }
+        }
+        if current < combined_end {
+            inner_text.push_str(&content[current..combined_end]);
+        }
+
+        let reconstructed = format!("{}{}{}", marker_str, inner_text, marker_str);
+
+        // Calculate precision mapped cursor coordinates
+        let new_start = map_index(range.start, combined_start, &marker_ranges, marker_len);
+        let new_end = map_index(range.end, combined_start, &marker_ranges, marker_len);
+
+        TextEdit {
+            range: combined_start..combined_end,
+            new_text: reconstructed,
+            new_selection: new_start..new_end,
+        }
+    }
+}
+
+/// Helper function to find the inner content range of a trailing content block of a FuncCall.
+fn get_content_body_range(func_call: &LinkedNode) -> Option<Range<usize>> {
+    let content_node = func_call
+        .children()
+        .find(|child| child.kind() == SyntaxKind::ContentBlock)?;
+    let r = content_node.range();
+    if r.len() >= 2 {
+        Some((r.start + 1)..(r.end - 1))
+    } else {
+        None
+    }
+}
+
+/// Recursively finds all `#text` or `text` function call nodes that fully enclose the selection range,
+/// ordered from outermost to innermost.
+fn find_enclosing_text_nodes<'a>(
+    root: &LinkedNode<'a>,
+    range: Range<usize>,
+    nodes: &mut Vec<LinkedNode<'a>>,
+) {
+    if root.kind() == SyntaxKind::FuncCall {
+        if let Some(callee) = root.children().next() {
+            let callee_text = callee.text();
+            if callee_text == "text" || callee_text == "#text" {
+                if let Some(body_range) = get_content_body_range(root) {
+                    if range.start >= body_range.start && range.end <= body_range.end {
+                        nodes.push(root.clone());
+                    }
+                }
+            }
+        }
+    }
+    for child in root.children() {
+        find_enclosing_text_nodes(&child, range.clone(), nodes);
+    }
+}
+
+/// Safely modifies content while dynamically shifting selection coordinates
+fn adjust_selection(
+    replace_range: Range<usize>,
+    replacement_len: usize,
+    selection: Range<usize>,
+) -> Range<usize> {
+    let diff = (replacement_len as isize) - (replace_range.len() as isize);
+
+    let mut new_start = selection.start;
+    if replace_range.end <= selection.start {
+        new_start = (selection.start as isize + diff) as usize;
+    } else if replace_range.start < selection.start {
+        new_start = replace_range.start + replacement_len;
+    }
+
+    let mut new_end = selection.end;
+    if replace_range.end <= selection.end {
+        new_end = (selection.end as isize + diff) as usize;
+    } else if replace_range.start < selection.end {
+        new_end = (selection.end as isize + diff) as usize;
+    }
+
+    new_start..new_end
+}
+
+/// Parses arguments to find if a key is present and returns its value
+fn get_arg_value(inner_args: &str, key: &str) -> Option<String> {
+    for param in inner_args.split(',') {
+        let trimmed = param.trim();
+        if let Some((p_key, p_val)) = trimmed.split_once(':') {
+            if p_key.trim() == key {
+                return Some(p_val.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Removes a key from the arguments, returning the new inner args string and whether it is now empty.
+fn remove_arg(inner_args: &str, key: &str) -> (String, bool) {
+    let mut parts = Vec::new();
+    for param in inner_args.split(',') {
+        let trimmed = param.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some((p_key, _)) = trimmed.split_once(':') {
+            if p_key.trim() != key {
+                parts.push(trimmed);
+            }
+        } else {
+            parts.push(trimmed);
+        }
+    }
+    let updated = parts.join(", ");
+    let is_empty = updated.is_empty();
+    (updated, is_empty)
+}
+
+/// Intelligently sets parameters in a `#text(...)` block using the AST.
+fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &str) -> TextEdit {
+    // 1. Trim leading/trailing whitespace from the active range to prevent trapping spacing
+    let mut trimmed_start = range.start;
+    let mut trimmed_end = range.end;
+    while trimmed_start < trimmed_end
+        && content
+            .chars()
+            .nth(trimmed_start)
+            .map_or(false, |c| c.is_whitespace())
+    {
+        trimmed_start += 1;
+    }
+    while trimmed_end > trimmed_start
+        && content
+            .chars()
+            .nth(trimmed_end - 1)
+            .map_or(false, |c| c.is_whitespace())
+    {
+        trimmed_end -= 1;
+    }
+    let active_range = trimmed_start..trimmed_end;
+
+    let tree = parse(content);
+    let root = LinkedNode::new(&tree);
+
+    // 2. Locate all nesting text ancestors covering this active span
+    let mut enclosing_nodes = Vec::new();
+    find_enclosing_text_nodes(&root, active_range.clone(), &mut enclosing_nodes);
+
+    if let Some(formatting_node) = enclosing_nodes.last().cloned() {
+        let mut should_merge = false;
+        if let Some(body_range) = get_content_body_range(&formatting_node) {
+            // Merge arguments if selection is empty or completely fills the block's text body
+            if active_range.is_empty()
+                || (active_range.start <= body_range.start && active_range.end >= body_range.end)
+            {
+                should_merge = true;
+            }
+        }
+
+        if should_merge {
+            // Find parent inherited value for this key going up the hierarchy
+            let mut parent_value = None;
+            if enclosing_nodes.len() > 1 {
+                let parent_node = &enclosing_nodes[enclosing_nodes.len() - 2];
+                if let Some(parent_args) = parent_node
+                    .children()
+                    .find(|c| c.kind() == SyntaxKind::Args)
+                {
+                    let parent_args_text = parent_args.text();
+                    let parent_inner = if parent_args_text.len() >= 2 {
+                        &parent_args_text[1..parent_args_text.len() - 1]
+                    } else {
+                        ""
+                    };
+                    parent_value = get_arg_value(parent_inner, key);
+                }
+            }
+
+            if let Some(args_node) = formatting_node
+                .children()
+                .find(|child| child.kind() == SyntaxKind::Args)
+            {
+                let args_range = args_node.range();
+                let args_text = args_node.text();
+                let inner_args = if args_text.len() >= 2 {
+                    &args_text[1..args_text.len() - 1]
+                } else {
+                    ""
+                };
+
+                // --- SMART UNWRAP / PRUNE REDUNDANT INHERITED ARGUMENTS ---
+                if value.is_empty() || parent_value.as_deref() == Some(value) {
+                    let (updated_inner, is_empty) = remove_arg(inner_args, key);
+                    if is_empty {
+                        // If no other arguments are left, unwrap this #text block completely
+                        if let Some(body_range) = get_content_body_range(&formatting_node) {
+                            let inner_body_text = &content[body_range.clone()];
+                            let new_selection = adjust_selection(
+                                formatting_node.range(),
+                                inner_body_text.len(),
+                                range.clone(),
+                            );
+                            return TextEdit {
+                                range: formatting_node.range(),
+                                new_text: inner_body_text.to_string(),
+                                new_selection,
+                            };
+                        }
+                    } else {
+                        // Just remove the redundant property from args list
+                        let updated_args = format!("({})", updated_inner);
+                        let new_selection =
+                            adjust_selection(args_range.clone(), updated_args.len(), range.clone());
+                        return TextEdit {
+                            range: args_range,
+                            new_text: updated_args,
+                            new_selection,
+                        };
+                    }
+                }
+
+                // Standard property merge
+                let updated_inner = merge_args(inner_args, key, value);
+                let updated_args = format!("({})", updated_inner);
+                let new_selection =
+                    adjust_selection(args_range.clone(), updated_args.len(), range.clone());
+                return TextEdit {
+                    range: args_range,
+                    new_text: updated_args,
+                    new_selection,
+                };
+            } else {
+                // No Args node found, insert it right after the callee (first child of FuncCall)
+                if let Some(callee_node) = formatting_node.children().next() {
+                    let insert_pos = callee_node.range().end;
+                    let inserted_str = format!("({}: {})", key, value);
+                    let new_selection =
+                        adjust_selection(insert_pos..insert_pos, inserted_str.len(), range.clone());
+                    return TextEdit {
+                        range: insert_pos..insert_pos,
+                        new_text: inserted_str,
+                        new_selection,
+                    };
+                }
             }
         }
     }
 
-    // Base Case: Create a clean new `#text(...)` wrapper
+    // Default Case: Wrap range with a brand new text function call (nested)
     let prefix = format!("#text({}: {})[", key, value);
-    wrap_text(content, start, end, selected_text, &prefix, "]")
+    let reconstructed = format!("{}{}]", prefix, &content[active_range.clone()]);
+    let new_start = active_range.start + prefix.len();
+    let new_range = new_start..(new_start + active_range.len());
+    TextEdit {
+        range: active_range.clone(),
+        new_text: reconstructed,
+        new_selection: new_range,
+    }
 }
 
 /// Helper function to merge arguments in a function block
@@ -336,46 +583,57 @@ fn merge_args(args_block: &str, key: &str, value: &str) -> String {
     updated
 }
 
+/// Helper function to find standard `#set page(...)` rules in the syntax tree
+fn find_page_set_rule<'a>(root: &'a LinkedNode<'a>) -> Option<LinkedNode<'a>> {
+    let mut stack = vec![root.clone()];
+    while let Some(node) = stack.pop() {
+        if node.kind() == SyntaxKind::SetRule {
+            if let Some(target) = node
+                .children()
+                .find(|child| child.kind() == SyntaxKind::Ident)
+            {
+                if target.text() == "page" {
+                    return Some(node);
+                }
+            }
+        }
+        for child in node.children().rev() {
+            stack.push(child);
+        }
+    }
+    None
+}
+
 /// Safely searches for `#set page(...)` at the top of the file, updating an active attribute,
-/// or prepending a new page set rule at line 1 if none exists.
-fn update_or_insert_page_rule(content: &str, key: &str, value: &str) -> String {
-    let target = "#set page(";
+/// or prepending a new page set rule if none exists using AST syntax parsing.
+fn update_or_insert_page_rule_ast(content: &str, key: &str, value: &str) -> (Range<usize>, String) {
+    let tree = parse(content);
+    let root = LinkedNode::new(&tree);
 
-    if let Some(start_idx) = content.find(target) {
-        let args_start = start_idx + target.len();
+    if let Some(set_rule_node) = find_page_set_rule(&root) {
+        if let Some(args_node) = set_rule_node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::Args)
+        {
+            let args_range = args_node.range();
+            let args_text = args_node.text();
+            let inner_args = if args_text.len() >= 2 {
+                &args_text[1..args_text.len() - 1]
+            } else {
+                ""
+            };
+            let updated_inner = merge_args(inner_args, key, value);
+            let updated_args = format!("({})", updated_inner);
 
-        // Find matching closing parenthesis
-        if let Some(end_offset) = find_closing_parenthesis(&content[args_start..]) {
-            let end_idx = args_start + end_offset;
-            let args_block = &content[args_start..end_idx];
-
-            let updated_args = merge_args(args_block, key, value);
-
-            let mut new_content = content[..start_idx].to_string();
-            new_content.push_str(&format!("#set page({})", updated_args));
-            new_content.push_str(&content[end_idx + 1..]);
-            return new_content;
+            return (args_range, updated_args);
+        } else {
+            // Target found but no Args node (e.g., #set page)
+            let insert_pos = set_rule_node.range().end;
+            let inserted_str = format!("({}: {})", key, value);
+            return (insert_pos..insert_pos, inserted_str);
         }
     }
 
     // No existing #set page directive found: Prepend to the top of the document
-    let mut new_content = format!("#set page({}: {})\n", key, value);
-    new_content.push_str(content);
-    new_content
-}
-
-/// Helper to scan bracket-matching to locate the closing parenthesis of a directive.
-fn find_closing_parenthesis(slice: &str) -> Option<usize> {
-    let mut depth = 1;
-    for (idx, ch) in slice.char_indices() {
-        if ch == '(' {
-            depth += 1;
-        } else if ch == ')' {
-            depth -= 1;
-            if depth == 0 {
-                return Some(idx);
-            }
-        }
-    }
-    None
+    (0..0, format!("#set page({}: {})\n", key, value))
 }
