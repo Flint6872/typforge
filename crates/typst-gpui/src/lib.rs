@@ -34,7 +34,7 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     input_state: Entity<InputState>,
     _input_state_subscription: Option<Subscription>,
     pub suppressing_events: bool, // NEW: Flag to control event emission
-    last_text_len: usize,
+    pub last_text_len: usize,
     last_hit_map: HitMap,
     scroll_handle: ScrollHandle,
     cursor_offset: usize,
@@ -61,54 +61,38 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         });
 
         // Use cx.subscribe to listen for InputState events
-        // CORRECTED: Listener signature adjusted to match Context::subscribe for Entity
         let subscription = cx.subscribe(
             &input_state,
-            move |this_panel_ref: &mut PreviewPanel<W>, // `this_panel_ref` is &mut PreviewPanel
-                  emitting_input_state_entity: Entity<InputState>, // `emitting_input_state_entity` is the Entity<InputState> that triggered the event
+            move |this_panel_ref: &mut PreviewPanel<W>,
+                  emitting_input_state_entity: Entity<InputState>,
                   event: &InputEvent,
                   cx_for_panel: &mut Context<PreviewPanel<W>>| {
                 if let InputEvent::Change = event {
                     let new_text = this_panel_ref
-                        .input_state // Correct: Access input_state field on PreviewPanel
+                        .input_state
                         .read(&cx_for_panel)
                         .text()
                         .to_string();
                     let new_len = new_text.len();
 
-                    // If the change originated from typing in THIS panel
                     if !this_panel_ref.suppressing_events {
-                        // 1. Update the internal Typst world content
                         this_panel_ref.world.lock().set_source(new_text.clone());
-
-                        // 2. Trigger a local re-compile so the preview updates
                         this_panel_ref.compile(cx_for_panel);
-
-                        // 3. Emit the change to the Editor via main.rs bridge
                         cx_for_panel.emit(PreviewPanelEvent::SourceChanged(new_text));
                     }
 
-                    // Always update the length tracking
                     this_panel_ref.last_text_len = new_len;
 
-                    // ! CORRECTED: Get cursor offset directly from the emitting_input_state_entity !
-                    // The `emitting_input_state_entity` is a `Model<InputState>` or `Entity<InputState>`.
-                    // We can `read` it directly with `cx_for_panel` to get the current cursor.
                     let current_cursor_offset =
                         emitting_input_state_entity.read(cx_for_panel).cursor();
                     this_panel_ref.cursor_offset = current_cursor_offset;
-                    // println!(
-                    //     "DEBUG: PreviewPanel - Cursor offset updated to: {}",
-                    //     this_panel_ref.cursor_offset
-                    // );
 
-                    cx_for_panel.notify(); // Ensure the panel re-renders with new cursor
+                    cx_for_panel.notify();
                 }
             },
         );
 
-        //let current_cx_for_callback = cx.app().clone();
-        let preview_panel_entity_for_callback = cx.entity().clone(); // Get Entity handle
+        let preview_panel_entity_for_callback = cx.entity().clone();
 
         let on_hit_map_updated_callback_arc =
             Arc::new(Mutex::new(move |hit_map_data: HitMap, app_cx: &mut App| {
@@ -123,24 +107,18 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
 
         let blink_task = cx.spawn(
             |view: WeakEntity<PreviewPanel<W>>, spawned_async_cx: &mut AsyncApp| {
-                // 1. Clone the context so it can be moved into the async block
                 let mut cx = spawned_async_cx.clone();
-
                 async move {
                     loop {
-                        // Wait for 500ms
                         cx.background_executor()
                             .timer(Duration::from_millis(350))
                             .await;
 
-                        // 2. Use the cloned 'cx' (AsyncApp) to update the view
-                        // update() on a WeakEntity returns an anyhow::Result
                         let result = view.update(&mut cx, |this, cx| {
                             this.cursor_visible = !this.cursor_visible;
                             cx.notify();
                         });
 
-                        // 3. If the view was dropped (entity no longer exists), stop the loop
                         if result.is_err() {
                             break;
                         }
@@ -149,12 +127,27 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             },
         );
 
+        // --- SINGLE SMART OBSERVER ---
         cx.observe(&input_state, |this, handle, cx| {
-            let new_cursor_offset = handle.read(cx).cursor();
-            if this.cursor_offset != new_cursor_offset {
-                this.cursor_offset = new_cursor_offset;
-                cx.notify();
+            let state = handle.read(cx);
+            let new_cursor_offset = state.cursor();
+            let sel = state.selected_range();
+
+            this.cursor_offset = new_cursor_offset;
+
+            if sel.is_empty() {
+                // Preserve the anchor on a fresh mouse down click (where cursor == anchor)
+                if this.selection_anchor != Some(new_cursor_offset) {
+                    this.selection_anchor = None;
+                }
+            } else {
+                this.selection_anchor = if new_cursor_offset == sel.start {
+                    Some(sel.end)
+                } else {
+                    Some(sel.start)
+                };
             }
+            cx.notify();
         })
         .detach();
 
@@ -202,51 +195,33 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
     /// Update the Typst source code and trigger a re-render.
 
     pub fn set_source(&mut self, source: String, window: &mut Window, cx: &mut Context<Self>) {
-        // println!(
-        //     "DEBUG: PreviewPanel::set_source called. Source length: {}",
-        //     source.len()
-        // );
-
         let source_for_input_state = source.clone();
         self.world.lock().set_source(source);
 
         self.suppressing_events = true;
-        // println!("DEBUG: PreviewPanel suppressing_events set to true in set_source");
 
         let preview_panel_entity = cx.entity().clone();
-
-        // --- CORRECTED FOCUS MANAGEMENT ---
-        // Store the original state of the PreviewPanel's focus_handle's tab_stop field
         let original_tab_stop_state = self.focus_handle.tab_stop;
-
-        // Temporarily set the PreviewPanel's focus_handle's tab_stop field to false
-        // This prevents the panel itself from being recognized as a tab stop, thus preventing
-        // it from implicitly grabbing focus if it's not meant to be interacted with.
         self.focus_handle.tab_stop = false;
-        // --- END CORRECTED FOCUS MANAGEMENT ---
+
+        // 1. Read and preserve the current selection range before updating input value
+        let current_selection = self.selection_range();
 
         self.input_state.update(cx, |input, input_cx| {
-            // Note: input.set_value() itself doesn't call focus().
-            // It's input.set_cursor_position() that calls input.focus().
-            // We need to prevent the input.focus() call inside set_cursor_position.
-            // Since input.focus_handle is private, we can't disable it from here.
-            // However, InputState.focus() will ultimately call its focus_handle().focus(window, cx),
-            // which will check if the focus_handle has tab_stop(true).
-            // If the *panel's* focus_handle is false, then the Input's focus_handle
-            // should also be prevented IF the Input is a direct child relying on parent focus.
-            // Let's try calling set_value, but avoid set_cursor_position here.
             input.set_value(source_for_input_state, window, input_cx);
+
+            // 2. Restore the selection range on the input state so it is not cleared by set_value
+            if let Some(ref sel) = current_selection {
+                input.set_selected_range(sel.clone(), input_cx);
+                let new_pos = input.text().offset_to_position(sel.end);
+                input.set_cursor_position(new_pos, window, input_cx);
+            }
         });
 
-        // Use defer to reset the panel's suppressing_events and tab_stop flag
         cx.defer(move |app_cx| {
             app_cx.update_entity(&preview_panel_entity, |this_panel, cx_for_panel| {
                 this_panel.suppressing_events = false;
-                // Restore original tab_stop state for the PreviewPanel's focus_handle
                 this_panel.focus_handle.tab_stop = original_tab_stop_state;
-                // println!(
-                //     "DEBUG: PreviewPanel suppressing_events and tab_stop reset via defer in set_source"
-                // );
                 cx_for_panel.notify();
             });
         });
@@ -383,14 +358,110 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
     }
 
     pub fn offset_for_point(&self, point_px: Point<Pixels>) -> Option<usize> {
-        // Iterate through the hit map in reverse to find the "frontmost" glyph if overlaps.
+        if self.last_hit_map.glyphs.is_empty() {
+            return None;
+        }
 
-        for glyph_info in self.last_hit_map.glyphs.iter().rev() {
-            if glyph_info.bounds.contains(&point_px) {
-                return Some(glyph_info.byte_offset);
+        // 1. Find the minimum vertical distance from our cursor Y to any glyph's line span.
+        let mut min_v_dist = f32::MAX;
+        for glyph_info in &self.last_hit_map.glyphs {
+            let bounds = glyph_info.bounds;
+            let v_dist = if point_px.y < bounds.top() {
+                (bounds.top() - point_px.y).as_f32()
+            } else if point_px.y > bounds.bottom() {
+                (point_px.y - bounds.bottom()).as_f32()
+            } else {
+                0.0 // Mouse is vertically inside this line
+            };
+            if v_dist < min_v_dist {
+                min_v_dist = v_dist;
             }
         }
-        None
+
+        // 2. Collect all glyphs that belong to this closest vertical line (within a 5px threshold).
+        let mut line_glyphs = Vec::new();
+        for glyph_info in &self.last_hit_map.glyphs {
+            let bounds = glyph_info.bounds;
+            let v_dist = if point_px.y < bounds.top() {
+                (bounds.top() - point_px.y).as_f32()
+            } else if point_px.y > bounds.bottom() {
+                (point_px.y - bounds.bottom()).as_f32()
+            } else {
+                0.0
+            };
+
+            if v_dist <= min_v_dist + 5.0 {
+                line_glyphs.push(glyph_info);
+            }
+        }
+
+        if line_glyphs.is_empty() {
+            return None;
+        }
+
+        // 3. Find the horizontally closest glyph on this specific line.
+        let mut closest_glyph = None;
+        let mut min_h_dist = f32::MAX;
+
+        for glyph in line_glyphs {
+            let bounds = glyph.bounds;
+            let h_dist = if point_px.x < bounds.left() {
+                (bounds.left() - point_px.x).as_f32()
+            } else if point_px.x > bounds.right() {
+                (point_px.x - bounds.right()).as_f32()
+            } else {
+                0.0 // Mouse is horizontally inside this character
+            };
+
+            if h_dist < min_h_dist {
+                min_h_dist = h_dist;
+                closest_glyph = Some(glyph);
+            }
+        }
+
+        // 4. Return the correct offset (before or after the character)
+        if let Some(glyph) = closest_glyph {
+            let bounds = glyph.bounds;
+            let center_x = bounds.left() + bounds.size.width / 2.0;
+            if point_px.x > center_x {
+                // If clicked on the right half of the character, place cursor after it
+                Some(glyph.byte_offset + glyph.byte_len)
+            } else {
+                // If clicked on the left half, place cursor before it
+                Some(glyph.byte_offset)
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Returns the active selection range normalized (min..max) if one exists.
+    pub fn selection_range(&self) -> Option<std::ops::Range<usize>> {
+        self.selection_anchor.and_then(|anchor| {
+            if anchor == self.cursor_offset {
+                None
+            } else {
+                Some(anchor.min(self.cursor_offset)..anchor.max(self.cursor_offset))
+            }
+        })
+    }
+
+    /// Explicitly updates the selection anchor and cursor position, syncing the underlying InputState.
+    pub fn set_selection(
+        &mut self,
+        range: std::ops::Range<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.selection_anchor = Some(range.start);
+        self.cursor_offset = range.end;
+
+        self.input_state.update(cx, |input, input_cx| {
+            // FIX: Explicitly set the selected range so InputState keeps the focus highlighted!
+            input.set_selected_range(range.clone(), input_cx);
+            let new_pos = input.text().offset_to_position(range.end);
+            input.set_cursor_position(new_pos, window, input_cx);
+        });
     }
 
     fn handle_link_click(&mut self, point: Point<Pixels>, cx: &mut Context<Self>) -> bool {
@@ -461,12 +532,18 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                         this.cursor_offset = byte_offset;
 
                         this.input_state.update(cx, |input, input_cx| {
+                            // Collapse selection to a single point on click
+                            input.set_selected_range(byte_offset..byte_offset, input_cx);
                             let new_pos = input.text().offset_to_position(byte_offset);
                             input.set_cursor_position(new_pos, window, input_cx);
                         });
                     } else {
                         // Clear selection if clicking on empty space
                         this.selection_anchor = None;
+                        this.input_state.update(cx, |input, input_cx| {
+                            input.set_selected_range(0..0, input_cx);
+                        });
+                        cx.notify();
                     }
 
                     let input_focus_handle = this.input_state.read(cx).focus_handle(cx);
@@ -493,11 +570,14 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                     if let Some(byte_offset) = this.offset_for_point(event.position) {
                         this.cursor_offset = byte_offset;
 
-                        // Sync with InputState so keyboard works from the drag end point
-                        this.input_state.update(cx, |input, input_cx| {
-                            let new_pos = input.text().offset_to_position(byte_offset);
-                            input.set_cursor_position(new_pos, window, input_cx);
-                        });
+                        if let Some(anchor) = this.selection_anchor {
+                            this.input_state.update(cx, |input, input_cx| {
+                                let normalized_range =
+                                    anchor.min(byte_offset)..anchor.max(byte_offset);
+                                // This sets both selection bounds AND updates the cursor without collapsing!
+                                input.set_selected_range(normalized_range, input_cx);
+                            });
+                        }
                         cx.notify();
                     }
                 }
@@ -557,14 +637,34 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                             }
                         });
 
+                        // Create the resolver closure accessing the world
+                        let world_clone = self.world.clone();
+                        let span_resolver = Some(std::sync::Arc::new(
+                            move |span: typst::syntax::Span, offset: u16| {
+                                if let Some(file_id) = span.id() {
+                                    // We use .ok() to handle potential errors in source() gracefully
+                                    if let Ok(source) = world_clone.lock().source(file_id) {
+                                        // Safely handle the Option returned by range(span)
+                                        if let Some(range) = source.range(span) {
+                                            return range.start + offset as usize;
+                                        }
+                                    }
+                                }
+                                0
+                            },
+                        )
+                            as std::sync::Arc<
+                                dyn Fn(typst::syntax::Span, u16) -> usize + Send + Sync,
+                            >);
+
                         TypstElement::new(
                             doc.clone(),
                             self.render_state.clone(),
-                            // self.scroll_handle.offset(),
                             Some(self.cursor_offset),
-                            selection_range,
+                            self.selection_range(),
                             self.on_hit_map_updated_callback.clone(),
                             self.cursor_visible,
+                            span_resolver, // Pass the resolver here
                         )
                         .with_zoom(self.zoom)
                         .into_any_element()

@@ -173,133 +173,40 @@ fn map_index(
 fn toggle_wrapper_ast(content: &str, range: Range<usize>, kind_to_toggle: SyntaxKind) -> TextEdit {
     let tree = parse(content);
     let root = LinkedNode::new(&tree);
-
-    let marker_str = if kind_to_toggle == SyntaxKind::Strong {
+    let marker = if kind_to_toggle == SyntaxKind::Strong {
         "*"
     } else {
         "_"
     };
-    let marker_len = marker_str.len();
+    let marker_len = marker.len();
 
-    // 1. Check if we are inside a single formatting block (UNFORMAT operation)
-    if let Some(formatting_node) = find_formatting_node(&root, range.clone(), kind_to_toggle) {
-        let block_range = formatting_node.range();
+    // 1. Check if the selection is already wrapped
+    if let Some(node) = find_formatting_node(&root, range.clone(), kind_to_toggle) {
+        let node_range = node.range();
 
-        let mut left_marker_len = marker_len;
-        if let Some(first_child) = formatting_node.children().next() {
-            left_marker_len = first_child.range().len();
-        }
-        let mut right_marker_len = marker_len;
-        if let Some(last_child) = formatting_node.children().last() {
-            right_marker_len = last_child.range().len();
-        }
+        // Ensure we don't underflow
+        if node_range.start + marker_len <= node_range.end - marker_len {
+            let inner_range = (node_range.start + marker_len)..(node_range.end - marker_len);
+            let inner_text = &content[inner_range];
 
-        if block_range.len() >= left_marker_len + right_marker_len {
-            let inner_start = block_range.start + left_marker_len;
-            let inner_end = block_range.end - right_marker_len;
-
-            let start_clamped = range.start.max(inner_start).min(inner_end);
-            let end_clamped = range.end.max(inner_start).min(inner_end);
-
-            let before_text = &content[inner_start..start_clamped];
-            let selected_text = &content[start_clamped..end_clamped];
-            let after_text = &content[end_clamped..inner_end];
-
-            let mut reconstructed = String::new();
-            if !before_text.is_empty() {
-                reconstructed.push_str(marker_str);
-                reconstructed.push_str(before_text);
-                reconstructed.push_str(marker_str);
-            }
-            reconstructed.push_str(selected_text);
-            if !after_text.is_empty() {
-                reconstructed.push_str(marker_str);
-                reconstructed.push_str(after_text);
-                reconstructed.push_str(marker_str);
-            }
-
-            let shift_start = block_range.start
-                + if before_text.is_empty() {
-                    0
-                } else {
-                    marker_len * 2 + before_text.len()
-                };
-            let new_range = shift_start..(shift_start + selected_text.len());
             return TextEdit {
-                range: block_range,
-                new_text: reconstructed,
-                new_selection: new_range,
+                range: node_range,
+                new_text: inner_text.to_string(),
+                // Use saturating sub or check for valid range to avoid overflow
+                new_selection: (range.start.saturating_sub(marker_len))
+                    ..(range.end.saturating_sub(marker_len)),
             };
         }
     }
 
-    // 2. We are outside or overlapping existing blocks (FORMAT / MERGE operation)
-    let mut intersecting_nodes = Vec::new();
-    find_intersecting_formatting_nodes(
-        &root,
-        range.clone(),
-        kind_to_toggle,
-        &mut intersecting_nodes,
-    );
+    // 2. Wrap logic
+    let selected_text = &content[range.clone()];
+    let new_text = format!("{}{}{}", marker, selected_text, marker);
 
-    if intersecting_nodes.is_empty() {
-        // Safe wrapped fallback
-        let selected_text = &content[range.clone()];
-        let reconstructed = format!("{}{}{}", marker_str, selected_text, marker_str);
-
-        let new_start = range.start + marker_len;
-        let new_range = new_start..(new_start + range.len());
-        TextEdit {
-            range: range.clone(),
-            new_text: reconstructed,
-            new_selection: new_range,
-        }
-    } else {
-        // Collect combined bounds
-        let mut combined_start = range.start;
-        let mut combined_end = range.end;
-        for node in &intersecting_nodes {
-            let r = node.range();
-            combined_start = combined_start.min(r.start);
-            combined_end = combined_end.max(r.end);
-        }
-
-        // Identify marker ranges to delete
-        let mut marker_ranges = Vec::new();
-        for node in &intersecting_nodes {
-            let r = node.range();
-            if r.len() >= marker_len * 2 {
-                marker_ranges.push(r.start..r.start + marker_len);
-                marker_ranges.push(r.end - marker_len..r.end);
-            }
-        }
-        marker_ranges.sort_by_key(|r| r.start);
-        marker_ranges.dedup();
-
-        // Extract inner content stripped of markers
-        let mut inner_text = String::new();
-        let mut current = combined_start;
-        for m_range in &marker_ranges {
-            if m_range.start >= current {
-                inner_text.push_str(&content[current..m_range.start]);
-                current = m_range.end;
-            }
-        }
-        if current < combined_end {
-            inner_text.push_str(&content[current..combined_end]);
-        }
-
-        let reconstructed = format!("{}{}{}", marker_str, inner_text, marker_str);
-
-        // Calculate precision mapped cursor coordinates
-        let new_start = map_index(range.start, combined_start, &marker_ranges, marker_len);
-        let new_end = map_index(range.end, combined_start, &marker_ranges, marker_len);
-
-        TextEdit {
-            range: combined_start..combined_end,
-            new_text: reconstructed,
-            new_selection: new_start..new_end,
-        }
+    TextEdit {
+        range: range.clone(),
+        new_text,
+        new_selection: (range.start + marker_len)..(range.end + marker_len),
     }
 }
 

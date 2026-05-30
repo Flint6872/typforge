@@ -81,10 +81,6 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
                   _emitter: Entity<EditorPanel>,
                   event: &FileContentUpdated,
                   cx_for_note_view: &mut Context<TypstNoteView<W>>| {
-                // println!(
-                //     "Bridge: Received update from editor ({} chars)",
-                //     event.content.len()
-                // );
                 let content = event.content.clone();
                 let path = event.path.clone();
 
@@ -94,9 +90,15 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
                         this_note_view.preview_panel.update(
                             app_cx_from_handle,
                             |preview, cx_for_preview| {
-                                preview.set_source(content.clone(), window_ref, cx_for_preview);
+                                // 1. Only trigger a full re-source if the content length is different
+                                // (a simple heuristic to avoid unnecessary re-compiles)
+                                if preview.last_text_len != content.len() {
+                                    preview.set_source(content.clone(), window_ref, cx_for_preview);
+                                }
+
+                                // 2. Always update document info for metadata
                                 preview.update_document_info(
-                                    path.clone(),
+                                    path,
                                     content,
                                     window_ref,
                                     cx_for_preview,
@@ -287,12 +289,25 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         }
     }
 
+    /// Orchestrates formatting actions triggered from either the Editor or Preview Panel.
     pub fn handle_ribbon_action(&mut self, action: &RibbonAction, cx: &mut Context<Self>) {
         let editor_panel = self.editor_panel.clone();
+        let preview_panel = self.preview_panel.clone();
         let window_handle = self.window_handle.clone();
 
         let _ = window_handle
             .update(cx, |_, window, app_cx| {
+                let is_preview_focused = preview_panel
+                    .read(app_cx)
+                    .focus_handle(app_cx)
+                    .contains_focused(window, app_cx);
+
+                let preview_selection = if is_preview_focused {
+                    preview_panel.read(app_cx).selection_range()
+                } else {
+                    None
+                };
+
                 editor_panel.update(app_cx, |editor, editor_cx| {
                     if let Some(active_path) = &editor.active_file_path {
                         if let Some(file) = editor
@@ -300,17 +315,19 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
                             .iter_mut()
                             .find(|f| &f.path == active_path)
                         {
+                            let mut final_new_selection = None;
+
                             // 1. Mutate editor text buffer
                             file.editor_state.update(editor_cx, |state, input_cx| {
                                 let content = state.text().to_string();
-                                let selection = state.selected_range();
+                                let selection = preview_selection
+                                    .clone()
+                                    .unwrap_or_else(|| state.selected_range());
 
-                                // Get the edit transaction details
                                 let edit = crate::ribbon::injector::apply_ribbon_action(
                                     &content, selection, action,
                                 );
 
-                                // Perform the edit with history tracking (for undo/redo support)
                                 state.replace_range_with_history(
                                     edit.range,
                                     &edit.new_text,
@@ -318,16 +335,26 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
                                     input_cx,
                                 );
 
-                                // Restore and re-apply the precise selection range
-                                state.set_selected_range(edit.new_selection, input_cx);
+                                state.set_selected_range(edit.new_selection.clone(), input_cx);
+                                final_new_selection = Some(edit.new_selection);
 
-                                // Focus the input to keep focus active, WITHOUT collapsing the selection
-                                state.focus(window, input_cx);
+                                if !is_preview_focused {
+                                    state.focus(window, input_cx);
+                                }
                             });
 
                             file.has_unsaved_changes = true;
 
-                            // 2. Push changes to Preview Panel immediately
+                            // 2. Sync visual highlights in the Preview Panel BEFORE triggering recompilation
+                            if is_preview_focused {
+                                if let Some(ref new_sel) = final_new_selection {
+                                    preview_panel.update(editor_cx, |preview, preview_cx| {
+                                        preview.set_selection(new_sel.clone(), window, preview_cx);
+                                    });
+                                }
+                            }
+
+                            // 3. Immediately compile and push updated content to Preview
                             let content = file.editor_state.read(editor_cx).text().to_string();
                             editor_cx.emit(FileContentUpdated {
                                 path: Some(active_path.clone()),

@@ -117,6 +117,7 @@ pub struct TypstElement {
     selection_range: Option<std::ops::Range<usize>>,
     on_hit_map_updated: Option<Arc<Mutex<dyn FnMut(HitMap, &mut App) + Send + Sync + 'static>>>,
     show_cursor: bool,
+    pub span_resolver: Option<Arc<dyn Fn(Span, u16) -> usize + Send + Sync + 'static>>,
 }
 
 // Manual implementation of Debug for TypstElement
@@ -380,6 +381,7 @@ impl TypstElement {
         selection_range: Option<std::ops::Range<usize>>,
         on_hit_map_updated: Option<Arc<Mutex<dyn FnMut(HitMap, &mut App) + Send + Sync + 'static>>>,
         show_cursor: bool,
+        span_resolver: Option<Arc<dyn Fn(Span, u16) -> usize + Send + Sync + 'static>>, // Add this
     ) -> Self {
         Self {
             id: gpui::ElementId::from(0),
@@ -393,6 +395,7 @@ impl TypstElement {
             selection_range,
             on_hit_map_updated,
             show_cursor,
+            span_resolver,
         }
     }
 
@@ -510,16 +513,23 @@ impl TypstElement {
                         );
                         let glyph_height = font_size;
 
-                        let (span, _index) = glyph_instance.span;
-                        let glyph_range = glyph_instance.range(); // Get the range here
+                        let (span, index) = glyph_instance.span;
+                        let glyph_range = glyph_instance.range();
+
+                        // --- NEW: Map relative span offsets to absolute document offsets ---
+                        let byte_offset = if let Some(resolver) = &self.span_resolver {
+                            resolver(span, index)
+                        } else {
+                            glyph_range.start
+                        };
 
                         hit_map_collector.push_glyph(GlyphInfo {
                             bounds: Bounds::new(
                                 glyph_origin,
                                 gpui::size(glyph_width, glyph_height),
                             ),
-                            byte_offset: glyph_range.start,
-                            byte_len: glyph_range.len(), // STORE THE LENGTH
+                            byte_offset, // Uses the resolved absolute offset!
+                            byte_len: glyph_range.len(),
                             span,
                         });
 
