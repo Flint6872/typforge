@@ -19,8 +19,8 @@ gpui_macros = { git = "https://github.com/zed-industries/zed" } # NEW: If you us
 
 gpui_util = "0.2.2"
 gpui-component.workspace = true
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
 
-gpui-component-assets = "0.5.1"
 typst-gpui = { path = "../typst-gpui" }
 
 tower-lsp.workspace = true

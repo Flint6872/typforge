@@ -15,6 +15,7 @@ use gpui_component::{
     Root,
     theme::{Theme, ThemeMode, ThemeRegistry},
 };
+use gpui_component_assets::Assets;
 
 use typst_kit::fonts::Fonts;
 
@@ -44,77 +45,79 @@ fn main() -> Result<()> {
     // on this thread and its children.
     let _guard = rt.enter();
 
-    gpui_platform::application().run(|cx: &mut App| {
-        // The closure receives &mut AppContext
-        // Initialize GPUI components that might require a specific context setup
-        //
-        // cx.with_assets_directory(typforge::app::DEFAULT_ASSETS_DIRECTORY);
-        // cx.run_migrations();
+    gpui_platform::application()
+        .with_assets(Assets)
+        .run(|cx: &mut App| {
+            // The closure receives &mut AppContext
+            // Initialize GPUI components that might require a specific context setup
+            //
+            // cx.with_assets_directory(typforge::app::DEFAULT_ASSETS_DIRECTORY);
+            // cx.run_migrations();
 
-        gpui_component::init(cx);
-        load_settings(cx);
-        bind_keys(cx);
-        theme::init(cx);
-        theme::apply_settings_theme(cx);
-        setup_menus(cx);
+            gpui_component::init(cx);
+            load_settings(cx);
+            bind_keys(cx);
+            theme::init(cx);
+            theme::apply_settings_theme(cx);
+            setup_menus(cx);
 
-        #[cfg(not(target_os = "macos"))]
-        if let Some(menus) = cx.get_menus() {
-            gpui_component::global_state::GlobalState::global_mut(cx).set_app_menus(menus);
-        }
+            #[cfg(not(target_os = "macos"))]
+            if let Some(menus) = cx.get_menus() {
+                gpui_component::global_state::GlobalState::global_mut(cx).set_app_menus(menus);
+            }
 
-        // Theme::change(ThemeMode::Dark, None, cx);
-        cx.set_global(typst_gpui::GpuiRegisteredFonts(
-            std::collections::HashSet::new(),
-        ));
+            // Theme::change(ThemeMode::Dark, None, cx);
+            cx.set_global(typst_gpui::GpuiRegisteredFonts(
+                std::collections::HashSet::new(),
+            ));
 
-        let fonts = load_fonts(cx);
-        let initial_lsp_content = String::new();
-        let mut world = GpuiWorld::new(fonts);
-        world.set_source(initial_lsp_content.clone()); // Initialize it with some content
+            let fonts = load_fonts(cx);
+            let initial_lsp_content = String::new();
+            let mut world = GpuiWorld::new(fonts);
+            world.set_source(initial_lsp_content.clone()); // Initialize it with some content
 
-        let shared_world = Arc::new(Mutex::new(world));
+            let shared_world = Arc::new(Mutex::new(world));
 
-        // Initialize our clean LSP Client
-        let (lsp_client, diagnostics_rx, responses_rx) = LspClient::new(shared_world.clone());
-        let lsp_client = Arc::new(lsp_client);
+            // Initialize our clean LSP Client
+            let (lsp_client, diagnostics_rx, responses_rx) = LspClient::new(shared_world.clone());
+            let lsp_client = Arc::new(lsp_client);
 
-        lsp_client.initialize(typstography::ClientCapabilities::default());
+            lsp_client.initialize(typstography::ClientCapabilities::default());
 
-        let initial_bounds = Bounds::centered(None, size(px(1280.0), px(600.0)), cx);
+            let initial_bounds = Bounds::centered(None, size(px(1280.0), px(600.0)), cx);
 
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(initial_bounds)),
-                titlebar: None,
-                focus: true,
-                show: true,
-                kind: WindowKind::Normal,
-                is_resizable: true,
-                is_movable: true,
-                ..Default::default()
-            },
-            |window: &mut Window, cx: &mut App| {
-                // Explicitly type AppContext here
-                // First, create your main application view
-                let typst_note_view = cx.new(|cx| {
-                    TypstNoteView::new(
-                        window,
-                        shared_world,
-                        lsp_client.clone(),
-                        diagnostics_rx,
-                        responses_rx,
-                        cx,
-                    )
-                });
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(initial_bounds)),
+                    titlebar: None,
+                    focus: true,
+                    show: true,
+                    kind: WindowKind::Normal,
+                    is_resizable: true,
+                    is_movable: true,
+                    ..Default::default()
+                },
+                |window: &mut Window, cx: &mut App| {
+                    // Explicitly type AppContext here
+                    // First, create your main application view
+                    let typst_note_view = cx.new(|cx| {
+                        TypstNoteView::new(
+                            window,
+                            shared_world,
+                            lsp_client.clone(),
+                            diagnostics_rx,
+                            responses_rx,
+                            cx,
+                        )
+                    });
 
-                // Then, wrap it inside gpui_component::Root
-                cx.new(|cx| Root::new(typst_note_view, window, cx))
-            },
-        )
-        .unwrap();
-        cx.activate(true);
-    });
+                    // Then, wrap it inside gpui_component::Root
+                    cx.new(|cx| Root::new(typst_note_view, window, cx))
+                },
+            )
+            .unwrap();
+            cx.activate(true);
+        });
     Ok(())
 }
 

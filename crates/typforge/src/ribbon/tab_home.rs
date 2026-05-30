@@ -3,7 +3,7 @@ use crate::{
     ribbon::panel::RibbonPanel,
 };
 use gpui::*;
-use gpui_component::{ActiveTheme, IconName, Sizable, color_picker::ColorPicker};
+use gpui_component::{ActiveTheme, IconName, Sizable, color_picker::ColorPicker, h_flex, v_flex};
 
 impl RibbonPanel {
     pub fn handle_toggle_bold(&mut self, _: &actions::ToggleBold, cx: &mut Context<Self>) {
@@ -75,10 +75,51 @@ impl RibbonPanel {
             // Separator
             .child(div().w(px(1.0)).h_6().bg(colors.border))
             // Color Picker Dropdown Component
+            .child(self.render_custom_color_picker(cx))
+    }
+}
+
+impl RibbonPanel {
+    fn render_custom_color_picker(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = cx.theme().colors;
+        let current_color = self
+            .text_color_picker
+            .read(cx)
+            .value()
+            .unwrap_or(colors.foreground);
+
+        h_flex()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .hover(|style| style.bg(colors.primary_hover))
+            // This is the "Font Color" button (Icon + Underline)
+            .child(
+                v_flex()
+                    .items_center()
+                    .cursor_pointer()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_this, _, _, _| {
+                            // Optional: re-apply color logic
+                        }),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(16.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(colors.foreground)
+                            .child("A"),
+                    )
+                    .child(div().w(px(18.0)).h(px(5.0)).bg(current_color)),
+            )
+            // The Dropdown Trigger
             .child(
                 ColorPicker::new(&self.text_color_picker)
-                    //.icon(IconName::Type) // Displays a standard text icon
                     .small()
+                    .icon(IconName::ChevronDown)
                     .anchor(Anchor::BottomLeft),
             )
     }

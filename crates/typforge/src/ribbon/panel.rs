@@ -188,6 +188,7 @@ impl RibbonPanel {
             } else {
                 colors.foreground
             })
+            .hover(|style| style.bg(colors.primary_hover))
             .cursor_pointer()
             .on_mouse_down(MouseButton::Left, on_click)
             .child(label)
