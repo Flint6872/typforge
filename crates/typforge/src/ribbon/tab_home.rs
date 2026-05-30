@@ -88,39 +88,49 @@ impl RibbonPanel {
             .value()
             .unwrap_or(colors.foreground);
 
+        // This outer container acts as the "unified button"
         h_flex()
             .items_center()
-            .gap_1()
-            .px_2()
-            .py_1()
             .rounded_md()
-            .hover(|style| style.bg(colors.primary_hover))
-            // This is the "Font Color" button (Icon + Underline)
+            .border_1()
+            .border_color(colors.border) // Optional: adds definition
+            .hover(|style| style.bg(colors.primary_hover)) // Hover the whole unit
             .child(
+                // Left Side: Apply Action
                 v_flex()
                     .items_center()
+                    .px_2()
+                    .py_1()
                     .cursor_pointer()
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|_this, _, _, _| {
-                            // Optional: re-apply color logic
+                        cx.listener(|this, _, _, cx| {
+                            if let Some(color) = this.text_color_picker.read(cx).value() {
+                                this.emit_text_color(color, cx);
+                            }
                         }),
                     )
                     .child(
                         div()
                             .text_size(px(16.0))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(colors.foreground)
                             .child("A"),
                     )
                     .child(div().w(px(18.0)).h(px(5.0)).bg(current_color)),
             )
-            // The Dropdown Trigger
             .child(
-                ColorPicker::new(&self.text_color_picker)
-                    .small()
-                    .icon(IconName::ChevronDown)
-                    .anchor(Anchor::BottomLeft),
+                // Divider line between sides
+                div().w(px(1.0)).h(px(24.0)).bg(colors.border),
             )
+            .child(
+                // Right Side: Dropdown
+                div().px_1().child(
+                    ColorPicker::new(&self.text_color_picker)
+                        .small()
+                        .icon(IconName::ChevronDown)
+                        .anchor(Anchor::BottomLeft),
+                ),
+            )
+            .cursor_pointer()
     }
 }

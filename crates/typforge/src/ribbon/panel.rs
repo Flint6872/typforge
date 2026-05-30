@@ -34,18 +34,9 @@ impl RibbonPanel {
         });
 
         // Subscribe to color selection events
-        cx.subscribe(&text_color_picker, |_, _, event, cx| {
+        cx.subscribe(&text_color_picker, |this, _, event, cx| {
             if let ColorPickerEvent::Change(Some(color)) = event {
-                // Convert GPUI Hsla to a Typst-friendly hex RGB string (e.g. rgb("#FF6B6B"))
-                let rgba = color.to_rgb();
-                let hex_color = format!(
-                    "rgb(\"#{:02x}{:02x}{:02x}\")",
-                    (rgba.r * 255.0).round() as u8,
-                    (rgba.g * 255.0).round() as u8,
-                    (rgba.b * 255.0).round() as u8
-                );
-
-                cx.emit(RibbonAction::SetTextColor(hex_color));
+                this.emit_text_color(*color, cx);
             }
         })
         .detach();
@@ -158,6 +149,17 @@ impl RibbonPanel {
                 }),
             )
             .child(label)
+    }
+
+    pub fn emit_text_color(&self, color: Hsla, cx: &mut Context<Self>) {
+        let rgba = color.to_rgb();
+        let hex_color = format!(
+            "rgb(\"#{:02x}{:02x}{:02x}\")",
+            (rgba.r * 255.0).round() as u8,
+            (rgba.g * 255.0).round() as u8,
+            (rgba.b * 255.0).round() as u8
+        );
+        cx.emit(RibbonAction::SetTextColor(hex_color));
     }
 
     pub fn render_icon_button(
