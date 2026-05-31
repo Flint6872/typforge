@@ -39,6 +39,7 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
     pub fn new(
         window: &mut Window,
         shared_world_arc: Arc<Mutex<W>>,
+
         lsp_client: Arc<LspClient>,
         diagnostics_rx: mpsc::UnboundedReceiver<PublishDiagnosticsParams>,
         responses_rx: mpsc::UnboundedReceiver<serde_json::Value>, // <--- ADDED THIS LINE
@@ -53,8 +54,17 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
             editor_panel.new_file(window, cx); // Call the new_file method
         });
 
+        let font_families: Vec<String> = {
+            let world = shared_world_arc.lock();
+            world
+                .book()
+                .families()
+                .map(|(name, _)| name.to_string())
+                .collect()
+        };
+
         let preview_panel = cx.new(|cx| PreviewPanel::new(shared_world_arc, window, cx));
-        let ribbon_panel = cx.new(|cx| RibbonPanel::new(window, cx));
+        let ribbon_panel = cx.new(|cx| RibbonPanel::new(font_families, window, cx));
 
         // --- Handles to be captured by closures ---
         let window_handle = window.window_handle();

@@ -17,7 +17,9 @@ pub enum RibbonTab {
 pub struct RibbonPanel {
     active_tab: RibbonTab,
     pub selected_font: String,
+    pub original_font: Option<String>,
     pub font_size: f32,
+    pub original_font_size: Option<f32>,
     pub is_bold: bool,
     pub is_italic: bool,
     #[allow(dead_code)] //will build this out at a later time
@@ -25,10 +27,14 @@ pub struct RibbonPanel {
     pub is_flipped: bool,
     pub columns: usize,
     pub(super) text_color_picker: Entity<ColorPickerState>,
+    // Dropdown state
+    pub font_families: Vec<String>,
+    pub font_dropdown_open: bool,
+    pub font_size_dropdown_open: bool,
 }
 
 impl RibbonPanel {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(font_families: Vec<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let text_color_picker = cx.new(|cx| {
             ColorPickerState::new(window, cx).default_value(cx.theme().colors.foreground) // Match active theme text color
         });
@@ -44,13 +50,18 @@ impl RibbonPanel {
         Self {
             active_tab: RibbonTab::Home,
             selected_font: "Liberation Sans".to_string(),
+            original_font: None,
             font_size: 11.0,
+            original_font_size: None,
             is_bold: false,
             is_italic: false,
             paper_size: "us-letter".to_string(),
             is_flipped: false,
             columns: 1,
             text_color_picker,
+            font_families,
+            font_dropdown_open: false,
+            font_size_dropdown_open: false,
         }
     }
 
