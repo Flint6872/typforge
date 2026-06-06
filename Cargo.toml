@@ -12,6 +12,7 @@ members = [
     "crates/typsdocx",
     "crates/typst-gpui",
     "crates/typstography",
+    "crates/typforge-core",
 ]
 
 
@@ -38,12 +39,15 @@ gpui-component = { path = "../gpui-component/crates/ui", features = [
 # ] }
 
 typst = "0.14.2"
+typst-syntax = "0.14.2"
 chrono = "0.4.44"
 
 tower-lsp = "0.20"
 lsp-types = "0.97.0"
 tokio = { version = "1", features = ["full"] }
 parking_lot = "0.12.5"
+
+serde = { version = "1.0", features = ["derive"] }
 
 [profile.release]
 opt-level = 3

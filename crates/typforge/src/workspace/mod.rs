@@ -7,7 +7,6 @@ use std::sync::Arc;
 // Import necessary types
 use crate::{
     actions::{self, RibbonAction},
-    components::lsp::LspClient,
     editor::{FileContentUpdated, editor_panel::EditorPanel},
     panels::{FilesPanel, OpenFileEvent},
     ribbon::panel::RibbonPanel,
@@ -19,36 +18,30 @@ use gpui_component::{
 };
 use gpui_util::ResultExt;
 use parking_lot::Mutex;
-use tokio::sync::mpsc;
-use typst_gpui::{PreviewPanel, PreviewPanelEvent};
-use typstography::PublishDiagnosticsParams;
 
-pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld> {
+use typforge_core::edit::apply_edit_action;
+use typst_gpui::{PreviewPanel, PreviewPanelEvent};
+
+pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> {
     pub dock_area: Entity<DockArea>,
     pub menu_bar: Option<Entity<AppMenuBar>>,
     pub ribbon_panel: Entity<RibbonPanel>,
-    pub editor_panel: Entity<EditorPanel>,
+    pub editor_panel: Entity<EditorPanel<W>>,
     pub preview_panel: Entity<PreviewPanel<W>>,
     pub files_panel: Entity<FilesPanel>,
     pub window_handle: AnyWindowHandle,
-    pub lsp_client: Arc<LspClient>,
 }
 
-impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
+impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
     // A constructor for your view.
     pub fn new(
         window: &mut Window,
         shared_world_arc: Arc<Mutex<W>>,
-
-        lsp_client: Arc<LspClient>,
-        diagnostics_rx: mpsc::UnboundedReceiver<PublishDiagnosticsParams>,
-        responses_rx: mpsc::UnboundedReceiver<serde_json::Value>, // <--- ADDED THIS LINE
         cx: &mut Context<Self>,
     ) -> Self {
         let files_panel = cx.new(|cx| FilesPanel::new(window, cx));
-        let editor_panel_entity = cx.new(|cx| {
-            EditorPanel::new(lsp_client.clone(), diagnostics_rx, responses_rx, window, cx)
-        });
+        let editor_panel_entity =
+            cx.new(|cx| EditorPanel::new(shared_world_arc.clone(), window, cx));
 
         editor_panel_entity.update(cx, |editor_panel, cx| {
             editor_panel.new_file(window, cx); // Call the new_file method
@@ -88,7 +81,7 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         cx.subscribe(
             &editor_panel_entity,
             move |this_note_view: &mut TypstNoteView<W>,
-                  _emitter: Entity<EditorPanel>,
+                  _emitter: Entity<EditorPanel<W>>,
                   event: &FileContentUpdated,
                   cx_for_note_view: &mut Context<TypstNoteView<W>>| {
                 let content = event.content.clone();
@@ -295,7 +288,6 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
             preview_panel,
             files_panel,
             window_handle, // Store the handle
-            lsp_client,
         }
     }
 
@@ -334,8 +326,10 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
                                     .clone()
                                     .unwrap_or_else(|| state.selected_range());
 
-                                let edit = crate::ribbon::injector::apply_ribbon_action(
-                                    &content, selection, action,
+                                let edit = apply_edit_action(
+                                    &content,
+                                    selection,
+                                    &action.into(), // Make sure you have a From/Into for your RibbonAction to core EditAction
                                 );
 
                                 state.replace_range_with_history(

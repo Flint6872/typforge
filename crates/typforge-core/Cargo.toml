@@ -1,0 +1,13 @@
+[package]
+name = "typforge-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+typst.workspace = true
+typst-syntax.workspace = true
+typst-ide = "0.14.2"
+typstyle-core = "0.14.4"
+serde.workspace = true

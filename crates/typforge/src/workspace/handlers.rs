@@ -3,7 +3,7 @@ use crate::editor::editor_panel::EditorPanel; // Import necessary panel types
 use crate::workspace::TypstNoteView;
 use gpui::*;
 
-impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
+impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
     pub(crate) fn handle_file_new(
         &mut self,
         _action: &actions::FileNew,
@@ -130,7 +130,7 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
     ) {
         println!("Action: FileSave triggered!"); // Debug print
         self.editor_panel
-            .update(cx, |editor: &mut EditorPanel, editor_cx| {
+            .update(cx, |editor: &mut EditorPanel<W>, editor_cx| {
                 editor.save_active_file(_window, editor_cx);
             });
     }

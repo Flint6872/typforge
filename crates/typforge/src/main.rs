@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::sync::Arc;
 
 use crate::{
-    components::{lsp::LspClient, menus::setup_menus, theme},
+    components::{menus::setup_menus, theme},
     key_bindings::bind_keys,
     settings::load_settings,
     typst_world::GpuiWorld,
@@ -17,9 +17,8 @@ use gpui_component::{
 };
 use gpui_component_assets::Assets;
 
-use typst_kit::fonts::Fonts;
-
 use parking_lot::Mutex;
+use typst_kit::fonts::Fonts;
 
 mod actions;
 mod components;
@@ -34,17 +33,6 @@ mod workspace;
 use workspace::TypstNoteView;
 
 fn main() -> Result<()> {
-    // 1. Create a multi-threaded Tokio runtime
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("Failed to create Tokio runtime");
-
-    // 2. Enter the runtime context.
-    // This allows tokio::spawn and tokio::io::duplex to work
-    // on this thread and its children.
-    let _guard = rt.enter();
-
     gpui_platform::application()
         .with_assets(Assets)
         .run(|cx: &mut App| {
@@ -72,18 +60,10 @@ fn main() -> Result<()> {
             ));
 
             let fonts = load_fonts(cx);
-            let initial_lsp_content = String::new();
             let mut world = GpuiWorld::new(fonts);
-            world.set_source(initial_lsp_content.clone()); // Initialize it with some content
+            world.set_source(String::new()); // Initialize empty source
 
             let shared_world = Arc::new(Mutex::new(world));
-
-            // Initialize our clean LSP Client
-            let (lsp_client, diagnostics_rx, responses_rx) = LspClient::new(shared_world.clone());
-            let lsp_client = Arc::new(lsp_client);
-
-            lsp_client.initialize(typstography::ClientCapabilities::default());
-
             let initial_bounds = Bounds::centered(None, size(px(1280.0), px(600.0)), cx);
 
             cx.open_window(
@@ -101,12 +81,9 @@ fn main() -> Result<()> {
                     // Explicitly type AppContext here
                     // First, create your main application view
                     let typst_note_view = cx.new(|cx| {
-                        TypstNoteView::new(
+                        TypstNoteView::<crate::typst_world::GpuiWorld>::new(
                             window,
                             shared_world,
-                            lsp_client.clone(),
-                            diagnostics_rx,
-                            responses_rx,
                             cx,
                         )
                     });

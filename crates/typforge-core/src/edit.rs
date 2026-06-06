@@ -1,74 +1,59 @@
-// crates/typforge/src/ribbon/injector.rs
+// typforge-core/src/edit.rs
 
-use crate::actions::RibbonAction;
 use std::ops::Range;
-use typforge_core::edit::EditAction;
-use typst::syntax::{LinkedNode, Side, SyntaxKind, parse};
+use typst_syntax::{LinkedNode, Side, SyntaxKind, parse};
 
-impl From<RibbonAction> for EditAction {
-    fn from(action: RibbonAction) -> Self {
-        match action {
-            RibbonAction::ToggleBold => EditAction::ToggleBold,
-            RibbonAction::ToggleItalic => EditAction::ToggleItalic,
-            RibbonAction::SetFont(f) => EditAction::SetFont(f),
-            RibbonAction::SetFontSize(s) => EditAction::SetFontSize(s as f64),
-            RibbonAction::SetTextColor(c) => EditAction::SetTextColor(c),
-            RibbonAction::InsertGrid { rows, cols } => EditAction::InsertGrid { rows, cols },
-            RibbonAction::SetPaper(p) => EditAction::SetPaper(p),
-            RibbonAction::SetFlipped(f) => EditAction::SetFlipped(f),
-            RibbonAction::SetColumns(c) => EditAction::SetColumns(c),
-            RibbonAction::SetMargin(m) => EditAction::SetMargin(m),
-        }
-    }
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum EditAction {
+    ToggleBold,
+    ToggleItalic,
+    SetFont(String),
+    SetFontSize(f64),
+    SetTextColor(String),
+    InsertGrid { rows: usize, cols: usize },
+    SetPaper(String),
+    SetFlipped(bool),
+    SetColumns(usize),
+    SetMargin(String),
 }
 
-impl From<&RibbonAction> for EditAction {
-    fn from(action: &RibbonAction) -> Self {
-        // Just clone the inner data and call the existing From implementation
-        action.clone().into()
-    }
-}
-
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextEdit {
     pub range: Range<usize>,
     pub new_text: String,
     pub new_selection: Range<usize>,
 }
 
-/// Applies a RibbonAction to the source text.
+/// Applies an EditAction to the source text.
 /// Returns the localized TextEdit to apply.
-pub fn apply_ribbon_action(
-    content: &str,
-    selection: Range<usize>,
-    action: &RibbonAction,
-) -> TextEdit {
+pub fn apply_edit_action(content: &str, selection: Range<usize>, action: &EditAction) -> TextEdit {
     let start = selection.start.min(content.len());
     let end = selection.end.min(content.len());
     let selection_clamped = start..end;
 
     match action {
         // --- 1. TEXT PARAMETERS (Smart Toggles & Mergers) ---
-        RibbonAction::ToggleBold => {
+        EditAction::ToggleBold => {
             toggle_wrapper_ast(content, selection_clamped, SyntaxKind::Strong)
         }
-        RibbonAction::ToggleItalic => {
+        EditAction::ToggleItalic => {
             toggle_wrapper_ast(content, selection_clamped, SyntaxKind::Emph)
         }
-        RibbonAction::SetFont(font_family) => apply_text_param_ast(
+        EditAction::SetFont(font_family) => apply_text_param_ast(
             content,
             selection_clamped,
             "font",
             &format!("\"{}\"", font_family),
         ),
-        RibbonAction::SetFontSize(size) => {
+        EditAction::SetFontSize(size) => {
             apply_text_param_ast(content, selection_clamped, "size", &format!("{}pt", size))
         }
-        RibbonAction::SetTextColor(color) => {
+        EditAction::SetTextColor(color) => {
             apply_text_param_ast(content, selection_clamped, "fill", color)
         }
 
         // --- 2. COMPLEX ELEMENTS (Cursor Injections) ---
-        RibbonAction::InsertGrid { rows, cols } => {
+        EditAction::InsertGrid { rows, cols } => {
             let mut grid_markup = String::new();
             grid_markup.push_str("\n#grid(\n");
             let col_frs = vec!["1fr"; *cols].join(", ");
@@ -94,7 +79,7 @@ pub fn apply_ribbon_action(
         }
 
         // --- 3. PAGE PARAMETERS (Global Directive Setters) ---
-        RibbonAction::SetPaper(paper) => {
+        EditAction::SetPaper(paper) => {
             let (edit_range, edit_text) =
                 update_or_insert_page_rule_ast(content, "paper", &format!("\"{}\"", paper));
             let new_selection = adjust_selection(edit_range.clone(), edit_text.len(), selection);
@@ -104,7 +89,7 @@ pub fn apply_ribbon_action(
                 new_selection,
             }
         }
-        RibbonAction::SetFlipped(flipped) => {
+        EditAction::SetFlipped(flipped) => {
             let (edit_range, edit_text) =
                 update_or_insert_page_rule_ast(content, "flipped", &flipped.to_string());
             let new_selection = adjust_selection(edit_range.clone(), edit_text.len(), selection);
@@ -114,7 +99,7 @@ pub fn apply_ribbon_action(
                 new_selection,
             }
         }
-        RibbonAction::SetColumns(cols) => {
+        EditAction::SetColumns(cols) => {
             let (edit_range, edit_text) =
                 update_or_insert_page_rule_ast(content, "columns", &cols.to_string());
             let new_selection = adjust_selection(edit_range.clone(), edit_text.len(), selection);
@@ -124,7 +109,7 @@ pub fn apply_ribbon_action(
                 new_selection,
             }
         }
-        RibbonAction::SetMargin(margin) => {
+        EditAction::SetMargin(margin) => {
             let (edit_range, edit_text) =
                 update_or_insert_page_rule_ast(content, "margin", &format!("({})", margin));
             let new_selection = adjust_selection(edit_range.clone(), edit_text.len(), selection);
@@ -143,9 +128,10 @@ fn find_formatting_node<'a>(
     range: Range<usize>,
     kind: SyntaxKind,
 ) -> Option<LinkedNode<'a>> {
+    // Look after the start position to get inside the formatted range
     let leaf = root
-        .leaf_at(range.start, Side::Before)
-        .or_else(|| root.leaf_at(range.start, Side::After))?;
+        .leaf_at(range.start, Side::After)
+        .or_else(|| root.leaf_at(range.start, Side::Before))?;
     let mut current = Some(leaf);
     while let Some(node) = current {
         if node.kind() == kind && node.range().start <= range.start && node.range().end >= range.end
@@ -157,89 +143,55 @@ fn find_formatting_node<'a>(
     None
 }
 
-/// Recursively find all formatting nodes that overlap or touch the target range
-fn find_intersecting_formatting_nodes<'a>(
-    root: &LinkedNode<'a>,
-    range: Range<usize>,
-    kind: SyntaxKind,
-    nodes: &mut Vec<LinkedNode<'a>>,
-) {
-    if root.kind() == kind {
-        let node_range = root.range();
-        if node_range.start <= range.end && node_range.end >= range.start {
-            nodes.push(root.clone());
-            return;
-        }
-    }
-    for child in root.children() {
-        find_intersecting_formatting_nodes(&child, range.clone(), kind, nodes);
-    }
-}
-
-/// Helper to map original selection indexes to the new formatted string layout
-fn map_index(
-    orig_idx: usize,
-    combined_start: usize,
-    marker_ranges: &[Range<usize>],
-    marker_len: usize,
-) -> usize {
-    let mut markers_removed_before = 0;
-    for r in marker_ranges {
-        if r.end <= orig_idx {
-            markers_removed_before += r.len();
-        } else if r.start < orig_idx {
-            markers_removed_before += orig_idx - r.start;
-        }
-    }
-    combined_start + marker_len + (orig_idx - combined_start - markers_removed_before)
-}
-
 /// Toggles bold or italic using synchronous syntax trees.
 fn toggle_wrapper_ast(content: &str, range: Range<usize>, kind_to_toggle: SyntaxKind) -> TextEdit {
     let tree = parse(content);
     let root = LinkedNode::new(&tree);
+
+    // 1. Check if the selection is already wrapped
+    if let Some(node) = find_formatting_node(&root, range.clone(), kind_to_toggle) {
+        let node_range = node.range();
+        let inner_text = &content[node_range.start + 1..node_range.end - 1]; // Offset 1 for * or _
+
+        return TextEdit {
+            range: node_range,
+            new_text: inner_text.to_string(),
+            new_selection: (range.start - 1)..(range.end - 1),
+        };
+    }
+
+    // 2. Wrap logic
     let marker = if kind_to_toggle == SyntaxKind::Strong {
         "*"
     } else {
         "_"
     };
-    let marker_len = marker.len();
-
-    // 1. Check if the selection is already wrapped
-    if let Some(node) = find_formatting_node(&root, range.clone(), kind_to_toggle) {
-        let node_range = node.range();
-
-        // Ensure we don't underflow
-        if node_range.start + marker_len <= node_range.end - marker_len {
-            let inner_range = (node_range.start + marker_len)..(node_range.end - marker_len);
-            let inner_text = &content[inner_range];
-
-            return TextEdit {
-                range: node_range,
-                new_text: inner_text.to_string(),
-                // Use saturating sub or check for valid range to avoid overflow
-                new_selection: (range.start.saturating_sub(marker_len))
-                    ..(range.end.saturating_sub(marker_len)),
-            };
-        }
-    }
-
-    // 2. Wrap logic
     let selected_text = &content[range.clone()];
     let new_text = format!("{}{}{}", marker, selected_text, marker);
 
     TextEdit {
         range: range.clone(),
         new_text,
-        new_selection: (range.start + marker_len)..(range.end + marker_len),
+        new_selection: (range.start + 1)..(range.end + 1),
     }
 }
 
 /// Helper function to find the inner content range of a trailing content block of a FuncCall.
-fn get_content_body_range(func_call: &LinkedNode) -> Option<Range<usize>> {
+fn get_content_body_range(content: &str, func_call: &LinkedNode) -> Option<Range<usize>> {
+    // Search both directly under FuncCall and under its Args child (Typst 0.14 layout)
     let content_node = func_call
         .children()
-        .find(|child| child.kind() == SyntaxKind::ContentBlock)?;
+        .find(|child| child.kind() == SyntaxKind::ContentBlock)
+        .or_else(|| {
+            func_call
+                .children()
+                .find(|child| child.kind() == SyntaxKind::Args)
+                .and_then(|args| {
+                    args.children()
+                        .find(|child| child.kind() == SyntaxKind::ContentBlock)
+                })
+        })?;
+
     let r = content_node.range();
     if r.len() >= 2 {
         Some((r.start + 1)..(r.end - 1))
@@ -248,28 +200,50 @@ fn get_content_body_range(func_call: &LinkedNode) -> Option<Range<usize>> {
     }
 }
 
-/// Recursively finds all `#text` or `text` function call nodes that fully enclose the selection range,
-/// ordered from outermost to innermost.
-fn find_enclosing_text_nodes<'a>(
-    root: &LinkedNode<'a>,
-    range: Range<usize>,
-    nodes: &mut Vec<LinkedNode<'a>>,
-) {
-    if root.kind() == SyntaxKind::FuncCall {
-        if let Some(callee) = root.children().next() {
+/// Recursively find all text FuncCalls in the tree.
+fn collect_text_nodes<'a>(node: &LinkedNode<'a>, nodes: &mut Vec<LinkedNode<'a>>) {
+    if node.kind() == SyntaxKind::FuncCall {
+        if let Some(callee) = node.children().next() {
             let callee_text = callee.text();
             if callee_text == "text" || callee_text == "#text" {
-                if let Some(body_range) = get_content_body_range(root) {
-                    if range.start >= body_range.start && range.end <= body_range.end {
-                        nodes.push(root.clone());
-                    }
-                }
+                nodes.push(node.clone());
             }
         }
     }
-    for child in root.children() {
-        find_enclosing_text_nodes(&child, range.clone(), nodes);
+    for child in node.children() {
+        collect_text_nodes(&child, nodes);
     }
+}
+
+/// Find if there's a valid `#text` node we can merge arguments into instead of nesting.
+fn find_target_text_node_for_merge<'a>(
+    content: &str,
+    root: &'a LinkedNode<'a>,
+    range: Range<usize>,
+) -> Option<(LinkedNode<'a>, Range<usize>)> {
+    let mut candidates = Vec::new();
+    collect_text_nodes(root, &mut candidates);
+
+    // Innermost first
+    for node in candidates.iter().rev() {
+        let node_range = node.range();
+        if let Some(body_range) = get_content_body_range(content, node) {
+            // Case 1: Selection is inside/covers content body
+            if range.start >= body_range.start && range.end <= body_range.end {
+                if range.is_empty()
+                    || (range.start == body_range.start && range.end == body_range.end)
+                {
+                    return Some((node.clone(), body_range));
+                }
+            }
+            // Case 2: Selection matches the entire FuncCall itself
+            if range.start == node_range.start && range.end == node_range.end {
+                return Some((node.clone(), body_range));
+            }
+        }
+    }
+
+    None
 }
 
 /// Safely modifies content while dynamically shifting selection coordinates
@@ -332,6 +306,7 @@ fn remove_arg(inner_args: &str, key: &str) -> (String, bool) {
 }
 
 /// Intelligently sets parameters in a `#text(...)` block using the AST.
+/// Intelligently sets parameters in a `#text(...)` block using the AST.
 fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &str) -> TextEdit {
     // 1. Trim leading/trailing whitespace from the active range to prevent trapping spacing
     let mut trimmed_start = range.start;
@@ -357,106 +332,87 @@ fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &s
     let tree = parse(content);
     let root = LinkedNode::new(&tree);
 
-    // 2. Locate all nesting text ancestors covering this active span
-    let mut enclosing_nodes = Vec::new();
-    find_enclosing_text_nodes(&root, active_range.clone(), &mut enclosing_nodes);
-
-    if let Some(formatting_node) = enclosing_nodes.last().cloned() {
-        let mut should_merge = false;
-        if let Some(body_range) = get_content_body_range(&formatting_node) {
-            // Merge arguments if selection is empty or completely fills the block's text body
-            if active_range.is_empty()
-                || (active_range.start <= body_range.start && active_range.end >= body_range.end)
-            {
-                should_merge = true;
-            }
-        }
-
-        if should_merge {
-            // Find parent inherited value for this key going up the hierarchy
-            let mut parent_value = None;
-            if enclosing_nodes.len() > 1 {
-                let parent_node = &enclosing_nodes[enclosing_nodes.len() - 2];
-                if let Some(parent_args) = parent_node
-                    .children()
-                    .find(|c| c.kind() == SyntaxKind::Args)
-                {
-                    let parent_args_text = parent_args.text();
-                    let parent_inner = if parent_args_text.len() >= 2 {
-                        &parent_args_text[1..parent_args_text.len() - 1]
-                    } else {
-                        ""
-                    };
-                    parent_value = get_arg_value(parent_inner, key);
-                }
-            }
-
-            if let Some(args_node) = formatting_node
+    if let Some((formatting_node, body_range)) =
+        find_target_text_node_for_merge(content, &root, active_range.clone())
+    {
+        if let Some(args_node) = formatting_node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::Args)
+        {
+            // Find LeftParen and RightParen inside Args node to locate the parenthesized arguments list
+            let left_paren = args_node
                 .children()
-                .find(|child| child.kind() == SyntaxKind::Args)
-            {
-                let args_range = args_node.range();
-                let args_text = args_node.text();
-                let inner_args = if args_text.len() >= 2 {
-                    &args_text[1..args_text.len() - 1]
+                .find(|c| c.kind() == SyntaxKind::LeftParen);
+            let right_paren = args_node
+                .children()
+                .find(|c| c.kind() == SyntaxKind::RightParen);
+
+            let (args_range, inner_args) = if let (Some(lp), Some(rp)) = (left_paren, right_paren) {
+                let range = lp.range().start..rp.range().end;
+                let text = &content[range.clone()];
+                (range, &text[1..text.len() - 1])
+            } else {
+                let range = args_node.range();
+                let text = &content[range.clone()];
+                let inner = if text.len() >= 2 {
+                    &text[1..text.len() - 1]
                 } else {
                     ""
                 };
+                (range, inner)
+            };
 
-                // --- SMART UNWRAP / PRUNE REDUNDANT INHERITED ARGUMENTS ---
-                if value.is_empty() || parent_value.as_deref() == Some(value) {
-                    let (updated_inner, is_empty) = remove_arg(inner_args, key);
-                    if is_empty {
-                        // If no other arguments are left, unwrap this #text block completely
-                        if let Some(body_range) = get_content_body_range(&formatting_node) {
-                            let inner_body_text = &content[body_range.clone()];
-                            let new_selection = adjust_selection(
-                                formatting_node.range(),
-                                inner_body_text.len(),
-                                range.clone(),
-                            );
-                            return TextEdit {
-                                range: formatting_node.range(),
-                                new_text: inner_body_text.to_string(),
-                                new_selection,
-                            };
-                        }
-                    } else {
-                        // Just remove the redundant property from args list
-                        let updated_args = format!("({})", updated_inner);
-                        let new_selection =
-                            adjust_selection(args_range.clone(), updated_args.len(), range.clone());
-                        return TextEdit {
-                            range: args_range,
-                            new_text: updated_args,
-                            new_selection,
-                        };
-                    }
-                }
-
-                // Standard property merge
-                let updated_inner = merge_args(inner_args, key, value);
-                let updated_args = format!("({})", updated_inner);
-                let new_selection =
-                    adjust_selection(args_range.clone(), updated_args.len(), range.clone());
-                return TextEdit {
-                    range: args_range,
-                    new_text: updated_args,
-                    new_selection,
-                };
-            } else {
-                // No Args node found, insert it right after the callee (first child of FuncCall)
-                if let Some(callee_node) = formatting_node.children().next() {
-                    let insert_pos = callee_node.range().end;
-                    let inserted_str = format!("({}: {})", key, value);
-                    let new_selection =
-                        adjust_selection(insert_pos..insert_pos, inserted_str.len(), range.clone());
+            // --- SMART UNWRAP / PRUNE REDUNDANT INHERITED ARGUMENTS ---
+            if value.is_empty() {
+                let (updated_inner, is_empty) = remove_arg(inner_args, key);
+                if is_empty {
+                    // If no other arguments are left, unwrap this #text block completely
+                    let inner_body_text = &content[body_range.clone()];
+                    let new_selection = adjust_selection(
+                        formatting_node.range(),
+                        inner_body_text.len(),
+                        range.clone(),
+                    );
                     return TextEdit {
-                        range: insert_pos..insert_pos,
-                        new_text: inserted_str,
+                        range: formatting_node.range(),
+                        new_text: inner_body_text.to_string(),
+                        new_selection,
+                    };
+                } else {
+                    // Just remove the redundant property from args list
+                    let updated_args = format!("({})", updated_inner);
+                    let new_selection =
+                        adjust_selection(args_range.clone(), updated_args.len(), range.clone());
+                    return TextEdit {
+                        range: args_range,
+                        new_text: updated_args,
                         new_selection,
                     };
                 }
+            }
+
+            // Standard property merge
+            let updated_inner = merge_args(inner_args, key, value);
+            let updated_args = format!("({})", updated_inner);
+            let new_selection =
+                adjust_selection(args_range.clone(), updated_args.len(), range.clone());
+            return TextEdit {
+                range: args_range,
+                new_text: updated_args,
+                new_selection,
+            };
+        } else {
+            // No Args node found, insert it right after the callee (first child of FuncCall)
+            if let Some(callee_node) = formatting_node.children().next() {
+                let insert_pos = callee_node.range().end;
+                let inserted_str = format!("({}: {})", key, value);
+                let new_selection =
+                    adjust_selection(insert_pos..insert_pos, inserted_str.len(), range.clone());
+                return TextEdit {
+                    range: insert_pos..insert_pos,
+                    new_text: inserted_str,
+                    new_selection,
+                };
             }
         }
     }
@@ -475,44 +431,27 @@ fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &s
 
 /// Helper function to merge arguments in a function block
 fn merge_args(args_block: &str, key: &str, value: &str) -> String {
-    let mut updated = String::new();
+    let mut params: Vec<String> = args_block
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
     let mut key_replaced = false;
-
-    for param in args_block.split(',') {
-        let trimmed = param.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        if let Some((p_key, _)) = trimmed.split_once(':') {
+    for param in &mut params {
+        if let Some((p_key, _)) = param.split_once(':') {
             if p_key.trim() == key {
-                if !updated.is_empty() {
-                    updated.push_str(", ");
-                }
-                updated.push_str(&format!("{}: {}", key, value));
+                *param = format!("{}: {}", key, value);
                 key_replaced = true;
-            } else {
-                if !updated.is_empty() {
-                    updated.push_str(", ");
-                }
-                updated.push_str(trimmed);
             }
-        } else {
-            if !updated.is_empty() {
-                updated.push_str(", ");
-            }
-            updated.push_str(trimmed);
         }
     }
 
     if !key_replaced {
-        if !updated.is_empty() {
-            updated.push_str(", ");
-        }
-        updated.push_str(&format!("{}: {}", key, value));
+        params.push(format!("{}: {}", key, value));
     }
 
-    updated
+    params.join(", ")
 }
 
 /// Helper function to find standard `#set page(...)` rules in the syntax tree
@@ -548,7 +487,7 @@ fn update_or_insert_page_rule_ast(content: &str, key: &str, value: &str) -> (Ran
             .find(|child| child.kind() == SyntaxKind::Args)
         {
             let args_range = args_node.range();
-            let args_text = args_node.text();
+            let args_text = &content[args_range.clone()];
             let inner_args = if args_text.len() >= 2 {
                 &args_text[1..args_text.len() - 1]
             } else {
@@ -568,4 +507,66 @@ fn update_or_insert_page_rule_ast(content: &str, key: &str, value: &str) -> (Ran
 
     // No existing #set page directive found: Prepend to the top of the document
     (0..0, format!("#set page({}: {})\n", key, value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_toggle_formatting() {
+        let content = "Hello world";
+
+        // 1. Bold the word "world"
+        let edit = apply_edit_action(content, 6..11, &EditAction::ToggleBold);
+        assert_eq!(edit.new_text, "*world*");
+        assert_eq!(edit.range, 6..11);
+
+        let new_content = format!(
+            "{}{}{}",
+            &content[..edit.range.start],
+            edit.new_text,
+            &content[edit.range.end..]
+        );
+        assert_eq!(new_content, "Hello *world*");
+
+        // 2. Unbold it back
+        let edit_unwrap = apply_edit_action(&new_content, 7..12, &EditAction::ToggleBold);
+        assert_eq!(edit_unwrap.new_text, "world");
+        assert_eq!(edit_unwrap.range, 6..13);
+    }
+
+    #[test]
+    fn test_smart_nesting_prevention() {
+        let content = "Hello #text(font: \"Inter\")[world]";
+
+        // Target is "world" which is inside #text(...)
+        // Let's modify size of "world" (selection inside the body)
+        let edit = apply_edit_action(content, 27..32, &EditAction::SetFontSize(14.0));
+
+        // It must merge the size parameter rather than wrapping it in `#text(size: 14pt)[...]`
+        assert_eq!(edit.new_text, "(font: \"Inter\", size: 14pt)");
+        // The edit range must target only the Args node of the parent '#text(...)`
+        assert_eq!(edit.range, 11..26);
+    }
+
+    #[test]
+    fn test_page_set_rules() {
+        let content = "Hello reader";
+
+        // 1. Insert paper attribute on a completely empty set-rule space
+        let edit = apply_edit_action(content, 0..0, &EditAction::SetPaper("A4".to_string()));
+        assert_eq!(edit.new_text, "#set page(paper: \"A4\")\n");
+        assert_eq!(edit.range, 0..0);
+
+        // 2. Update existing set rule
+        let content_with_page = "#set page(paper: \"A4\")\nHello reader";
+        let edit_update = apply_edit_action(
+            content_with_page,
+            24..30, // reader
+            &EditAction::SetFlipped(true),
+        );
+        assert_eq!(edit_update.new_text, "(paper: \"A4\", flipped: true)");
+        assert_eq!(edit_update.range, 9..22);
+    }
 }

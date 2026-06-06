@@ -22,16 +22,13 @@ gpui-component.workspace = true
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
 
 typst-gpui = { path = "../typst-gpui" }
+typforge-core = { path = "../typforge-core" }
 
-tower-lsp.workspace = true
-lsp-types.workspace = true
-tokio.workspace = true
 parking_lot.workspace = true
 ropey = "2.0.0-beta.1"
 serde_json = "1.0.149"
-serde = { version = "1.0", features = ["derive"] }
+serde.workspace = true
 
-typstography = { path = "../typstography" }
 
 anyhow = "1.0" # Added for consistent error handling in main
 

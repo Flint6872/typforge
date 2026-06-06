@@ -6,7 +6,9 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::{ActiveTheme, button::Button, h_flex};
 
-impl<W: typst_gpui::TypstGpuiWorld> Render for TypstNoteView<W> {
+impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
+    for TypstNoteView<W>
+{
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         //let is_maximized = window.is_fullscreen();
 

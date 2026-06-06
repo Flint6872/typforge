@@ -1,13 +1,16 @@
+// crates/typforge/src/editor/editor_panel/render.rs
+
 use crate::editor::{CodeEditor, DraggedTab, EditorPanel, FileContentUpdated, TabDrag};
 use gpui::*;
 use gpui_component::{ActiveTheme, StyledExt, h_flex, scroll::ScrollableElement};
 
 use std::time::Duration;
-use tokio::time::Instant;
-// Use types from typstography (0.94) for the backend communication
-use typstography::HoverContents;
+use std::time::Instant;
+use typforge_core::intel::Tooltip;
 
-impl Render for EditorPanel {
+impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Render
+    for EditorPanel<W>
+{
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active_file_path = self.active_file_path.clone();
 
@@ -17,8 +20,7 @@ impl Render for EditorPanel {
         // 1. Create the base Editor UI
         let editor_element = if let Some(ref active_path) = active_file_path {
             if let Some(file) = self.open_files.iter().find(|f| f.path == *active_path) {
-                let uri = file.uri();
-                //let editor_panel_handle = cx.entity().clone();
+                let active_path = active_path.clone();
 
                 CodeEditor::new(file.editor_state.clone(), file.language.clone(), Vec::new())
                     .font_size(font_size)
@@ -34,25 +36,20 @@ impl Render for EditorPanel {
                                 let Some(active_file) = this_entity
                                     .open_files
                                     .iter()
-                                    .find(|f| f.path == uri.to_file_path().unwrap())
+                                    .find(|f| f.path == active_path)
                                 else {
                                     return;
                                 };
 
                                 let code_editor_entity = active_file.code_editor_entity.clone();
-                                let Some(lsp_position) = code_editor_entity
+                                let Some(byte_offset) = code_editor_entity
                                     .read(cx)
-                                    .screen_to_lsp_position(event.position, cx)
+                                    .screen_to_byte_offset(event.position, cx)
                                 else {
                                     return;
                                 };
 
-                                this_entity.request_hover(
-                                    uri.clone(),
-                                    lsp_position,
-                                    event.position,
-                                    cx,
-                                );
+                                this_entity.request_hover(byte_offset, event.position, cx);
                             }
                         },
                     ))
@@ -76,16 +73,15 @@ impl Render for EditorPanel {
         // 2. Prepare the Hover Popup if it exists
         let hover_popup = self.current_hover_content.as_ref().map(|hover| {
             let pos = self.current_hover_position.unwrap_or_default();
-            let text = match &hover.contents {
-                HoverContents::Markup(m) => m.value.clone(),
-                _ => "Hover info".to_string(),
+            let text = match hover {
+                Tooltip::Text(text) => text.to_string(),
+                Tooltip::Code(code) => format!("```typst\n{}\n```", code),
             };
 
             div()
                 .absolute()
                 .top(pos.y + px(20.))
                 .left(pos.x)
-                //  .z_index(100)
                 .bg(rgb(0x333333))
                 .border_1()
                 .border_color(rgb(0x555555))
@@ -98,7 +94,6 @@ impl Render for EditorPanel {
         // 3. Stack the editor and the popup
         div()
             .size_full()
-            //.bg(cx.theme().background)
             .track_focus(&self.focus_handle)
             .on_scroll_wheel(
                 cx.listener(|this, event: &gpui::ScrollWheelEvent, _win, cx| {
@@ -115,11 +110,8 @@ impl Render for EditorPanel {
             .flex_col()
             .child(
                 // Scrollable Tab Bar Container
-                div()
-                    .w_full()
-                    //.overflow_scrollbar()
-                    .bg(cx.theme().foreground)
-                    .child(h_flex().flex_nowrap().items_baseline().children(
+                div().w_full().bg(cx.theme().foreground).child(
+                    h_flex().flex_nowrap().items_baseline().children(
                         if self.open_files.is_empty() {
                             vec![
                                 div()
@@ -137,7 +129,7 @@ impl Render for EditorPanel {
                                     let path = f.path.clone();
 
                                     div()
-                                        .flex_shrink_0() // Prevents tabs from squishing
+                                        .flex_shrink_0()
                                         .bg(cx.theme().tab_bar)
                                         .text_color(if is_active {
                                             cx.theme().tab_foreground
@@ -220,7 +212,8 @@ impl Render for EditorPanel {
                                 })
                                 .collect::<Vec<_>>()
                         },
-                    )),
+                    ),
+                ),
             )
             .child(
                 div()

@@ -12,7 +12,6 @@ use typst::{
 use typst_kit::fonts::{FontSlot, Fonts};
 
 use typst_gpui::TypstGpuiWorld;
-use typstography::TypstLspWorld;
 
 // A custom Typst world that provides fonts and files.
 #[derive(Clone, Debug)]
@@ -191,11 +190,9 @@ impl TypstGpuiWorld for GpuiWorld {
     }
 }
 
-impl TypstLspWorld for GpuiWorld {
-    fn update_main_source(&mut self, new_content: &str) {
-        // You already have a `set_source` method on GpuWorld.
-        // Decide if `update_main_source` is a synonym or has slightly different behavior.
-        // Assuming it's the same, you can call your existing method.
-        self.set_source(new_content.to_string());
+// Implement IdeWorld for compiler-guided autocomplete and tooltip hover support
+impl typforge_core::IdeWorld for GpuiWorld {
+    fn upcast(&self) -> &dyn World {
+        self
     }
 }

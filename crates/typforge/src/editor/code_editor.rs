@@ -1,8 +1,6 @@
 use gpui::{Point, Styled, *};
 use gpui_component::{ActiveTheme, h_flex, input::*, v_flex};
-use typstography::{Position as LspPosition, gpui_bridge::map_diagnostics};
 
-//#[derive(Clone)]
 pub struct CodeEditor {
     id: ElementId,
     editor: Entity<InputState>,
@@ -11,7 +9,7 @@ pub struct CodeEditor {
     font_size: Option<Pixels>,
     line_height: Option<Pixels>,
 
-    // Listeners passed from the parent to handle LSP logic (Hover, etc.)
+    // Listeners passed from the parent to handle IDE logic (Hover, etc.)
     on_mouse_move: Option<Box<dyn Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static>>,
     on_mouse_down: Option<Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>>,
 }
@@ -25,7 +23,6 @@ impl Clone for CodeEditor {
             height: self.height.clone(),
             font_size: self.font_size.clone(),
             line_height: self.font_size.clone(),
-            // Closures cannot be cloned, so they are reset to None in a clone
             on_mouse_move: None,
             on_mouse_down: None,
         }
@@ -36,7 +33,7 @@ impl CodeEditor {
     pub fn new(
         editor_state: Entity<InputState>,
         language: String,
-        _initial_diagnostics: Vec<typstography::Diagnostic>,
+        _initial_diagnostics: Vec<typst::diag::SourceDiagnostic>,
     ) -> Self {
         Self {
             id: ElementId::from("code-editor"),
@@ -55,18 +52,16 @@ impl CodeEditor {
         self
     }
 
-    /// Sets the line height of this element and its children.
     pub fn line_height(mut self, line_height: impl Into<Pixels>) -> Self {
         self.line_height = Some(line_height.into());
         self
     }
 
     pub fn h_full(mut self) -> Self {
-        self.height = Some(relative(1.)); // Use relative(1.) for full height
+        self.height = Some(relative(1.));
         self
     }
 
-    /// Attach a listener for mouse move events (used for Hover).
     pub fn on_mouse_move(
         mut self,
         listener: impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static,
@@ -75,7 +70,6 @@ impl CodeEditor {
         self
     }
 
-    /// Attach a listener for mouse down events (used to clear UI).
     pub fn on_mouse_down(
         mut self,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
@@ -93,34 +87,20 @@ impl CodeEditor {
 
     pub fn set_diagnostics(
         &mut self,
-        lsp_diagnostics: Vec<typstography::Diagnostic>,
-        cx: &mut Context<Self>,
+        _diagnostics: Vec<typst::diag::SourceDiagnostic>,
+        _cx: &mut Context<Self>,
     ) {
-        self.editor.update(cx, |input_state, input_cx| {
-            if let Some(diagnostic_set) = input_state.diagnostics_mut() {
-                diagnostic_set.clear();
-                // Use the bridge to convert 0.94 diagnostics to GPUI-compatible ones
-                let gpui_diagnostics = map_diagnostics(lsp_diagnostics);
-                diagnostic_set.extend(gpui_diagnostics);
-            }
-            input_cx.notify();
-        });
+        // Future: Render native compilation errors/underlines on the code editor input_state
     }
 
-    /// Converts a screen position (Pixels) to an LSP-compatible text position (line, character).
-    /// This implementation uses only the public API of InputState to perform the conversion.
-    pub fn screen_to_lsp_position(
-        &self,
-        screen_position: Point<Pixels>,
-        cx: &App,
-    ) -> Option<LspPosition> {
+    /// Converts a screen position (Pixels) to a document character/byte offset (usize).
+    pub fn screen_to_byte_offset(&self, screen_position: Point<Pixels>, cx: &App) -> Option<usize> {
         let input_state = self.editor.read(cx);
         let text = input_state.text();
 
         let visible_range = input_state.visible_row_range()?;
 
         for row in visible_range {
-            // Cast `row` to `u32` for gpui_component::input::Position constructor
             let row_start = text.position_to_offset(&gpui_component::input::Position {
                 line: row as u32,
                 character: 0,
@@ -159,11 +139,7 @@ impl CodeEditor {
                         }
                     }
 
-                    let pos = text.offset_to_position(best_offset);
-                    return Some(LspPosition {
-                        line: pos.line as u32,
-                        character: pos.character as u32,
-                    });
+                    return Some(best_offset);
                 }
             }
         }
@@ -215,7 +191,6 @@ impl IntoElement for CodeEditor {
     fn into_element(self) -> Self::Element {
         let mut input = Input::new(&self.editor).bordered(true).h_full();
 
-        // Apply font size to the Input component if provided
         if let Some(size) = self.font_size {
             input = input.text_size(size);
         }

@@ -5459,6 +5459,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
 
 [[package]]
+name = "prettyless"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "749d63085aa461d80b3233e48781bf9e9dca8147fbc98f577e0697c6827dc418"
+dependencies = [
+ "typed-arena",
+ "unicode-width",
+]
+
+[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8019,17 +8029,25 @@ dependencies = [
  "gpui_macros",
  "gpui_platform",
  "gpui_util 0.2.2",
- "lsp-types 0.97.0",
  "parking_lot",
  "ropey",
  "serde",
  "serde_json",
- "tokio",
- "tower-lsp",
+ "typforge-core",
  "typst",
  "typst-gpui",
  "typst-kit",
- "typstography",
+]
+
+[[package]]
+name = "typforge-core"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "typst",
+ "typst-ide",
+ "typst-syntax",
+ "typstyle-core",
 ]
 
 [[package]]
@@ -8120,6 +8138,22 @@ dependencies = [
  "typst-syntax",
  "typst-timing",
  "typst-utils",
+]
+
+[[package]]
+name = "typst-ide"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9411a123dff40c264101af99e043ef292b4b8bc638aa05b328359b859dabaf2a"
+dependencies = [
+ "comemo",
+ "ecow",
+ "pathdiff",
+ "rustc-hash 2.1.1",
+ "serde",
+ "typst",
+ "typst-eval",
+ "unscanny",
 ]
 
 [[package]]
@@ -8386,6 +8420,22 @@ dependencies = [
  "tokio",
  "tower-lsp",
  "typst",
+]
+
+[[package]]
+name = "typstyle-core"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c989b67950153600ea08e19d82c7f4d13a4754793e05f46e080a0049421c2e78"
+dependencies = [
+ "ecow",
+ "itertools 0.14.0",
+ "prettyless",
+ "rustc-hash 2.1.1",
+ "smallvec",
+ "thiserror 2.0.18",
+ "typst-syntax",
+ "unicode-width",
 ]
 
 [[package]]
