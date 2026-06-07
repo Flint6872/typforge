@@ -165,36 +165,58 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         cx.subscribe(
             &preview_panel,
             move |this_note_view, _emitter, event, cx_for_note_view| {
-                if let PreviewPanelEvent::SourceChanged(new_content) = event {
-                    let content = new_content.clone();
-                    let editor_panel_handle = this_note_view.editor_panel.clone();
-                    let window_handle = this_note_view.window_handle.clone();
+                match event {
+                    PreviewPanelEvent::SourceChanged(new_content) => {
+                        let content = new_content.clone();
+                        let editor_panel_handle = this_note_view.editor_panel.clone();
+                        let window_handle = this_note_view.window_handle.clone();
 
-                    // FIX: Update the window FIRST.
-                    // This provides a fresh context (app_cx) and access to &mut Window.
-                    let _ = window_handle
-                        .update(cx_for_note_view, |_, window, app_cx| {
-                            // Use app_cx (provided by the window update) to update the editor
-                            editor_panel_handle.update(app_cx, |editor, editor_cx| {
-                                if let Some(active_path) = &editor.active_file_path {
-                                    if let Some(file) = editor
-                                        .open_files
-                                        .iter_mut()
-                                        .find(|f| &f.path == active_path)
+                        let _ = window_handle
+                            .update(cx_for_note_view, |_, window, app_cx| {
+                                editor_panel_handle.update(app_cx, |editor, editor_cx| {
+                                    if let Some(active_path) = &editor.active_file_path {
+                                        if let Some(file) = editor
+                                            .open_files
+                                            .iter_mut()
+                                            .find(|f| &f.path == active_path)
+                                        {
+                                            file.editor_state.update(
+                                                editor_cx,
+                                                |state, input_cx| {
+                                                    state.set_value(content, window, input_cx);
+                                                },
+                                            );
+                                            file.has_unsaved_changes = true;
+                                        }
+                                    }
+                                });
+                            })
+                            .log_err();
+                    }
+                    PreviewPanelEvent::DiagnosticsChanged(diags) => {
+                        // Update diagnostics in the EditorPanel
+                        this_note_view
+                            .editor_panel
+                            .update(cx_for_note_view, |panel, cx| {
+                                if let Some(active_path) = &panel.active_file_path {
+                                    if let Some(file) =
+                                        panel.open_files.iter_mut().find(|f| f.path == *active_path)
                                     {
-                                        // Use editor_cx to update the editor's InputState
-                                        file.editor_state.update(editor_cx, |state, input_cx| {
-                                            state.set_value(content, window, input_cx);
-                                        });
-                                        file.has_unsaved_changes = true;
+                                        file.diagnostics = diags.clone();
 
-                                        // NOTE: Do NOT emit(FileContentUpdated) here!
-                                        // It would trigger an infinite loop back to the Preview.
+                                        // Extract the active Source from our shared world
+                                        let world = panel.shared_world.lock();
+                                        let main_id = world.main();
+                                        if let Ok(source) = world.source(main_id) {
+                                            file.code_editor_entity.update(cx, |editor, cx| {
+                                                editor.set_diagnostics(diags.clone(), &source, cx);
+                                            });
+                                        }
                                     }
                                 }
+                                cx.notify();
                             });
-                        })
-                        .log_err();
+                    }
                 }
             },
         )

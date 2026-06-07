@@ -1,5 +1,11 @@
 use gpui::{Point, Styled, *};
-use gpui_component::{ActiveTheme, h_flex, input::*, v_flex};
+use gpui_component::{
+    h_flex,
+    highlighter::{Diagnostic, DiagnosticSeverity},
+    input::*,
+    v_flex,
+};
+use typst::diag::{Severity, SourceDiagnostic};
 
 pub struct CodeEditor {
     id: ElementId,
@@ -87,10 +93,38 @@ impl CodeEditor {
 
     pub fn set_diagnostics(
         &mut self,
-        _diagnostics: Vec<typst::diag::SourceDiagnostic>,
-        _cx: &mut Context<Self>,
+        diagnostics: Vec<SourceDiagnostic>,
+        source: &typst::syntax::Source,
+        cx: &mut Context<Self>,
     ) {
-        // Future: Render native compilation errors/underlines on the code editor input_state
+        self.editor.update(cx, |input_state, input_cx| {
+            let text = input_state.text().clone();
+
+            if let Some(diagnostic_set) = input_state.diagnostics_mut() {
+                diagnostic_set.clear();
+
+                for diag in diagnostics {
+                    let range = source.range(diag.span).unwrap_or(0..0);
+
+                    // Convert byte range to Position range for GPUI
+                    let start_pos = text.offset_to_position(range.start);
+                    let end_pos = text.offset_to_position(range.end);
+                    let position_range = start_pos..end_pos;
+
+                    // Use the constructor provided by gpui_component
+                    let severity = match diag.severity {
+                        Severity::Error => DiagnosticSeverity::Error,
+                        Severity::Warning => DiagnosticSeverity::Warning,
+                    };
+
+                    let diagnostic = Diagnostic::new(position_range, diag.message.to_string())
+                        .with_severity(severity);
+
+                    diagnostic_set.push(diagnostic);
+                }
+            }
+            input_cx.notify();
+        });
     }
 
     /// Converts a screen position (Pixels) to a document character/byte offset (usize).

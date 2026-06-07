@@ -21,6 +21,7 @@ pub enum PreviewPanelEvent {
     // For Phase 1, we'll only handle appending a single character.
     // This will evolve in later phases for more complex edits (deletion, insertion at cursor, etc.).
     SourceChanged(String),
+    DiagnosticsChanged(Vec<typst::diag::SourceDiagnostic>),
 }
 
 /// The PreviewPanel is a GPUI View that renders a Typst document.
@@ -235,17 +236,22 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
 
         match typst::compile(&*world_guard).output {
             Ok(document) => {
-                let doc: Arc<PagedDocument> = Arc::new(document);
+                let doc = Arc::new(document);
 
-                drop(world_guard); // Release lock before sync_fonts_to_gpui if it needs its own lock
+                drop(world_guard);
+                // --- CRITICAL: Keep this! ---
                 self.sync_fonts_to_gpui(&doc, cx);
+
                 self.document = Some(doc);
                 self.diagnostics.clear();
+                // Emit success so the tab clears the red error indicator
+                cx.emit(PreviewPanelEvent::DiagnosticsChanged(Vec::new()));
             }
             Err(errors) => {
-                self.diagnostics = errors.into_iter().collect();
-                // We keep the old document visible if compilation fails,
-                // or you could clear it: self.document = None;
+                let diags: Vec<_> = errors.into_iter().collect();
+                self.diagnostics = diags.clone();
+                // Emit the errors
+                cx.emit(PreviewPanelEvent::DiagnosticsChanged(diags));
             }
         }
         cx.notify();
