@@ -3,7 +3,7 @@
 use typst::layout::PagedDocument;
 use typst::syntax::Side;
 use typst::syntax::Source;
-pub use typst_ide::{Completion, IdeWorld, Tooltip, autocomplete, tooltip};
+pub use typst_ide::{Completion, CompletionKind, IdeWorld, Tooltip, autocomplete, tooltip};
 
 /// Retrieves a list of completions at the specified cursor position.
 pub fn get_completions(

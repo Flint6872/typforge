@@ -92,135 +92,6 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                 .child(text)
         });
 
-        // 3. Prepare the completions autocomplete popup menu if active
-        let completions_popup = if !self.completions.is_empty() {
-            if let (Some(active_path), Some(start_idx)) =
-                (&active_file_path, self.completions_trigger_index)
-            {
-                if let Some(file) = self.open_files.iter().find(|f| f.path == *active_path) {
-                    let editor_state = file.editor_state.read(cx);
-                    let cursor = editor_state.cursor();
-
-                    let origin_bounds = editor_state.range_to_bounds(&(0..0));
-                    let char_range = start_idx..(start_idx + 1); // Position of '#'
-                    let char_bounds = editor_state.range_to_bounds(&char_range);
-
-                    if let (Some(ob), Some(cb)) = (origin_bounds, char_bounds) {
-                        let local_x = cb.left() - ob.left() + px(120.0);
-                        let local_y = cb.bottom() - ob.top() + px(50.0);
-
-                        let file_state = file.editor_state.clone();
-                        let content = editor_state.text().to_string();
-
-                        // Fetch the prefix currently typed after the '#'
-                        let typed_prefix = if cursor > start_idx + 1 {
-                            content[(start_idx + 1)..cursor].to_lowercase()
-                        } else {
-                            String::new()
-                        };
-
-                        // Filter completions based on prefix
-                        let filtered_completions: Vec<_> = self
-                            .completions
-                            .iter()
-                            .filter(|c| {
-                                if typed_prefix.is_empty() {
-                                    true
-                                } else {
-                                    c.label
-                                        .to_string()
-                                        .to_lowercase()
-                                        .starts_with(&typed_prefix)
-                                }
-                            })
-                            .collect();
-
-                        let items: Vec<_> = filtered_completions
-                            .iter()
-                            .enumerate()
-                            .map(|(idx, c)| {
-                                let label = c.label.to_string();
-                                let apply_text = c
-                                    .apply
-                                    .as_ref()
-                                    .map(|s| s.to_string())
-                                    .unwrap_or_else(|| label.clone());
-
-                                div()
-                                    .id(("completion-item", idx))
-                                    .px_2()
-                                    .py_1()
-                                    .text_color(rgb(0xABB2BF))
-                                    .hover(|s| s.bg(rgb(0x3E4452)))
-                                    .cursor_pointer()
-                                    .on_click(cx.listener({
-                                        let apply_text = apply_text.clone();
-                                        let file_state = file_state.clone();
-                                        move |this, _, window, cx| {
-                                            this.completions.clear();
-                                            this.completions_trigger_index = None;
-
-                                            file_state.update(cx, |state, input_cx| {
-                                                let cursor = state.cursor();
-                                                let replace_range = (start_idx + 1)..cursor;
-                                                state.replace_range_with_history(
-                                                    replace_range,
-                                                    &apply_text,
-                                                    window,
-                                                    input_cx,
-                                                );
-                                                state.focus(window, input_cx);
-                                            });
-
-                                            cx.notify();
-                                        }
-                                    }))
-                                    .child(label)
-                            })
-                            .collect();
-
-                        if !items.is_empty() {
-                            Some(
-                                div()
-                                    .absolute()
-                                    .top(local_y)
-                                    .left(local_x)
-                                    .bg(rgb(0x282C34))
-                                    .border_1()
-                                    .border_color(rgb(0x3E4452))
-                                    .p_1()
-                                    .rounded_md()
-                                    .shadow_lg()
-                                    .w(px(220.0))
-                                    .max_h(px(250.0)) // Explicit outer height to satisfy GPUI layout
-                                    .flex()
-                                    .flex_col()
-                                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                                        this.completions.clear();
-                                        this.completions_trigger_index = None;
-                                        cx.notify();
-                                    }))
-                                    .child(
-                                        // Scrollable inner container that handles overflow gracefully
-                                        div().flex_grow().overflow_y_scrollbar().children(items),
-                                    ),
-                            )
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
         // 3. Stack the editor and the popup
         div()
             .size_full()
@@ -351,8 +222,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                     .size_full()
                     .flex_col()
                     .child(editor_element)
-                    .children(hover_popup)
-                    .children(completions_popup),
+                    .children(hover_popup),
             )
     }
 }

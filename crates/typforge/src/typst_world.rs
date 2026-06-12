@@ -27,8 +27,7 @@ pub struct GpuiWorld {
     source_text: String,
     /// A virtual file ID for the source text.
     main_file_id: FileId,
-    // You might also need a way to store additional source files if your Typst documents
-    // were to import other .typ files. For the MVP, we assume a single main string.
+    compiled_document: Option<std::sync::Arc<typst::layout::PagedDocument>>,
 }
 
 impl GpuiWorld {
@@ -62,6 +61,7 @@ impl GpuiWorld {
             current_document_physical_path: None,
             source_text: String::new(),
             main_file_id: FileId::new(None, VirtualPath::new("/__main__.typ")),
+            compiled_document: None,
         }
     }
 
@@ -96,6 +96,14 @@ impl GpuiWorld {
             self.current_document_physical_path = None;
             self.main_file_id = FileId::new(None, VirtualPath::new("/__main__.typ"));
         }
+    }
+
+    fn document(&self) -> Option<std::sync::Arc<typst::layout::PagedDocument>> {
+        self.compiled_document.clone()
+    }
+
+    fn set_document(&mut self, doc: std::sync::Arc<typst::layout::PagedDocument>) {
+        self.compiled_document = Some(doc);
     }
 
     /// Helper to resolve a Typst FileId to a physical path on disk.

@@ -8029,6 +8029,7 @@ dependencies = [
  "gpui_macros",
  "gpui_platform",
  "gpui_util 0.2.2",
+ "lsp-types 0.97.0",
  "parking_lot",
  "ropey",
  "serde",

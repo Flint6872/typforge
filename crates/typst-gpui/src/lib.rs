@@ -14,6 +14,11 @@ use crate::typst_element::{HitMap, TypstElement, TypstRenderState};
 pub trait TypstGpuiWorld: typst::World + Send + Sync + 'static {
     fn set_source(&mut self, source: String);
     fn set_main_document_info(&mut self, path: Option<std::path::PathBuf>, content: String);
+
+    fn document(&self) -> Option<std::sync::Arc<typst::layout::PagedDocument>> {
+        None
+    }
+    fn set_document(&mut self, _doc: std::sync::Arc<typst::layout::PagedDocument>) {}
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -232,11 +237,14 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
 
     /// Internal compilation logic.
     fn compile(&mut self, cx: &mut Context<Self>) {
-        let world_guard = self.world.lock();
+        let mut world_guard = self.world.lock(); // <--- Make this mut so we can call set_document
 
         match typst::compile(&*world_guard).output {
             Ok(document) => {
-                let doc = Arc::new(document);
+                let doc: Arc<typst::layout::PagedDocument> = Arc::new(document);
+
+                // --- SYNC COMPILED DOCUMENT TO SHARED WORLD ---
+                world_guard.set_document(doc.clone());
 
                 drop(world_guard);
                 // --- CRITICAL: Keep this! ---

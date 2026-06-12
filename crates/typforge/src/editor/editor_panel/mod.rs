@@ -1,11 +1,16 @@
+mod completions;
 mod handlers;
 mod render;
 
 use crate::editor::{CodeEditor, FileContentUpdated, OpenedFile};
 use crate::typst_world::GpuiWorld;
 use gpui::*;
-use gpui_component::{dock::Panel as DockPanel, input::InputState};
+use gpui_component::{
+    dock::Panel as DockPanel,
+    input::{CompletionProvider, InputState},
+};
 use parking_lot::{Mutex, RawMutex};
+use std::rc::Rc;
 use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
 use typst_gpui::TypstGpuiWorld;
@@ -27,8 +32,6 @@ pub struct EditorPanel<W: typst::World + typforge_core::IdeWorld + 'static> {
     pub current_hover_content: Option<Tooltip>,
     pub current_hover_position: Option<Point<Pixels>>,
     pub last_hover_request_time: Option<Instant>,
-    pub completions: Vec<Completion>,
-    pub completions_trigger_index: Option<usize>,
 }
 
 impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Clone
@@ -44,8 +47,6 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
             current_hover_content: self.current_hover_content.clone(),
             current_hover_position: self.current_hover_position.clone(),
             last_hover_request_time: self.last_hover_request_time,
-            completions: Vec::new(),
-            completions_trigger_index: None,
         }
     }
 }
@@ -63,8 +64,6 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
             current_hover_content: None,
             current_hover_position: None,
             last_hover_request_time: None,
-            completions: Vec::new(),
-            completions_trigger_index: None,
         }
     }
 
@@ -86,8 +85,14 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
             let main_id = world_lock.main();
 
             if let Ok(source) = world_lock.source(main_id) {
-                // Return the tooltip, dropping the lock immediately after this block
-                get_hover_info(&*world_lock, None, &source, byte_offset)
+                // --- GET AND PASS THE LIVE DOCUMENT ---
+                let document = world_lock.document();
+                get_hover_info(
+                    &*world_lock,
+                    document.as_deref(), // Deref Arc<PagedDocument> to &PagedDocument
+                    &source,
+                    byte_offset,
+                )
             } else {
                 None
             }
@@ -122,52 +127,13 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                     if let Some(file) = this_view.open_files.iter_mut().find(|f| f.path == path) {
                         let content = editor_entity.read(cx).text().to_string();
 
-                        // 1. Sync in-memory world
+                        // 1. Sync in-memory world (CRITICAL)
                         {
                             let mut world = this_view.shared_world.lock();
                             world.set_source(content.clone());
                         }
 
-                        let cursor = editor_entity.read(cx).cursor();
-
-                        // 2. State Machine: Initialize session on typing '#'
-                        if cursor > 0 && content.chars().nth(cursor - 1) == Some('#') {
-                            this_view.completions_trigger_index = Some(cursor - 1);
-                        }
-
-                        // 3. State Machine: Keep-Alive & Filter if session is active
-                        if let Some(start_idx) = this_view.completions_trigger_index {
-                            // Close session if the cursor moves before the '#' or if we type space/delimiters
-                            let mut should_close_session = cursor <= start_idx;
-                            if !should_close_session && cursor > start_idx {
-                                if let Some(last_char) = content.chars().nth(cursor - 1) {
-                                    if last_char.is_whitespace()
-                                        || last_char == ']'
-                                        || last_char == ')'
-                                        || last_char == '}'
-                                    {
-                                        should_close_session = true;
-                                    }
-                                }
-                            }
-
-                            if should_close_session {
-                                this_view.completions.clear();
-                                this_view.completions_trigger_index = None;
-                            } else {
-                                // Session is active! Fetch filtered completions continuously
-                                let world = this_view.shared_world.lock();
-                                let source_result = world.source(world.main());
-
-                                if let Ok(source) = source_result {
-                                    let completions =
-                                        get_completions(&*world, None, &source, cursor, false);
-                                    this_view.completions = completions;
-                                }
-                            }
-                        }
-
-                        // 4. Emit update event so preview compiles (CRITICAL)
+                        // 2. Emit update event so preview compiles (CRITICAL)
                         cx.emit(FileContentUpdated {
                             path: Some(path.clone()),
                             content,
@@ -189,6 +155,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
         cx.notify();
     }
 
+    // crates/typforge/src/editor/editor_panel/mod.rs
     pub fn open_file(
         &mut self,
         mut path: PathBuf,
@@ -225,12 +192,20 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
 
         match OpenedFile::new(path.clone(), window, cx) {
             Ok(mut new_file) => {
+                // Register the completion provider for the newly opened file
+                let provider =
+                    completions::TypstCompletionProvider::<W>::new(self.shared_world.clone());
+                new_file.editor_state.update(cx, |state, _| {
+                    state.lsp.completion_provider = Some(Rc::new(provider));
+                });
+
                 let content = new_file.editor_state.read(cx).text().to_string();
                 new_file.lsp_version += 1;
 
                 self.open_files.push(new_file.clone());
                 self.active_file_path = Some(path.clone());
 
+                // Subscribe to editor changes AFTER the file loaded cleanly
                 EditorPanel::subscribe_to_editor_changes(
                     self,
                     path.clone(),
@@ -341,6 +316,14 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                 .searchable(true)
                 .folding(true)
                 .default_value("")
+        });
+
+        // 1. Explicitly type-qualify W to bypass type inference limits
+        let provider = completions::TypstCompletionProvider::<W>::new(self.shared_world.clone());
+
+        // 2. Attach the completion provider natively to GPUI's lsp config field
+        editor_state.update(cx, |state, _| {
+            state.lsp.completion_provider = Some(Rc::new(provider));
         });
 
         let code_editor_entity =
