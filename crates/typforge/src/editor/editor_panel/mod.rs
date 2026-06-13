@@ -126,6 +126,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                 if let gpui_component::input::InputEvent::Change = event {
                     if let Some(file) = this_view.open_files.iter_mut().find(|f| f.path == path) {
                         let content = editor_entity.read(cx).text().to_string();
+                        let cursor = editor_entity.read(cx).cursor();
 
                         // 1. Sync in-memory world (CRITICAL)
                         {
@@ -133,7 +134,23 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                             world.set_source(content.clone());
                         }
 
-                        // 2. Emit update event so preview compiles (CRITICAL)
+                        // 2. CURSOR AUTO-JUMP HOOK
+                        // If the text immediately preceding the cursor is "()",
+                        // move the cursor left by 1 character to place it inside the parentheses!
+                        if cursor >= 2 {
+                            if let Some(slice) = content.get(cursor - 2..cursor) {
+                                if slice == "()" {
+                                    editor_entity.update(cx, |state, input_cx| {
+                                        state.set_selected_range(
+                                            (cursor - 1)..(cursor - 1),
+                                            input_cx,
+                                        );
+                                    });
+                                }
+                            }
+                        }
+
+                        // 3. Emit update event so preview compiles (CRITICAL)
                         cx.emit(FileContentUpdated {
                             path: Some(path.clone()),
                             content,

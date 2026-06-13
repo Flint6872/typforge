@@ -1,3 +1,5 @@
+// crates/typforge/src/editor/editor_panel/completions.rs
+
 use gpui::{Context, Task, Window};
 use gpui_component::input::{CompletionProvider, InputState};
 use lsp_types::{
@@ -30,19 +32,31 @@ impl<W: typst::World + typforge_core::IdeWorld + 'static> TypstCompletionProvide
         let items = if let Ok(source) = world.source(main_id) {
             let completions = get_completions(&*world, None, &source, cursor, false);
 
-            let trigger_offset = get_trigger_offset(rope, cursor);
+            // 1. Get context-aware trigger details
+            let (trigger_offset, is_hash_command) = get_trigger_info(rope, cursor);
             let start_pos = offset_to_lsp_position(rope, trigger_offset);
             let end_pos = offset_to_lsp_position(rope, cursor);
 
-            let typed_prefix = if cursor > trigger_offset + 1 {
-                let prefix_slice = rope.slice((trigger_offset + 1)..cursor);
-                prefix_slice.to_string().to_lowercase()
+            // 2. Fetch the prefix currently typed after the trigger boundary
+            let typed_prefix = if cursor > trigger_offset {
+                let start = if is_hash_command {
+                    trigger_offset + 1
+                } else {
+                    trigger_offset
+                };
+                if cursor > start {
+                    let prefix_slice = rope.slice(start..cursor);
+                    prefix_slice.to_string().to_lowercase()
+                } else {
+                    String::new()
+                }
             } else {
                 String::new()
             };
 
             completions
                 .into_iter()
+                // --- FILTER SUGGESTIONS DYNAMICALLY ---
                 .filter(|c| {
                     if typed_prefix.is_empty() {
                         true
@@ -61,8 +75,15 @@ impl<W: typst::World + typforge_core::IdeWorld + 'static> TypstCompletionProvide
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| label.clone());
 
-                    // Convert Typst custom snippet syntax to valid LSP snippet syntax
-                    let apply_text = convert_typst_snippet_to_lsp(&raw_apply_text);
+                    // Simplify autocomplete text to raw plain text:
+                    let apply_text = if raw_apply_text.contains('(') {
+                        // E.g. "text(${body})" or "text()" -> "text()"
+                        let base = raw_apply_text.split('(').next().unwrap_or(&label);
+                        format!("{}()", base)
+                    } else {
+                        // E.g. "fill: ${}" -> "fill: "
+                        raw_apply_text.replace("${}", "").replace("${1:}", "")
+                    };
 
                     let kind = match c.kind {
                         CompletionKind::Func => CompletionItemKind::FUNCTION,
@@ -73,13 +94,14 @@ impl<W: typst::World + typforge_core::IdeWorld + 'static> TypstCompletionProvide
                         _ => CompletionItemKind::TEXT,
                     };
 
-                    let insert_text_format = if apply_text.contains('$') {
-                        Some(InsertTextFormat::SNIPPET)
-                    } else {
-                        Some(InsertTextFormat::PLAIN_TEXT)
-                    };
+                    // Force PLAIN_TEXT to avoid literal $1 or ${}
+                    let insert_text_format = Some(InsertTextFormat::PLAIN_TEXT);
 
-                    let replacement_text = format!("#{}", apply_text);
+                    let replacement_text = if is_hash_command {
+                        format!("#{}", apply_text)
+                    } else {
+                        apply_text
+                    };
 
                     let text_edit = CompletionTextEdit::Edit(TextEdit {
                         range: Range {
@@ -115,9 +137,11 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
         new_text: &str,
         _cx: &mut Context<InputState>,
     ) -> bool {
-        new_text
-            .chars()
-            .any(|c| c.is_alphanumeric() || c == '#' || c == '.' || c == '(' || c == ',')
+        // Trigger on `#` and keep updating the completion query as alphanumeric characters or code delimiters are typed
+        new_text == "#"
+            || new_text == "("
+            || new_text == ","
+            || new_text.chars().any(|c| c.is_alphanumeric() || c == '_')
     }
 
     fn completions(
@@ -142,6 +166,15 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
 
 /// Translates Typst snippet format (e.g., `${body}`) to LSP format (e.g., `${1:body}`)
 fn convert_typst_snippet_to_lsp(snippet: &str) -> String {
+    // Case 1: Simple function call (e.g., text() -> text($1))
+    if snippet.ends_with("()") {
+        return snippet.replace("()", "($1)");
+    }
+
+    // Case 2: Snippets that shouldn't be indexed (e.g. fill: )
+    // We detect if the Typst snippet is just a placeholder (like ${})
+    // and convert it to a plain string or a simple stop.
+
     let mut result = String::new();
     let mut chars = snippet.chars().peekable();
     let mut tab_index = 1;
@@ -159,17 +192,13 @@ fn convert_typst_snippet_to_lsp(snippet: &str) -> String {
             }
 
             if placeholder.is_empty() {
-                // E.g. list(${}) -> list($1) -> Places cursor inside ()
-                result.push_str(&format!(" "));
-
+                // If the placeholder is empty (like ${}), it's just a cursor position
+                result.push_str(&format!("${}", tab_index));
                 tab_index += 1;
-            } else if placeholder.contains(':') {
-                // Already has standard format, keep it
-                result.push_str(&format!("${{{}}}", placeholder));
             } else {
-                // E.g. text(${body}) -> text(${1:body}) -> Highlights 'body' as a tab-stop
-                result.push_str(&format!("${{{}:{}}}", tab_index, placeholder));
-                tab_index += 1;
+                // This handles your #text(fill: ${}) request.
+                // By returning just the placeholder text, it won't have $1 inside.
+                result.push_str(&placeholder);
             }
         } else {
             result.push(c);
@@ -178,19 +207,32 @@ fn convert_typst_snippet_to_lsp(snippet: &str) -> String {
     result
 }
 
-fn get_trigger_offset(rope: &Rope, cursor: usize) -> usize {
-    let mut offset = cursor;
-    while offset > 0 {
-        offset -= 1;
-        if rope.char(offset) == '#' {
-            return offset;
-        }
-        let c = rope.char(offset);
-        if c.is_whitespace() || c == '\n' || c == '\r' {
+/// Scans backwards to find the context-aware trigger boundary.
+/// Returns: (trigger_byte_offset, is_hash_command)
+fn get_trigger_info(rope: &Rope, cursor: usize) -> (usize, bool) {
+    if cursor == 0 {
+        return (0, false);
+    }
+
+    // 1. Find the start of the current alphanumeric word/identifier
+    let mut word_start = cursor;
+    while word_start > 0 {
+        let prev_c = rope.char(word_start - 1);
+        if prev_c.is_alphanumeric() || prev_c == '_' || prev_c == '-' {
+            word_start -= 1;
+        } else {
             break;
         }
     }
-    cursor.saturating_sub(1)
+
+    // 2. Check if the character immediately preceding the word is '#'
+    if word_start > 0 && rope.char(word_start - 1) == '#' {
+        // This is a top-level command call (e.g., `#text` or `#rect`)
+        return (word_start - 1, true);
+    }
+
+    // 3. Otherwise, we are completing a parameter/variable inside code mode (e.g., `fil` in `text(fil)`)
+    (word_start, false)
 }
 
 fn offset_to_lsp_position(rope: &Rope, offset: usize) -> Position {
