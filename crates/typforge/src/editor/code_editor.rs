@@ -104,7 +104,16 @@ impl CodeEditor {
                 diagnostic_set.clear();
 
                 for diag in diagnostics {
-                    let range = source.range(diag.span).unwrap_or(0..0);
+                    let range = match diag.span.get() {
+                        // If it's a standard numbered span, we can extract the SpanNumber
+                        typst::syntax::DiagSpanKind::Number { num, .. } => {
+                            source.range(num, None).unwrap_or(0..0)
+                        }
+                        // If it's a raw range span, we can use it directly
+                        typst::syntax::DiagSpanKind::Range { range, .. } => range,
+                        // If it's detached, we have no range
+                        _ => 0..0,
+                    };
 
                     // Convert byte range to Position range for GPUI
                     let start_pos = text.offset_to_position(range.start);

@@ -1,9 +1,9 @@
 // typforge-core/src/intel.rs
 
-use typst::layout::PagedDocument;
 use typst::syntax::Side;
 use typst::syntax::Source;
 pub use typst_ide::{Completion, CompletionKind, IdeWorld, Tooltip, autocomplete, tooltip};
+use typst_layout::PagedDocument;
 
 /// Retrieves a list of completions at the specified cursor position.
 pub fn get_completions(

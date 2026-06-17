@@ -22,6 +22,19 @@ impl<W: typst::World + typforge_core::IdeWorld + 'static> EventEmitter<FileConte
 {
 }
 
+pub struct EditorSelectionChanged {
+    pub is_bold: bool,
+    pub is_italic: bool,
+    pub size: Option<f32>,
+    pub font: Option<String>,
+    pub color: Option<String>,
+}
+
+impl<W: typst::World + typforge_core::IdeWorld + 'static> EventEmitter<EditorSelectionChanged>
+    for EditorPanel<W>
+{
+}
+
 pub struct EditorPanel<W: typst::World + typforge_core::IdeWorld + 'static> {
     pub open_files: Vec<OpenedFile>,
     pub active_file_path: Option<PathBuf>,
@@ -79,26 +92,18 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
         mouse_pos: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        // 1. Get the data we need in a scope
         let tooltip = {
             let world_lock = self.shared_world.lock();
             let main_id = world_lock.main();
 
             if let Ok(source) = world_lock.source(main_id) {
-                // --- GET AND PASS THE LIVE DOCUMENT ---
                 let document = world_lock.document();
-                get_hover_info(
-                    &*world_lock,
-                    document.as_deref(), // Deref Arc<PagedDocument> to &PagedDocument
-                    &source,
-                    byte_offset,
-                )
+                get_hover_info(&*world_lock, document.as_deref(), &source, byte_offset)
             } else {
                 None
             }
-        }; // <--- world_lock is dropped here!
+        };
 
-        // 2. Now self is free to be borrowed mutably
         if let Some(tooltip) = tooltip {
             self.current_hover_content = Some(tooltip);
             self.current_hover_position = Some(mouse_pos);
@@ -114,12 +119,29 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
         cx.notify();
     }
 
+    pub fn update_ribbon_selection(
+        &mut self,
+        content: &str,
+        cursor: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let props = crate::ribbon::injector::detect_properties_at_offset(content, cursor);
+        cx.emit(EditorSelectionChanged {
+            is_bold: props.is_bold,
+            is_italic: props.is_italic,
+            size: props.size,
+            font: props.font,
+            color: props.color,
+        });
+    }
+
     fn subscribe_to_editor_changes(
         this: &mut Self,
         path: PathBuf,
         editor_state: &Entity<InputState>,
         cx: &mut Context<Self>,
     ) {
+        // 1. Subscribe to actual Change events to sync the workspace world and handle jumping
         cx.subscribe(
             editor_state,
             move |this_view, editor_entity, event: &gpui_component::input::InputEvent, cx| {
@@ -128,15 +150,13 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                         let content = editor_entity.read(cx).text().to_string();
                         let cursor = editor_entity.read(cx).cursor();
 
-                        // 1. Sync in-memory world (CRITICAL)
+                        // Sync in-memory world (CRITICAL)
                         {
                             let mut world = this_view.shared_world.lock();
                             world.set_source(content.clone());
                         }
 
-                        // 2. CURSOR AUTO-JUMP HOOK
-                        // If the text immediately preceding the cursor is "()",
-                        // move the cursor left by 1 character to place it inside the parentheses!
+                        // CURSOR AUTO-JUMP HOOK
                         if cursor >= 2 {
                             if let Some(slice) = content.get(cursor - 2..cursor) {
                                 if slice == "()" {
@@ -150,7 +170,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                             }
                         }
 
-                        // 3. Emit update event so preview compiles (CRITICAL)
+                        // Emit update event so preview compiles (CRITICAL)
                         cx.emit(FileContentUpdated {
                             path: Some(path.clone()),
                             content,
@@ -160,6 +180,14 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                 }
             },
         )
+        .detach();
+
+        // 2. Observe the state of the editor to capture cursor movements and selection changes in real-time
+        cx.observe(editor_state, move |this_view, editor_entity, cx| {
+            let content = editor_entity.read(cx).text().to_string();
+            let cursor = editor_entity.read(cx).cursor();
+            this_view.update_ribbon_selection(&content, cursor, cx);
+        })
         .detach();
     }
 }
@@ -172,7 +200,6 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
         cx.notify();
     }
 
-    // crates/typforge/src/editor/editor_panel/mod.rs
     pub fn open_file(
         &mut self,
         mut path: PathBuf,
@@ -193,7 +220,6 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                 state.focus(window, cx);
             });
 
-            // Set main source content in our compiler world
             {
                 let mut world = self.shared_world.lock();
                 world.set_source(content.clone());
@@ -209,7 +235,6 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
 
         match OpenedFile::new(path.clone(), window, cx) {
             Ok(mut new_file) => {
-                // Register the completion provider for the newly opened file
                 let provider =
                     completions::TypstCompletionProvider::<W>::new(self.shared_world.clone());
                 new_file.editor_state.update(cx, |state, _| {
@@ -222,7 +247,6 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                 self.open_files.push(new_file.clone());
                 self.active_file_path = Some(path.clone());
 
-                // Subscribe to editor changes AFTER the file loaded cleanly
                 EditorPanel::subscribe_to_editor_changes(
                     self,
                     path.clone(),
@@ -230,7 +254,6 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                     cx,
                 );
 
-                // Set main source content in our compiler world
                 {
                     let mut world = self.shared_world.lock();
                     world.set_source(content.clone());
@@ -335,10 +358,8 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                 .default_value("")
         });
 
-        // 1. Explicitly type-qualify W to bypass type inference limits
         let provider = completions::TypstCompletionProvider::<W>::new(self.shared_world.clone());
 
-        // 2. Attach the completion provider natively to GPUI's lsp config field
         editor_state.update(cx, |state, _| {
             state.lsp.completion_provider = Some(Rc::new(provider));
         });

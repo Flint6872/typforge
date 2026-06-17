@@ -4,21 +4,19 @@ use typst::{
     Library, LibraryExt, World,
     diag::{FileError, FileResult},
     foundations::{Bytes, Datetime},
-    syntax::VirtualPath,
-    syntax::{FileId, Source},
+    syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot},
     text::{Font, FontBook},
     utils::LazyHash,
 };
-use typst_kit::fonts::{FontSlot, Fonts};
+use typst_layout::PagedDocument;
 
 use typst_gpui::TypstGpuiWorld;
 
 // A custom Typst world that provides fonts and files.
-#[derive(Clone, Debug)]
+
 pub struct GpuiWorld {
     library: LazyHash<Library>,
-    font_book: LazyHash<FontBook>,
-    fonts: Vec<std::sync::Arc<FontSlot>>,
+    font_store: typst_kit::fonts::FontStore,
     /// The root directory for file resolution (used by #include, #image, etc).
     root: PathBuf,
     /// The physical path of the main document being compiled. `None` if new/unsaved.
@@ -27,40 +25,42 @@ pub struct GpuiWorld {
     source_text: String,
     /// A virtual file ID for the source text.
     main_file_id: FileId,
-    compiled_document: Option<std::sync::Arc<typst::layout::PagedDocument>>,
+    compiled_document: Option<std::sync::Arc<PagedDocument>>,
 }
 
 impl GpuiWorld {
     /// Creates a new `GpuiWorld` with a pre-initialized font book.
     /// The fonts must be provided by the host application.
-    pub fn new(fonts_from_searcher: Fonts) -> Self {
+    pub fn new(font_store: typst_kit::fonts::FontStore) -> Self {
         // Update signature
         // Initialize with a default root (e.g., current working directory)
         // and a generic virtual path for unsaved documents.
         let default_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
 
         // Extract font_book and font_slots from the Fonts struct
-        let font_book = fonts_from_searcher.book;
-        let font_slots: Vec<std::sync::Arc<FontSlot>> = fonts_from_searcher
-            .fonts
-            .into_iter()
-            .map(std::sync::Arc::new)
-            .collect();
+        // let font_book = fonts_from_searcher.book;
+        // let font_slots: Vec<std::sync::Arc<FontSlot>> = fonts_from_searcher
+        //     .fonts
+        //     .into_iter()
+        //     .map(std::sync::Arc::new)
+        //     .collect();
 
-        eprintln!(
-            "GpuiWorld initialized with {} font slots and {} font families in book.",
-            font_slots.len(),
-            font_book.families().count()
-        );
+        // eprintln!(
+        //     "GpuiWorld initialized with {} font slots and {} font families in book.",
+        //     font_slots.len(),
+        //     font_book.families().count()
+        // );
 
         GpuiWorld {
             library: LazyHash::new(Library::default()),
-            font_book: LazyHash::new(font_book), // Use the extracted font_book
-            fonts: font_slots,                   // Store the font_slots
+            font_store, // Store the font_slots
             root: default_root.clone(),
             current_document_physical_path: None,
             source_text: String::new(),
-            main_file_id: FileId::new(None, VirtualPath::new("/__main__.typ")),
+            main_file_id: FileId::new(RootedPath::new(
+                VirtualRoot::Project,
+                VirtualPath::new("/__main__.typ").expect("must be valid"),
+            )),
             compiled_document: None,
         }
     }
@@ -89,20 +89,26 @@ impl GpuiWorld {
             if !vpath_str.starts_with('/') {
                 vpath_str = format!("/{}", vpath_str);
             }
-            self.main_file_id = FileId::new(None, VirtualPath::new(vpath_str));
+            self.main_file_id = FileId::new(RootedPath::new(
+                VirtualRoot::Project,
+                VirtualPath::new(vpath_str).expect("must be valid"),
+            ));
         } else {
             // If no path, it's a new/unsaved document. Use default root and generic virtual path.
             self.root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
             self.current_document_physical_path = None;
-            self.main_file_id = FileId::new(None, VirtualPath::new("/__main__.typ"));
+            self.main_file_id = FileId::new(RootedPath::new(
+                VirtualRoot::Project, // 'None' is now a specific root type
+                VirtualPath::new("/__main__.typ").expect("hardcoded path must be valid"),
+            ));
         }
     }
 
-    fn document(&self) -> Option<std::sync::Arc<typst::layout::PagedDocument>> {
+    fn document(&self) -> Option<std::sync::Arc<PagedDocument>> {
         self.compiled_document.clone()
     }
 
-    fn set_document(&mut self, doc: std::sync::Arc<typst::layout::PagedDocument>) {
+    fn set_document(&mut self, doc: std::sync::Arc<PagedDocument>) {
         self.compiled_document = Some(doc);
     }
 
@@ -128,7 +134,7 @@ impl World for GpuiWorld {
 
     /// Returns the font book, which contains metadata for all known fonts.
     fn book(&self) -> &LazyHash<FontBook> {
-        &self.font_book
+        &self.font_store.book()
     }
 
     // Returns the ID of the virtual main file that holds our source text.
@@ -171,11 +177,11 @@ impl World for GpuiWorld {
     /// Tries to access the font with the given identifier.
     fn font(&self, id: usize) -> Option<Font> {
         // Use the FontId's index to look up in our vector of loaded fonts.
-        self.fonts.get(id)?.get()
+        self.font_store.font(id)
     }
 
     /// Returns the current date and time.
-    fn today(&self, _offset: Option<i64>) -> Option<Datetime> {
+    fn today(&self, _offset: Option<typst::foundations::Duration>) -> Option<Datetime> {
         let now = chrono::Local::now();
         Datetime::from_ymd_hms(
             now.year(),

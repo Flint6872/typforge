@@ -18,7 +18,6 @@ use gpui_component::{
 use gpui_component_assets::Assets;
 
 use parking_lot::Mutex;
-use typst_kit::fonts::Fonts;
 
 mod actions;
 mod components;
@@ -98,15 +97,13 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn load_fonts(cx: &mut App) -> Fonts {
-    let mut searcher = typst_kit::fonts::FontSearcher::new();
-    searcher.include_system_fonts(true);
-    let all_typst_fonts_result = searcher.search();
+fn load_fonts(cx: &mut App) -> typst_kit::fonts::FontStore {
+    let mut store = typst_kit::fonts::FontStore::new();
 
-    // let loaded_gpui_font_data: Option<Vec<u8>> = None;
+    // 1. Populate the store with both system and embedded fonts
+    store.extend(typst_kit::fonts::system());
+    store.extend(typst_kit::fonts::embedded());
 
-    // Use the font book to find a preferred UI font (e.g., "Segoe UI" or "Inter")
-    // Note: Typst font families are case-insensitive.
     let preferred_families = [
         "New Computer Modern Math",
         "Libertinus Serif",
@@ -114,30 +111,26 @@ fn load_fonts(cx: &mut App) -> Fonts {
         "Inter",
         "Source Code Pro",
         "Noto Sans CJK JP",
-    ]; // Added "Noto Sans CJK JP" for broader coverage
+    ];
 
     for family_name in preferred_families {
-        // Use FontBook::select to find a font by family name and variant
-        // `FontVariant::default()` usually means "normal" weight, "normal" style.
-        if let Some(font_id) = all_typst_fonts_result
-            .book
+        // 2. Select the font from the book (store.book() dereferences to FontBook)
+        if let Some(font_id) = store
+            .book()
             .select(family_name, typst::text::FontVariant::default())
         {
-            // Get the corresponding FontSlot using its index (FontId is just an index)
-            if let Some(font_slot) = all_typst_fonts_result.fonts.get(font_id) {
-                // font_id is already usize, no need to_usize()
-                // Now, and only now, call .get() on this specific font_slot to load its data.
-                if let Some(font) = font_slot.get() {
-                    println!("DEBUG: Found and loaded UI font: {}", family_name);
-                    let data = font.data().to_vec();
-                    // Add each found font to GPUI immediately
-                    let _ = cx
-                        .text_system()
-                        .add_fonts(vec![std::borrow::Cow::Owned(data)]);
-                }
+            // 3. Retrieve and load the actual font data from the store
+            if let Some(font) = store.font(font_id.into()) {
+                println!("DEBUG: Found and loaded UI font: {}", family_name);
+                let data = font.data().to_vec();
+
+                // Add each found font to GPUI immediately
+                let _ = cx
+                    .text_system()
+                    .add_fonts(vec![std::borrow::Cow::Owned(data)]);
             }
         }
     }
 
-    all_typst_fonts_result
+    store
 }

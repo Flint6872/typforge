@@ -24,7 +24,6 @@ impl From<RibbonAction> for EditAction {
 
 impl From<&RibbonAction> for EditAction {
     fn from(action: &RibbonAction) -> Self {
-        // Just clone the inner data and call the existing From implementation
         action.clone().into()
     }
 }
@@ -33,6 +32,102 @@ pub struct TextEdit {
     pub range: Range<usize>,
     pub new_text: String,
     pub new_selection: Range<usize>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ActiveProperties {
+    pub is_bold: bool,
+    pub is_italic: bool,
+    pub size: Option<f32>,
+    pub font: Option<String>,
+    pub color: Option<String>,
+}
+
+/// Traverses up the AST hierarchy from the current cursor position to resolve active properties.
+pub fn detect_properties_at_offset(content: &str, offset: usize) -> ActiveProperties {
+    let tree = parse(content);
+    let root = LinkedNode::new(&tree);
+    let mut props = ActiveProperties::default();
+
+    // Locate the leaf node containing the cursor
+    let leaf = root
+        .leaf_at(offset, Side::Before)
+        .or_else(|| root.leaf_at(offset, Side::After));
+
+    let mut current = leaf;
+    while let Some(node) = current {
+        // 1. Parse Strong/Emph Node Markup
+        if node.kind() == SyntaxKind::Strong {
+            props.is_bold = true;
+        }
+        if node.kind() == SyntaxKind::Emph {
+            props.is_italic = true;
+        }
+
+        // 2. Parse Text Formatting Functions (#text(...) or text(...))
+        if node.kind() == SyntaxKind::FuncCall {
+            if let Some(callee) = node.children().next() {
+                let callee_text = callee.leaf_text();
+                if callee_text == "text" || callee_text == "#text" {
+                    if let Some(args_node) = node.children().find(|c| c.kind() == SyntaxKind::Args)
+                    {
+                        let args_text = args_node.leaf_text();
+                        let inner_args = if args_text.len() >= 2 {
+                            &args_text[1..args_text.len() - 1]
+                        } else {
+                            ""
+                        };
+
+                        // Check weight
+                        if let Some(weight_val) = get_arg_value(inner_args, "weight") {
+                            let w = weight_val.trim_matches('"');
+                            if w == "bold" || w == "700" {
+                                props.is_bold = true;
+                            }
+                        }
+
+                        // Check style
+                        if let Some(style_val) = get_arg_value(inner_args, "style") {
+                            let s = style_val.trim_matches('"');
+                            if s == "italic" {
+                                props.is_italic = true;
+                            }
+                        }
+
+                        // Check size
+                        if props.size.is_none() {
+                            if let Some(size_val) = get_arg_value(inner_args, "size") {
+                                let cleaned = size_val
+                                    .trim()
+                                    .trim_end_matches("pt")
+                                    .trim_end_matches("em");
+                                if let Ok(val) = cleaned.parse::<f32>() {
+                                    props.size = Some(val);
+                                }
+                            }
+                        }
+
+                        // Check font family
+                        if props.font.is_none() {
+                            if let Some(font_val) = get_arg_value(inner_args, "font") {
+                                props.font = Some(font_val.trim_matches('"').to_string());
+                            }
+                        }
+
+                        // Check color / fill
+                        if props.color.is_none() {
+                            if let Some(fill_val) = get_arg_value(inner_args, "fill") {
+                                props.color = Some(fill_val);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        current = node.parent().cloned();
+    }
+
+    props
 }
 
 /// Applies a RibbonAction to the source text.
@@ -209,7 +304,6 @@ fn toggle_wrapper_ast(content: &str, range: Range<usize>, kind_to_toggle: Syntax
     if let Some(node) = find_formatting_node(&root, range.clone(), kind_to_toggle) {
         let node_range = node.range();
 
-        // Ensure we don't underflow
         if node_range.start + marker_len <= node_range.end - marker_len {
             let inner_range = (node_range.start + marker_len)..(node_range.end - marker_len);
             let inner_text = &content[inner_range];
@@ -217,7 +311,6 @@ fn toggle_wrapper_ast(content: &str, range: Range<usize>, kind_to_toggle: Syntax
             return TextEdit {
                 range: node_range,
                 new_text: inner_text.to_string(),
-                // Use saturating sub or check for valid range to avoid overflow
                 new_selection: (range.start.saturating_sub(marker_len))
                     ..(range.end.saturating_sub(marker_len)),
             };
@@ -257,7 +350,7 @@ fn find_enclosing_text_nodes<'a>(
 ) {
     if root.kind() == SyntaxKind::FuncCall {
         if let Some(callee) = root.children().next() {
-            let callee_text = callee.text();
+            let callee_text = callee.leaf_text();
             if callee_text == "text" || callee_text == "#text" {
                 if let Some(body_range) = get_content_body_range(root) {
                     if range.start >= body_range.start && range.end <= body_range.end {
@@ -298,7 +391,7 @@ fn adjust_selection(
 }
 
 /// Parses arguments to find if a key is present and returns its value
-fn get_arg_value(inner_args: &str, key: &str) -> Option<String> {
+pub fn get_arg_value(inner_args: &str, key: &str) -> Option<String> {
     for param in inner_args.split(',') {
         let trimmed = param.trim();
         if let Some((p_key, p_val)) = trimmed.split_once(':') {
@@ -333,7 +426,6 @@ fn remove_arg(inner_args: &str, key: &str) -> (String, bool) {
 
 /// Intelligently sets parameters in a `#text(...)` block using the AST.
 fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &str) -> TextEdit {
-    // 1. Trim leading/trailing whitespace from the active range to prevent trapping spacing
     let mut trimmed_start = range.start;
     let mut trimmed_end = range.end;
     while trimmed_start < trimmed_end
@@ -357,14 +449,12 @@ fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &s
     let tree = parse(content);
     let root = LinkedNode::new(&tree);
 
-    // 2. Locate all nesting text ancestors covering this active span
     let mut enclosing_nodes = Vec::new();
     find_enclosing_text_nodes(&root, active_range.clone(), &mut enclosing_nodes);
 
     if let Some(formatting_node) = enclosing_nodes.last().cloned() {
         let mut should_merge = false;
         if let Some(body_range) = get_content_body_range(&formatting_node) {
-            // Merge arguments if selection is empty or completely fills the block's text body
             if active_range.is_empty()
                 || (active_range.start <= body_range.start && active_range.end >= body_range.end)
             {
@@ -373,7 +463,6 @@ fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &s
         }
 
         if should_merge {
-            // Find parent inherited value for this key going up the hierarchy
             let mut parent_value = None;
             if enclosing_nodes.len() > 1 {
                 let parent_node = &enclosing_nodes[enclosing_nodes.len() - 2];
@@ -381,7 +470,7 @@ fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &s
                     .children()
                     .find(|c| c.kind() == SyntaxKind::Args)
                 {
-                    let parent_args_text = parent_args.text();
+                    let parent_args_text = parent_args.full_text();
                     let parent_inner = if parent_args_text.len() >= 2 {
                         &parent_args_text[1..parent_args_text.len() - 1]
                     } else {
@@ -396,18 +485,16 @@ fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &s
                 .find(|child| child.kind() == SyntaxKind::Args)
             {
                 let args_range = args_node.range();
-                let args_text = args_node.text();
+                let args_text = args_node.full_text();
                 let inner_args = if args_text.len() >= 2 {
                     &args_text[1..args_text.len() - 1]
                 } else {
                     ""
                 };
 
-                // --- SMART UNWRAP / PRUNE REDUNDANT INHERITED ARGUMENTS ---
                 if value.is_empty() || parent_value.as_deref() == Some(value) {
                     let (updated_inner, is_empty) = remove_arg(inner_args, key);
                     if is_empty {
-                        // If no other arguments are left, unwrap this #text block completely
                         if let Some(body_range) = get_content_body_range(&formatting_node) {
                             let inner_body_text = &content[body_range.clone()];
                             let new_selection = adjust_selection(
@@ -422,7 +509,6 @@ fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &s
                             };
                         }
                     } else {
-                        // Just remove the redundant property from args list
                         let updated_args = format!("({})", updated_inner);
                         let new_selection =
                             adjust_selection(args_range.clone(), updated_args.len(), range.clone());
@@ -434,7 +520,6 @@ fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &s
                     }
                 }
 
-                // Standard property merge
                 let updated_inner = merge_args(inner_args, key, value);
                 let updated_args = format!("({})", updated_inner);
                 let new_selection =
@@ -445,7 +530,6 @@ fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &s
                     new_selection,
                 };
             } else {
-                // No Args node found, insert it right after the callee (first child of FuncCall)
                 if let Some(callee_node) = formatting_node.children().next() {
                     let insert_pos = callee_node.range().end;
                     let inserted_str = format!("({}: {})", key, value);
@@ -461,7 +545,6 @@ fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &s
         }
     }
 
-    // Default Case: Wrap range with a brand new text function call (nested)
     let prefix = format!("#text({}: {})[", key, value);
     let reconstructed = format!("{}{}]", prefix, &content[active_range.clone()]);
     let new_start = active_range.start + prefix.len();
@@ -500,8 +583,8 @@ fn merge_args(args_block: &str, key: &str, value: &str) -> String {
         } else {
             if !updated.is_empty() {
                 updated.push_str(", ");
+                updated.push_str(trimmed);
             }
-            updated.push_str(trimmed);
         }
     }
 
@@ -524,7 +607,7 @@ fn find_page_set_rule<'a>(root: &'a LinkedNode<'a>) -> Option<LinkedNode<'a>> {
                 .children()
                 .find(|child| child.kind() == SyntaxKind::Ident)
             {
-                if target.text() == "page" {
+                if target.full_text() == "page" {
                     return Some(node);
                 }
             }
@@ -548,7 +631,7 @@ fn update_or_insert_page_rule_ast(content: &str, key: &str, value: &str) -> (Ran
             .find(|child| child.kind() == SyntaxKind::Args)
         {
             let args_range = args_node.range();
-            let args_text = args_node.text();
+            let args_text = args_node.full_text();
             let inner_args = if args_text.len() >= 2 {
                 &args_text[1..args_text.len() - 1]
             } else {
@@ -559,13 +642,11 @@ fn update_or_insert_page_rule_ast(content: &str, key: &str, value: &str) -> (Ran
 
             return (args_range, updated_args);
         } else {
-            // Target found but no Args node (e.g., #set page)
             let insert_pos = set_rule_node.range().end;
             let inserted_str = format!("({}: {})", key, value);
             return (insert_pos..insert_pos, inserted_str);
         }
     }
 
-    // No existing #set page directive found: Prepend to the top of the document
     (0..0, format!("#set page({}: {})\n", key, value))
 }

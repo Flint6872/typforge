@@ -5,7 +5,7 @@ use gpui_component::{
 };
 use parking_lot::Mutex;
 use std::{sync::Arc, time::Duration};
-use typst::layout::PagedDocument;
+use typst_layout::PagedDocument;
 
 pub mod typst_element;
 use crate::typst_element::{HitMap, TypstElement, TypstRenderState};
@@ -15,10 +15,10 @@ pub trait TypstGpuiWorld: typst::World + Send + Sync + 'static {
     fn set_source(&mut self, source: String);
     fn set_main_document_info(&mut self, path: Option<std::path::PathBuf>, content: String);
 
-    fn document(&self) -> Option<std::sync::Arc<typst::layout::PagedDocument>> {
+    fn document(&self) -> Option<std::sync::Arc<PagedDocument>> {
         None
     }
-    fn set_document(&mut self, _doc: std::sync::Arc<typst::layout::PagedDocument>) {}
+    fn set_document(&mut self, _doc: std::sync::Arc<PagedDocument>) {}
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -32,7 +32,7 @@ pub enum PreviewPanelEvent {
 /// The PreviewPanel is a GPUI View that renders a Typst document.
 pub struct PreviewPanel<W: TypstGpuiWorld> {
     world: Arc<Mutex<W>>,
-    document: Option<std::sync::Arc<typst::layout::PagedDocument>>,
+    document: Option<std::sync::Arc<PagedDocument>>,
     pub render_state: Arc<TypstRenderState>,
     diagnostics: Vec<typst::diag::SourceDiagnostic>,
     focus_handle: FocusHandle,
@@ -241,7 +241,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
 
         match typst::compile(&*world_guard).output {
             Ok(document) => {
-                let doc: Arc<typst::layout::PagedDocument> = Arc::new(document);
+                let doc: Arc<PagedDocument> = Arc::new(document);
 
                 // --- SYNC COMPILED DOCUMENT TO SHARED WORLD ---
                 world_guard.set_document(doc.clone());
@@ -308,15 +308,11 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         // triggering your error message in main.rs
     }
 
-    fn sync_fonts_to_gpui(
-        &mut self,
-        document: &typst::layout::PagedDocument,
-        cx: &mut Context<Self>,
-    ) {
+    fn sync_fonts_to_gpui(&mut self, document: &PagedDocument, cx: &mut Context<Self>) {
         let mut used_fonts = std::collections::HashSet::new();
 
         // Directly call the recursive helper for each page
-        for page in &document.pages {
+        for page in document.pages() {
             self.collect_fonts_from_frame_recursive(&page.frame, &mut used_fonts);
         }
 
@@ -357,7 +353,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         for (_, item) in frame.items() {
             match item {
                 typst::layout::FrameItem::Text(text) => {
-                    fonts_set.insert(text.font.clone());
+                    fonts_set.insert(text.font.font().clone());
                 }
                 typst::layout::FrameItem::Group(group) => {
                     self.collect_fonts_from_frame_recursive(&group.frame, fonts_set);
@@ -656,11 +652,15 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                         let span_resolver = Some(std::sync::Arc::new(
                             move |span: typst::syntax::Span, offset: u16| {
                                 if let Some(file_id) = span.id() {
-                                    // We use .ok() to handle potential errors in source() gracefully
                                     if let Ok(source) = world_clone.lock().source(file_id) {
-                                        // Safely handle the Option returned by range(span)
-                                        if let Some(range) = source.range(span) {
-                                            return range.start + offset as usize;
+                                        // Use .get() to access the internal data of the Span
+                                        if let typst::syntax::SpanKind::Number { num, .. } =
+                                            span.get()
+                                        {
+                                            // Now you have the SpanNumber (num) to pass to range()
+                                            if let Some(range) = source.range(num, None) {
+                                                return range.start + offset as usize;
+                                            }
                                         }
                                     }
                                 }

@@ -14,7 +14,8 @@ lyon_path = "1.0.16"         # Ensure this is present
 lyon_tessellation = "1.0.16" # Ensure this is present (as you referenced it)
 
 typst.workspace = true
-typst-pdf = "0.14.2"
+typst-layout.workspace = true
+typst-pdf = "0.15.0"
 
 typsdocx = { path = "../typsdocx" }
 

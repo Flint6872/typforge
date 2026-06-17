@@ -29,7 +29,7 @@ impl<W: typst::World + typforge_core::IdeWorld + 'static> TypstCompletionProvide
         let world = world_mutex.lock();
         let main_id = world.main();
 
-        let items = if let Ok(source) = world.source(main_id) {
+        let mut items = if let Ok(source) = world.source(main_id) {
             let completions = get_completions(&*world, None, &source, cursor, false);
 
             // 1. Get context-aware trigger details
@@ -54,7 +54,7 @@ impl<W: typst::World + typforge_core::IdeWorld + 'static> TypstCompletionProvide
                 String::new()
             };
 
-            completions
+            let mut list: Vec<CompletionItem> = completions
                 .into_iter()
                 // --- FILTER SUGGESTIONS DYNAMICALLY ---
                 .filter(|c| {
@@ -119,7 +119,41 @@ impl<W: typst::World + typforge_core::IdeWorld + 'static> TypstCompletionProvide
                         ..Default::default()
                     }
                 })
-                .collect()
+                .collect();
+
+            // --- 3. COACHING SYSTEM: DYNAMIC ALPHANUMERIC SIZE COACHING ---
+            if !typed_prefix.is_empty() && is_size_context(rope, trigger_offset) {
+                if let Ok(_number_val) = typed_prefix.parse::<f64>() {
+                    let units = ["pt", "em", "cm", "mm"];
+                    for unit in units {
+                        let suggested_text = format!("{}{}", typed_prefix, unit);
+                        let text_edit = CompletionTextEdit::Edit(TextEdit {
+                            range: Range {
+                                start: start_pos,
+                                end: end_pos,
+                            },
+                            new_text: suggested_text.clone(),
+                        });
+
+                        list.insert(
+                            0,
+                            CompletionItem {
+                                label: suggested_text.clone(),
+                                kind: Some(CompletionItemKind::UNIT),
+                                text_edit: Some(text_edit),
+                                insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+                                detail: Some(format!(
+                                    "Coaching: Insert explicit length ({})",
+                                    unit
+                                )),
+                                ..Default::default()
+                            },
+                        );
+                    }
+                }
+            }
+
+            list
         } else {
             Vec::new()
         };
@@ -137,11 +171,13 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
         new_text: &str,
         _cx: &mut Context<InputState>,
     ) -> bool {
-        // Trigger on `#` and keep updating the completion query as alphanumeric characters or code delimiters are typed
+        // Trigger on `#`, delimiters, alphanumeric values, or decimal points
         new_text == "#"
             || new_text == "("
             || new_text == ","
-            || new_text.chars().any(|c| c.is_alphanumeric() || c == '_')
+            || new_text
+                .chars()
+                .any(|c| c.is_alphanumeric() || c == '_' || c == '.')
     }
 
     fn completions(
@@ -164,16 +200,67 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
     }
 }
 
+/// Helper function to detect if the target parameter expects physical dimensions / units
+fn is_size_context(rope: &Rope, mut offset: usize) -> bool {
+    // Skip spaces backwards
+    while offset > 0 {
+        let prev_c = rope.char(offset - 1);
+        if prev_c.is_whitespace() {
+            offset -= 1;
+        } else {
+            break;
+        }
+    }
+    // Check for parameter assignment separator `:`
+    if offset == 0 || rope.char(offset - 1) != ':' {
+        return false;
+    }
+    offset -= 1;
+    // Skip spaces backwards
+    while offset > 0 {
+        let prev_c = rope.char(offset - 1);
+        if prev_c.is_whitespace() {
+            offset -= 1;
+        } else {
+            break;
+        }
+    }
+    // Scan backward to extract parameter name identifier
+    let mut param_start = offset;
+    while param_start > 0 {
+        let prev_c = rope.char(param_start - 1);
+        if prev_c.is_alphanumeric() || prev_c == '_' || prev_c == '-' {
+            param_start -= 1;
+        } else {
+            break;
+        }
+    }
+    if param_start < offset {
+        let param_name = rope.slice(param_start..offset).to_string();
+        matches!(
+            param_name.as_str(),
+            "size"
+                | "margin"
+                | "gap"
+                | "gutter"
+                | "width"
+                | "height"
+                | "radius"
+                | "stroke"
+                | "inset"
+                | "outset"
+                | "spacing"
+        )
+    } else {
+        false
+    }
+}
+
 /// Translates Typst snippet format (e.g., `${body}`) to LSP format (e.g., `${1:body}`)
 fn convert_typst_snippet_to_lsp(snippet: &str) -> String {
-    // Case 1: Simple function call (e.g., text() -> text($1))
     if snippet.ends_with("()") {
         return snippet.replace("()", "($1)");
     }
-
-    // Case 2: Snippets that shouldn't be indexed (e.g. fill: )
-    // We detect if the Typst snippet is just a placeholder (like ${})
-    // and convert it to a plain string or a simple stop.
 
     let mut result = String::new();
     let mut chars = snippet.chars().peekable();
@@ -192,12 +279,9 @@ fn convert_typst_snippet_to_lsp(snippet: &str) -> String {
             }
 
             if placeholder.is_empty() {
-                // If the placeholder is empty (like ${}), it's just a cursor position
                 result.push_str(&format!("${}", tab_index));
                 tab_index += 1;
             } else {
-                // This handles your #text(fill: ${}) request.
-                // By returning just the placeholder text, it won't have $1 inside.
                 result.push_str(&placeholder);
             }
         } else {
@@ -214,11 +298,11 @@ fn get_trigger_info(rope: &Rope, cursor: usize) -> (usize, bool) {
         return (0, false);
     }
 
-    // 1. Find the start of the current alphanumeric word/identifier
+    // 1. Find the start of the current alphanumeric word/identifier (allowing decimals)
     let mut word_start = cursor;
     while word_start > 0 {
         let prev_c = rope.char(word_start - 1);
-        if prev_c.is_alphanumeric() || prev_c == '_' || prev_c == '-' {
+        if prev_c.is_alphanumeric() || prev_c == '_' || prev_c == '-' || prev_c == '.' {
             word_start -= 1;
         } else {
             break;
@@ -227,11 +311,9 @@ fn get_trigger_info(rope: &Rope, cursor: usize) -> (usize, bool) {
 
     // 2. Check if the character immediately preceding the word is '#'
     if word_start > 0 && rope.char(word_start - 1) == '#' {
-        // This is a top-level command call (e.g., `#text` or `#rect`)
         return (word_start - 1, true);
     }
 
-    // 3. Otherwise, we are completing a parameter/variable inside code mode (e.g., `fil` in `text(fil)`)
     (word_start, false)
 }
 

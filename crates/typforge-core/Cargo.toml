@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 typst.workspace = true
 typst-syntax.workspace = true
-typst-ide = "0.14.2"
+typst-layout.workspace = true
+typst-ide = "0.15.0"
 typstyle-core = "0.14.4"
 serde.workspace = true

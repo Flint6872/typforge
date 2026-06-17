@@ -204,7 +204,8 @@ fn get_content_body_range(content: &str, func_call: &LinkedNode) -> Option<Range
 fn collect_text_nodes<'a>(node: &LinkedNode<'a>, nodes: &mut Vec<LinkedNode<'a>>) {
     if node.kind() == SyntaxKind::FuncCall {
         if let Some(callee) = node.children().next() {
-            let callee_text = callee.text();
+            //should full_text or leaf_text be used here
+            let callee_text = callee.full_text();
             if callee_text == "text" || callee_text == "#text" {
                 nodes.push(node.clone());
             }
@@ -463,7 +464,8 @@ fn find_page_set_rule<'a>(root: &'a LinkedNode<'a>) -> Option<LinkedNode<'a>> {
                 .children()
                 .find(|child| child.kind() == SyntaxKind::Ident)
             {
-                if target.text() == "page" {
+                //should full_text or leaf_text be used here
+                if target.full_text() == "page" {
                     return Some(node);
                 }
             }

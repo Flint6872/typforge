@@ -6,7 +6,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-typst = "0.14.2"
+typst.workspace = true
+typst-layout.workspace = true
 docx-rs = "0.4.19"
 # We use IndexMap to preserve insertion order while grouping by Y-coord
 indexmap = "2.13.0"
