@@ -51,6 +51,7 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     cursor_visible: bool,
     is_hovering_link: bool,
     _blink_task: Option<Task<()>>,
+    compile_task: Option<Task<()>>,
 }
 
 impl<W: TypstGpuiWorld> PreviewPanel<W> {
@@ -176,6 +177,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             cursor_visible: true,
             is_hovering_link: false,
             _blink_task: Some(blink_task), // Store the task
+            compile_task: None,
         }
     }
 
@@ -235,34 +237,55 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         self.compile(cx);
     }
 
-    /// Internal compilation logic.
+    /// Asynchronous compilation logic running on background thread.
     fn compile(&mut self, cx: &mut Context<Self>) {
-        let mut world_guard = self.world.lock(); // <--- Make this mut so we can call set_document
+        let world = self.world.clone();
 
-        match typst::compile(&*world_guard).output {
-            Ok(document) => {
-                let doc: Arc<PagedDocument> = Arc::new(document);
+        // Cancel any pending compilation task to debounce rapid typing
+        self.compile_task = None;
 
-                // --- SYNC COMPILED DOCUMENT TO SHARED WORLD ---
-                world_guard.set_document(doc.clone());
+        let handle = cx.weak_entity();
+        self.compile_task = Some(cx.spawn(|_view, spawned_async_cx: &mut AsyncApp| {
+            let mut async_cx = spawned_async_cx.clone();
+            async move {
+                // Debounce compile requests by 50ms during continuous typing
+                async_cx
+                    .background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
 
-                drop(world_guard);
-                // --- CRITICAL: Keep this! ---
-                self.sync_fonts_to_gpui(&doc, cx);
+                // Perform heavy CPU-bound compile on background executor
+                let compiled_result = {
+                    let world_guard = world.lock();
+                    typst::compile(&*world_guard)
+                };
 
-                self.document = Some(doc);
-                self.diagnostics.clear();
-                // Emit success so the tab clears the red error indicator
-                cx.emit(PreviewPanelEvent::DiagnosticsChanged(Vec::new()));
+                // Jump back to the main thread to update the UI
+                let _ = handle.update(&mut async_cx, |panel, cx| {
+                    match compiled_result.output {
+                        Ok(document) => {
+                            let doc: Arc<PagedDocument> = Arc::new(document);
+
+                            // Sync document back to the shared world
+                            panel.world.lock().set_document(doc.clone());
+
+                            // Sync fonts
+                            panel.sync_fonts_to_gpui(&doc, cx);
+
+                            panel.document = Some(doc);
+                            panel.diagnostics.clear();
+                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(Vec::new()));
+                        }
+                        Err(errors) => {
+                            let diags: Vec<_> = errors.into_iter().collect();
+                            panel.diagnostics = diags.clone();
+                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(diags));
+                        }
+                    }
+                    cx.notify();
+                });
             }
-            Err(errors) => {
-                let diags: Vec<_> = errors.into_iter().collect();
-                self.diagnostics = diags.clone();
-                // Emit the errors
-                cx.emit(PreviewPanelEvent::DiagnosticsChanged(diags));
-            }
-        }
-        cx.notify();
+        }));
     }
 
     /// Updates the GpuiWorld's main document path and content.

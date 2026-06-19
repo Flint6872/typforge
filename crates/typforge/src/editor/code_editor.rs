@@ -136,56 +136,75 @@ impl CodeEditor {
         });
     }
 
-    /// Converts a screen position (Pixels) to a document character/byte offset (usize).
+    /// Converts a screen position to a document byte offset using nested Binary Search O(log R + log C)
     pub fn screen_to_byte_offset(&self, screen_position: Point<Pixels>, cx: &App) -> Option<usize> {
         let input_state = self.editor.read(cx);
         let text = input_state.text();
 
         let visible_range = input_state.visible_row_range()?;
+        if visible_range.is_empty() {
+            return None;
+        }
 
-        for row in visible_range {
+        // 1. Binary search to find the correct row vertically
+        let mut low_row = visible_range.start;
+        let mut high_row = visible_range.end.saturating_sub(1);
+        let mut target_row = None;
+
+        while low_row <= high_row {
+            let mid_row = (low_row + high_row) / 2;
             let row_start = text.position_to_offset(&gpui_component::input::Position {
-                line: row as u32,
+                line: mid_row as u32,
                 character: 0,
             });
             let next_row_start = text.position_to_offset(&gpui_component::input::Position {
-                line: (row + 1) as u32,
+                line: (mid_row + 1) as u32,
                 character: 0,
             });
 
             if let Some(line_bounds) = input_state.range_to_bounds(&(row_start..next_row_start)) {
-                if screen_position.y >= line_bounds.top()
-                    && screen_position.y <= line_bounds.bottom()
-                {
-                    let mut low = row_start;
-                    let mut high = if next_row_start > row_start {
-                        next_row_start - 1
-                    } else {
-                        row_start
-                    };
-                    let mut best_offset = row_start;
-
-                    while low <= high {
-                        let mid = (low + high) / 2;
-                        if let Some(char_bounds) = input_state.range_to_bounds(&(mid..mid + 1)) {
-                            if screen_position.x < char_bounds.left() {
-                                high = mid.saturating_sub(1);
-                            } else if screen_position.x > char_bounds.right() {
-                                low = mid + 1;
-                                best_offset = mid + 1;
-                            } else {
-                                best_offset = mid;
-                                break;
-                            }
-                        } else {
-                            high = mid.saturating_sub(1);
-                        }
-                    }
-
-                    return Some(best_offset);
+                if screen_position.y < line_bounds.top() {
+                    high_row = mid_row.saturating_sub(1);
+                } else if screen_position.y > line_bounds.bottom() {
+                    low_row = mid_row + 1;
+                } else {
+                    target_row = Some((row_start, next_row_start));
+                    break;
                 }
+            } else {
+                high_row = mid_row.saturating_sub(1);
             }
         }
+
+        // 2. Binary search characters horizontally within that row
+        if let Some((row_start, next_row_start)) = target_row {
+            let mut low = row_start;
+            let mut high = if next_row_start > row_start {
+                next_row_start - 1
+            } else {
+                row_start
+            };
+            let mut best_offset = row_start;
+
+            while low <= high {
+                let mid = (low + high) / 2;
+                if let Some(char_bounds) = input_state.range_to_bounds(&(mid..mid + 1)) {
+                    if screen_position.x < char_bounds.left() {
+                        high = mid.saturating_sub(1);
+                    } else if screen_position.x > char_bounds.right() {
+                        low = mid + 1;
+                        best_offset = mid + 1;
+                    } else {
+                        best_offset = mid;
+                        break;
+                    }
+                } else {
+                    high = mid.saturating_sub(1);
+                }
+            }
+            return Some(best_offset);
+        }
+
         None
     }
 }
