@@ -29,13 +29,13 @@ gpui_macros = { git = "https://github.com/zed-industries/zed" } # NEW: If you us
 #     "tree-sitter-languages",
 # ] }
 
-gpui-component = { path = "../gpui-component/crates/ui", features = [
-    "tree-sitter-languages",
-] }
-
-# gpui-component = { git = "https://github.com/Flint6872/gpui-component", features = [
+# gpui-component = { path = "../gpui-component/crates/ui", features = [
 #     "tree-sitter-languages",
 # ] }
+
+gpui-component = { git = "https://github.com/Flint6872/gpui-component", features = [
+    "tree-sitter-languages",
+] }
 
 typst = "0.15.0"
 typst-syntax = "0.15.0"
