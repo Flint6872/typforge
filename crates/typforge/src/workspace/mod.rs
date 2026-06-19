@@ -6,50 +6,58 @@ use std::sync::Arc;
 
 // Import necessary types
 use crate::{
-    components::lsp::LspClient,
+    actions::{self, RibbonAction},
     editor::{FileContentUpdated, editor_panel::EditorPanel},
     panels::{FilesPanel, OpenFileEvent},
+    ribbon::panel::RibbonPanel,
 };
 use gpui_component::{
+    RopeExt,
     dock::{DockArea, DockItem},
     menu::AppMenuBar,
 };
 use gpui_util::ResultExt;
 use parking_lot::Mutex;
-use tokio::sync::mpsc;
-use typst_gpui::{PreviewPanel, PreviewPanelEvent};
-use typstography::PublishDiagnosticsParams;
 
-pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld> {
+use typforge_core::edit::apply_edit_action;
+use typst_gpui::{PreviewPanel, PreviewPanelEvent};
+
+pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> {
     pub dock_area: Entity<DockArea>,
     pub menu_bar: Option<Entity<AppMenuBar>>,
-    pub editor_panel: Entity<EditorPanel>,
+    pub ribbon_panel: Entity<RibbonPanel>,
+    pub editor_panel: Entity<EditorPanel<W>>,
     pub preview_panel: Entity<PreviewPanel<W>>,
     pub files_panel: Entity<FilesPanel>,
     pub window_handle: AnyWindowHandle,
-    pub lsp_client: Arc<LspClient>,
 }
 
-impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
+impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
     // A constructor for your view.
     pub fn new(
         window: &mut Window,
         shared_world_arc: Arc<Mutex<W>>,
-        lsp_client: Arc<LspClient>,
-        diagnostics_rx: mpsc::UnboundedReceiver<PublishDiagnosticsParams>,
-        responses_rx: mpsc::UnboundedReceiver<serde_json::Value>, // <--- ADDED THIS LINE
         cx: &mut Context<Self>,
     ) -> Self {
         let files_panel = cx.new(|cx| FilesPanel::new(window, cx));
-        let editor_panel_entity = cx.new(|cx| {
-            EditorPanel::new(lsp_client.clone(), diagnostics_rx, responses_rx, window, cx)
-        });
+        let editor_panel_entity =
+            cx.new(|cx| EditorPanel::new(shared_world_arc.clone(), window, cx));
 
         editor_panel_entity.update(cx, |editor_panel, cx| {
             editor_panel.new_file(window, cx); // Call the new_file method
         });
 
+        let font_families: Vec<String> = {
+            let world = shared_world_arc.lock();
+            world
+                .book()
+                .families()
+                .map(|(name, _)| name.to_string())
+                .collect()
+        };
+
         let preview_panel = cx.new(|cx| PreviewPanel::new(shared_world_arc, window, cx));
+        let ribbon_panel = cx.new(|cx| RibbonPanel::new(font_families, window, cx));
 
         // --- Handles to be captured by closures ---
         let window_handle = window.window_handle();
@@ -57,19 +65,25 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         let preview_panel_clone_for_subscriptions = preview_panel.clone();
         let files_panel_clone_for_subscriptions = files_panel.clone();
 
+        // --- 1. Ribbon Event Subscription ---
+        // This subscription listens to actions coming from our Ribbon UI
+        cx.subscribe(
+            &ribbon_panel,
+            move |this_note_view, _emitter, event, cx_for_note_view| {
+                this_note_view.handle_ribbon_action(event, cx_for_note_view);
+            },
+        )
+        .detach();
+
         // --- 2. Editor -> Preview Synchronization (via FileContentUpdated events) ---
         // This listener ensures that any change originating from the EditorPanel
         // updates the PreviewPanel.
         cx.subscribe(
             &editor_panel_entity,
             move |this_note_view: &mut TypstNoteView<W>,
-                  _emitter: Entity<EditorPanel>,
+                  _emitter: Entity<EditorPanel<W>>,
                   event: &FileContentUpdated,
                   cx_for_note_view: &mut Context<TypstNoteView<W>>| {
-                // println!(
-                //     "Bridge: Received update from editor ({} chars)",
-                //     event.content.len()
-                // );
                 let content = event.content.clone();
                 let path = event.path.clone();
 
@@ -79,13 +93,19 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
                         this_note_view.preview_panel.update(
                             app_cx_from_handle,
                             |preview, cx_for_preview| {
-                                preview.set_source(content.clone(), window_ref, cx_for_preview);
+                                // 1. CRITICAL FIX: Always update the document metadata and root folder FIRST
+                                // so that relative image paths and includes resolve correctly during compilation.
                                 preview.update_document_info(
                                     path.clone(),
-                                    content,
+                                    content.clone(),
                                     window_ref,
                                     cx_for_preview,
                                 );
+
+                                // 2. CRITICAL FIX: Set the source SECOND (which triggers compile()).
+                                // We always run this to guarantee that switches between files of the same
+                                // length are handled correctly.
+                                preview.set_source(content.clone(), window_ref, cx_for_preview);
                             },
                         );
                     })
@@ -145,36 +165,58 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         cx.subscribe(
             &preview_panel,
             move |this_note_view, _emitter, event, cx_for_note_view| {
-                if let PreviewPanelEvent::SourceChanged(new_content) = event {
-                    let content = new_content.clone();
-                    let editor_panel_handle = this_note_view.editor_panel.clone();
-                    let window_handle = this_note_view.window_handle.clone();
+                match event {
+                    PreviewPanelEvent::SourceChanged(new_content) => {
+                        let content = new_content.clone();
+                        let editor_panel_handle = this_note_view.editor_panel.clone();
+                        let window_handle = this_note_view.window_handle.clone();
 
-                    // FIX: Update the window FIRST.
-                    // This provides a fresh context (app_cx) and access to &mut Window.
-                    let _ = window_handle
-                        .update(cx_for_note_view, |_, window, app_cx| {
-                            // Use app_cx (provided by the window update) to update the editor
-                            editor_panel_handle.update(app_cx, |editor, editor_cx| {
-                                if let Some(active_path) = &editor.active_file_path {
-                                    if let Some(file) = editor
-                                        .open_files
-                                        .iter_mut()
-                                        .find(|f| &f.path == active_path)
+                        let _ = window_handle
+                            .update(cx_for_note_view, |_, window, app_cx| {
+                                editor_panel_handle.update(app_cx, |editor, editor_cx| {
+                                    if let Some(active_path) = &editor.active_file_path {
+                                        if let Some(file) = editor
+                                            .open_files
+                                            .iter_mut()
+                                            .find(|f| &f.path == active_path)
+                                        {
+                                            file.editor_state.update(
+                                                editor_cx,
+                                                |state, input_cx| {
+                                                    state.set_value(content, window, input_cx);
+                                                },
+                                            );
+                                            file.has_unsaved_changes = true;
+                                        }
+                                    }
+                                });
+                            })
+                            .log_err();
+                    }
+                    PreviewPanelEvent::DiagnosticsChanged(diags) => {
+                        // Update diagnostics in the EditorPanel
+                        this_note_view
+                            .editor_panel
+                            .update(cx_for_note_view, |panel, cx| {
+                                if let Some(active_path) = &panel.active_file_path {
+                                    if let Some(file) =
+                                        panel.open_files.iter_mut().find(|f| f.path == *active_path)
                                     {
-                                        // Use editor_cx to update the editor's InputState
-                                        file.editor_state.update(editor_cx, |state, input_cx| {
-                                            state.set_value(content, window, input_cx);
-                                        });
-                                        file.has_unsaved_changes = true;
+                                        file.diagnostics = diags.clone();
 
-                                        // NOTE: Do NOT emit(FileContentUpdated) here!
-                                        // It would trigger an infinite loop back to the Preview.
+                                        // Extract the active Source from our shared world
+                                        let world = panel.shared_world.lock();
+                                        let main_id = world.main();
+                                        if let Ok(source) = world.source(main_id) {
+                                            file.code_editor_entity.update(cx, |editor, cx| {
+                                                editor.set_diagnostics(diags.clone(), &source, cx);
+                                            });
+                                        }
                                     }
                                 }
+                                cx.notify();
                             });
-                        })
-                        .log_err();
+                    }
                 }
             },
         )
@@ -263,11 +305,91 @@ impl<W: typst_gpui::TypstGpuiWorld> TypstNoteView<W> {
         Self {
             dock_area: dock_area_entity,
             menu_bar,
+            ribbon_panel,
             editor_panel: editor_panel_entity,
             preview_panel,
             files_panel,
             window_handle, // Store the handle
-            lsp_client,
         }
+    }
+
+    /// Orchestrates formatting actions triggered from either the Editor or Preview Panel.
+    pub fn handle_ribbon_action(&mut self, action: &RibbonAction, cx: &mut Context<Self>) {
+        let editor_panel = self.editor_panel.clone();
+        let preview_panel = self.preview_panel.clone();
+        let window_handle = self.window_handle.clone();
+
+        let _ = window_handle
+            .update(cx, |_, window, app_cx| {
+                let is_preview_focused = preview_panel
+                    .read(app_cx)
+                    .focus_handle(app_cx)
+                    .contains_focused(window, app_cx);
+
+                let preview_selection = if is_preview_focused {
+                    preview_panel.read(app_cx).selection_range()
+                } else {
+                    None
+                };
+
+                editor_panel.update(app_cx, |editor, editor_cx| {
+                    if let Some(active_path) = &editor.active_file_path {
+                        if let Some(file) = editor
+                            .open_files
+                            .iter_mut()
+                            .find(|f| &f.path == active_path)
+                        {
+                            let mut final_new_selection = None;
+
+                            // 1. Mutate editor text buffer
+                            file.editor_state.update(editor_cx, |state, input_cx| {
+                                let content = state.text().to_string();
+                                let selection = preview_selection
+                                    .clone()
+                                    .unwrap_or_else(|| state.selected_range());
+
+                                let edit = apply_edit_action(
+                                    &content,
+                                    selection,
+                                    &action.into(), // Make sure you have a From/Into for your RibbonAction to core EditAction
+                                );
+
+                                state.replace_range_with_history(
+                                    edit.range,
+                                    &edit.new_text,
+                                    window,
+                                    input_cx,
+                                );
+
+                                state.set_selected_range(edit.new_selection.clone(), input_cx);
+                                final_new_selection = Some(edit.new_selection);
+
+                                if !is_preview_focused {
+                                    state.focus(window, input_cx);
+                                }
+                            });
+
+                            file.has_unsaved_changes = true;
+
+                            // 2. Sync visual highlights in the Preview Panel BEFORE triggering recompilation
+                            if is_preview_focused {
+                                if let Some(ref new_sel) = final_new_selection {
+                                    preview_panel.update(editor_cx, |preview, preview_cx| {
+                                        preview.set_selection(new_sel.clone(), window, preview_cx);
+                                    });
+                                }
+                            }
+
+                            // 3. Immediately compile and push updated content to Preview
+                            let content = file.editor_state.read(editor_cx).text().to_string();
+                            editor_cx.emit(FileContentUpdated {
+                                path: Some(active_path.clone()),
+                                content,
+                            });
+                        }
+                    }
+                });
+            })
+            .log_err();
     }
 }

@@ -26,7 +26,11 @@ actions!(
         FileExportPdf,
         FileExportDocx,
         PackageManager,
+        ReloadSettings,
         // ChangeTheme,
+        // ribbon actions
+        ToggleBold,
+        ToggleItalic,
     ]
 );
 
@@ -43,3 +47,22 @@ pub struct ChangeTheme {
 // pub struct GoToLine {
 //     pub line_number: usize,
 // }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RibbonAction {
+    // Page Parameters
+    SetPaper(String),  // e.g., "us-letter", "a4"
+    SetFlipped(bool),  // true = Landscape, false = Portrait
+    SetColumns(usize), // e.g., 1 or 2 columns
+    SetMargin(String), // e.g., "1in", "2.5cm"
+
+    // Grid Parameters
+    InsertGrid { rows: usize, cols: usize },
+
+    // Text Parameters
+    SetFont(String),  // e.g., "Liberation Sans", "Linux Libertine"
+    SetFontSize(f32), // e.g., 12.0
+    ToggleBold,
+    ToggleItalic,
+    SetTextColor(String), // e.g., "red", "blue", or hex values
+}

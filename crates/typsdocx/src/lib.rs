@@ -1,7 +1,8 @@
 use docx_rs::*;
 use std::io::Cursor;
-use typst::layout::{Frame, FrameItem, PagedDocument};
+use typst::layout::{Frame, FrameItem};
 use typst::text::TextItemView;
+use typst_layout::PagedDocument;
 
 pub struct DocxOptions {
     pub title: Option<String>,
@@ -26,14 +27,14 @@ pub fn docx(document: &PagedDocument, _options: &DocxOptions) -> Vec<u8> {
     let mut docx = Docx::new();
     eprintln!("--- typsdocx: Starting DOCX export ---");
 
-    if document.pages.is_empty() {
+    if document.pages().is_empty() {
         eprintln!("typsdocx: Document has no pages. Returning empty DOCX.");
         return vec![];
     }
 
     let mut total_paragraphs_added = 0;
 
-    for (page_idx, page) in document.pages.iter().enumerate() {
+    for (page_idx, page) in document.pages().iter().enumerate() {
         let page_w_pt = page.frame.width().to_pt();
         let page_h_pt = page.frame.height().to_pt();
         let w = (page_w_pt * 20.0) as u32;

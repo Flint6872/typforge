@@ -13,10 +13,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-// Use types from typstography (0.94) for the backend communication
-use typstography::{
-    Diagnostic as LspDiagnostic, Hover, HoverContents, MarkedString, MarkupContent, Url,
-};
+use typforge_core::intel::Tooltip;
 
 #[derive(Clone, Debug)]
 pub struct FileContentUpdated {
@@ -48,10 +45,10 @@ impl Render for DraggedTab {
 pub struct OpenedFile {
     pub path: PathBuf,
     pub editor_state: Entity<InputState>,
-    pub language: String,                // e.g., "rust", "markdown", "typst"
-    pub has_unsaved_changes: bool,       // Future: Track if content is modified
-    pub lsp_version: i32,                // Track LSP document version
-    pub diagnostics: Vec<LspDiagnostic>, // Store diagnostics for this file
+    pub language: String,          // e.g., "rust", "markdown", "typst"
+    pub has_unsaved_changes: bool, // Future: Track if content is modified
+    pub lsp_version: i32,          // Track document version
+    pub diagnostics: Vec<typst::diag::SourceDiagnostic>, // Store native diagnostics
     pub code_editor_entity: Entity<CodeEditor>,
 }
 
@@ -85,7 +82,7 @@ impl OpenedFile {
             editor_state,
             language,
             has_unsaved_changes: false,
-            lsp_version: 0, // Start with version 0
+            lsp_version: 0,
             diagnostics: Vec::new(),
             code_editor_entity,
         })
@@ -99,10 +96,6 @@ impl OpenedFile {
             .unwrap_or("untitled")
             .to_string()
     }
-
-    pub fn uri(&self) -> Url {
-        Url::from_file_path(&self.path).expect("Failed to convert path to URL")
-    }
 }
 
 // Helper to guess language from file extension
@@ -114,7 +107,7 @@ fn get_language_from_path(path: &Path) -> String {
             "rs" => "rust",
             "md" => "markdown",
             "toml" => "toml",
-            "typ" => "typst", // Assuming 'typst' is a recognized highlighter
+            "typ" => "typst",
             _ => "text",
         })
         .unwrap_or("text")
@@ -131,26 +124,15 @@ pub enum InputEvent {
     Blur,
 }
 
-// NEW: Helper to render the hover popup
-fn render_hover_popup(
-    hover: &Hover,
+// Helper to render the hover popup using our new Tooltip enum
+fn render_hover_popup<W: typst::World + typforge_core::IdeWorld + 'static>(
+    tooltip: &Tooltip,
     screen_pos: Point<Pixels>,
-    _cx: &mut Context<EditorPanel>,
+    _cx: &mut Context<EditorPanel<W>>,
 ) -> impl IntoElement {
-    let content = match &hover.contents {
-        HoverContents::Markup(MarkupContent { value, .. }) => value.clone(),
-        HoverContents::Scalar(ms) => match ms {
-            MarkedString::String(s) => s.clone(),
-            MarkedString::LanguageString(ls) => ls.value.clone(),
-        },
-        HoverContents::Array(arr) => arr
-            .iter()
-            .map(|ms| match ms {
-                MarkedString::String(s) => s.clone(),
-                MarkedString::LanguageString(ls) => ls.value.clone(),
-            })
-            .collect::<Vec<_>>()
-            .join("\n---\n"),
+    let content = match tooltip {
+        Tooltip::Text(text) => text.to_string(),
+        Tooltip::Code(code) => format!("```typst\n{}\n```", code),
     };
 
     div()
@@ -169,7 +151,7 @@ fn render_hover_popup(
 
 // Helper to render an element and then other elements on top in a stack.
 fn element_to_parent_stack(
-    mut parent_element: AnyElement,
+    parent_element: AnyElement,
     children: impl Iterator<Item = AnyElement>,
 ) -> AnyElement {
     let mut elements: Vec<AnyElement> = vec![parent_element];

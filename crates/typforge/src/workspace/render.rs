@@ -1,9 +1,14 @@
-use crate::workspace::TypstNoteView;
+use crate::{
+    actions::{self, ReloadSettings},
+    workspace::TypstNoteView,
+};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::{ActiveTheme, button::Button, h_flex};
 
-impl<W: typst_gpui::TypstGpuiWorld> Render for TypstNoteView<W> {
+impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
+    for TypstNoteView<W>
+{
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         //let is_maximized = window.is_fullscreen();
 
@@ -99,6 +104,17 @@ impl<W: typst_gpui::TypstGpuiWorld> Render for TypstNoteView<W> {
             .on_action(cx.listener(Self::handle_export_pdf))
             //export to docx
             .on_action(cx.listener(Self::handle_export_docx))
+            //reload settings
+            .on_action(cx.listener(Self::handle_reload_settings))
+            .on_action(cx.listener(|this, action: &actions::ToggleBold, _, cx| {
+                this.ribbon_panel
+                    .update(cx, |ribbon, cx| ribbon.handle_toggle_bold(action, cx));
+            }))
+            .on_action(cx.listener(|this, action: &actions::ToggleItalic, _, cx| {
+                this.ribbon_panel
+                    .update(cx, |ribbon, cx| ribbon.handle_toggle_italic(action, cx));
+            }))
+            //  cx.listener(Self::handle_reload_settings))
             //.child(self.dock_area.clone())
             .child(
                 // 2. Title Bar
@@ -155,6 +171,9 @@ impl<W: typst_gpui::TypstGpuiWorld> Render for TypstNoteView<W> {
                         .child(menu_bar),
                 )
             })
+            // --- 3. Render Ribbon Panel ---
+            // Positioned cleanly underneath the window menu bar, stretching full-width.
+            .child(self.ribbon_panel.clone())
             .child(
                 // 2. Main Body Area (Horizontal Flex) - Now handled by DockArea
                 self.dock_area.clone(),

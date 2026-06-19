@@ -1,13 +1,14 @@
 [package]
-name = "typsdocx"
-version = "0.0.1"
+name = "typforge-core"
+version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 typst.workspace = true
+typst-syntax.workspace = true
 typst-layout.workspace = true
-docx-rs = "0.4.19"
-# We use IndexMap to preserve insertion order while grouping by Y-coord
-indexmap = "2.13.0"
+typst-ide = "0.15.0"
+typstyle-core = "0.14.4"
+serde.workspace = true

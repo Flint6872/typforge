@@ -1,5 +1,5 @@
 [workspace.package]
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Flint <flint6872@gmail.com>"]
 edition = "2024"
 license = "MIT OR Apache-2.0"             # This is the magic line
@@ -8,10 +8,10 @@ license = "MIT OR Apache-2.0"             # This is the magic line
 resolver = "2"
 
 members = [
-    "crates/typforge",
-    "crates/typsdocx",
-    "crates/typst-gpui",
-    "crates/typstography",
+    "crates/typforge",      #main binary
+    "crates/typsdocx",      #typst document to MS word export
+    "crates/typst-gpui",    #renderer for typst to gpui
+    "crates/typforge-core", #mostly holds the AST info
 ]
 
 
@@ -29,21 +29,25 @@ gpui_macros = { git = "https://github.com/zed-industries/zed" } # NEW: If you us
 #     "tree-sitter-languages",
 # ] }
 
-# gpui-component = { path = "../gpui-component/crates/ui", features = [
-#     "tree-sitter-languages",
-# ] }
-
-gpui-component = { git = "https://github.com/Flint6872/gpui-component", features = [
+gpui-component = { path = "../gpui-component/crates/ui", features = [
     "tree-sitter-languages",
 ] }
 
-typst = "0.14.2"
+# gpui-component = { git = "https://github.com/Flint6872/gpui-component", features = [
+#     "tree-sitter-languages",
+# ] }
+
+typst = "0.15.0"
+typst-syntax = "0.15.0"
+typst-layout = "0.15.0"
 chrono = "0.4.44"
 
 tower-lsp = "0.20"
 lsp-types = "0.97.0"
 tokio = { version = "1", features = ["full"] }
 parking_lot = "0.12.5"
+
+serde = { version = "1.0", features = ["derive"] }
 
 [profile.release]
 opt-level = 3

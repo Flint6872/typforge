@@ -3,6 +3,7 @@ mod typst_point;
 mod utils;
 
 use typst_curve::TypstCurveExt;
+use typst_layout::PagedDocument;
 use typst_point::TypstPointExt;
 use utils::{
     resolve_font_with_fallback, typst_color_to_gpui_hsla, typst_dash_to_gpui,
@@ -107,7 +108,7 @@ impl Default for TypstRenderState {
 // Our custom GPUI element for rendering Typst content.
 pub struct TypstElement {
     id: ElementId,
-    document: Arc<typst::layout::PagedDocument>, // This will hold the compiled Typst document.
+    document: Arc<PagedDocument>, // This will hold the compiled Typst document.
     page_margin: f32,
     zoom: f32,
 
@@ -117,6 +118,7 @@ pub struct TypstElement {
     selection_range: Option<std::ops::Range<usize>>,
     on_hit_map_updated: Option<Arc<Mutex<dyn FnMut(HitMap, &mut App) + Send + Sync + 'static>>>,
     show_cursor: bool,
+    pub span_resolver: Option<Arc<dyn Fn(Span, u16) -> usize + Send + Sync + 'static>>,
 }
 
 // Manual implementation of Debug for TypstElement
@@ -137,7 +139,7 @@ impl Debug for TypstElement {
 impl PartialEq for TypstElement {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id && // Include ID in equality check
-            Arc::<typst::layout::PagedDocument>::ptr_eq(&self.document, &other.document)
+            Arc::<PagedDocument>::ptr_eq(&self.document, &other.document)
                 && self.page_margin == other.page_margin
                 && self.zoom == other.zoom
     }
@@ -177,12 +179,12 @@ impl Element for TypstElement {
         let mut total_height = 0.0;
         let mut max_width: f32 = 0.0;
 
-        for (i, page) in self.document.pages.iter().enumerate() {
+        for (i, page) in self.document.pages().iter().enumerate() {
             let size = page.frame.size();
             total_height += size.y.to_pt() as f32 * scale;
             max_width = max_width.max(size.x.to_pt() as f32 * scale);
 
-            if i < self.document.pages.len() - 1 {
+            if i < self.document.pages().len() - 1 {
                 // Scale the margin as well
                 total_height += self.page_margin * self.zoom;
             }
@@ -233,7 +235,7 @@ impl Element for TypstElement {
         let mut current_page_screen_y = bounds.origin.y; // For actual painting
         let mut y_offset_from_top = Pixels::ZERO; // For STABLE hit-mapping
 
-        for (i, page) in self.document.pages.iter().enumerate() {
+        for (i, page) in self.document.pages().iter().enumerate() {
             let page_height = Pixels::from(page.frame.height().to_pt() as f32 * scale_factor);
             let frame_origin_in_gpui = gpui::point(bounds.origin.x, current_page_screen_y);
 
@@ -270,7 +272,7 @@ impl Element for TypstElement {
 
             // Advance both counters by exactly the same amount
             let advance = page_height
-                + if i < self.document.pages.len() - 1 {
+                + if i < self.document.pages().len() - 1 {
                     page_margin_px
                 } else {
                     Pixels::ZERO
@@ -373,13 +375,14 @@ impl EventEmitter<PreviewPanelEvent> for TypstElement {}
 
 impl TypstElement {
     pub fn new(
-        document: Arc<typst::layout::PagedDocument>,
+        document: Arc<PagedDocument>,
         render_state: Arc<TypstRenderState>,
         //scroll_offset: Point<Pixels>,
         cursor_offset: Option<usize>,
         selection_range: Option<std::ops::Range<usize>>,
         on_hit_map_updated: Option<Arc<Mutex<dyn FnMut(HitMap, &mut App) + Send + Sync + 'static>>>,
         show_cursor: bool,
+        span_resolver: Option<Arc<dyn Fn(Span, u16) -> usize + Send + Sync + 'static>>, // Add this
     ) -> Self {
         Self {
             id: gpui::ElementId::from(0),
@@ -393,6 +396,7 @@ impl TypstElement {
             selection_range,
             on_hit_map_updated,
             show_cursor,
+            span_resolver,
         }
     }
 
@@ -510,16 +514,23 @@ impl TypstElement {
                         );
                         let glyph_height = font_size;
 
-                        let (span, _index) = glyph_instance.span;
-                        let glyph_range = glyph_instance.range(); // Get the range here
+                        let (span, index) = glyph_instance.span;
+                        let glyph_range = glyph_instance.range();
+
+                        // --- NEW: Map relative span offsets to absolute document offsets ---
+                        let byte_offset = if let Some(resolver) = &self.span_resolver {
+                            resolver(span, index)
+                        } else {
+                            glyph_range.start
+                        };
 
                         hit_map_collector.push_glyph(GlyphInfo {
                             bounds: Bounds::new(
                                 glyph_origin,
                                 gpui::size(glyph_width, glyph_height),
                             ),
-                            byte_offset: glyph_range.start,
-                            byte_len: glyph_range.len(), // STORE THE LENGTH
+                            byte_offset, // Uses the resolved absolute offset!
+                            byte_len: glyph_range.len(),
                             span,
                         });
 
@@ -678,7 +689,7 @@ impl TypstElement {
                             // For curves, use bbox_size for tiling if it's a closed shape
                             typst::visualize::Geometry::Curve(curve) if curve.is_closed() => {
                                 // **New: Check for closed curve**
-                                let typst_bbox_size = curve.bbox_size();
+                                let typst_bbox_size = curve.bbox(None).size();
                                 let w =
                                     Pixels::from(typst_bbox_size.x.to_pt() as f32 * scale_factor);
                                 let h =
@@ -853,7 +864,7 @@ impl TypstElement {
                         }
 
                         typst::visualize::Geometry::Curve(curve) => {
-                            let typst_bbox_size = curve.bbox_size();
+                            let typst_bbox_size = curve.bbox(None).size();
                             let w = Pixels::from(typst_bbox_size.x.to_pt() as f32 * scale_factor);
                             let h = Pixels::from(typst_bbox_size.y.to_pt() as f32 * scale_factor);
                             let bounds =

@@ -19,21 +19,21 @@ gpui_macros = { git = "https://github.com/zed-industries/zed" } # NEW: If you us
 
 gpui_util = "0.2.2"
 gpui-component.workspace = true
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
 
-gpui-component-assets = "0.5.1"
 typst-gpui = { path = "../typst-gpui" }
+typforge-core = { path = "../typforge-core" }
 
-tower-lsp.workspace = true
-lsp-types.workspace = true
-tokio.workspace = true
 parking_lot.workspace = true
 ropey = "2.0.0-beta.1"
 serde_json = "1.0.149"
-serde = { version = "1.0", features = ["derive"] }
+serde.workspace = true
 
-typstography = { path = "../typstography" }
 
 anyhow = "1.0" # Added for consistent error handling in main
 
-typst = "0.14.2"
-typst-kit = { version = "0.14", features = ["fonts", "embed-fonts"] }
+typst.workspace = true
+typst-layout.workspace = true
+typst-kit = { version = "0.15.0", features = ["scan-fonts", "embedded-fonts"] }
+
+lsp-types = "0.97.0"

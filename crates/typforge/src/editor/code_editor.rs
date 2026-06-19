@@ -1,8 +1,12 @@
 use gpui::{Point, Styled, *};
-use gpui_component::{ActiveTheme, h_flex, input::*, v_flex};
-use typstography::{Position as LspPosition, gpui_bridge::map_diagnostics};
+use gpui_component::{
+    h_flex,
+    highlighter::{Diagnostic, DiagnosticSeverity},
+    input::*,
+    v_flex,
+};
+use typst::diag::{Severity, SourceDiagnostic};
 
-//#[derive(Clone)]
 pub struct CodeEditor {
     id: ElementId,
     editor: Entity<InputState>,
@@ -11,7 +15,7 @@ pub struct CodeEditor {
     font_size: Option<Pixels>,
     line_height: Option<Pixels>,
 
-    // Listeners passed from the parent to handle LSP logic (Hover, etc.)
+    // Listeners passed from the parent to handle IDE logic (Hover, etc.)
     on_mouse_move: Option<Box<dyn Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static>>,
     on_mouse_down: Option<Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>>,
 }
@@ -25,7 +29,6 @@ impl Clone for CodeEditor {
             height: self.height.clone(),
             font_size: self.font_size.clone(),
             line_height: self.font_size.clone(),
-            // Closures cannot be cloned, so they are reset to None in a clone
             on_mouse_move: None,
             on_mouse_down: None,
         }
@@ -36,7 +39,7 @@ impl CodeEditor {
     pub fn new(
         editor_state: Entity<InputState>,
         language: String,
-        _initial_diagnostics: Vec<typstography::Diagnostic>,
+        _initial_diagnostics: Vec<typst::diag::SourceDiagnostic>,
     ) -> Self {
         Self {
             id: ElementId::from("code-editor"),
@@ -55,18 +58,16 @@ impl CodeEditor {
         self
     }
 
-    /// Sets the line height of this element and its children.
     pub fn line_height(mut self, line_height: impl Into<Pixels>) -> Self {
         self.line_height = Some(line_height.into());
         self
     }
 
     pub fn h_full(mut self) -> Self {
-        self.height = Some(relative(1.)); // Use relative(1.) for full height
+        self.height = Some(relative(1.));
         self
     }
 
-    /// Attach a listener for mouse move events (used for Hover).
     pub fn on_mouse_move(
         mut self,
         listener: impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static,
@@ -75,7 +76,6 @@ impl CodeEditor {
         self
     }
 
-    /// Attach a listener for mouse down events (used to clear UI).
     pub fn on_mouse_down(
         mut self,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
@@ -93,80 +93,118 @@ impl CodeEditor {
 
     pub fn set_diagnostics(
         &mut self,
-        lsp_diagnostics: Vec<typstography::Diagnostic>,
+        diagnostics: Vec<SourceDiagnostic>,
+        source: &typst::syntax::Source,
         cx: &mut Context<Self>,
     ) {
         self.editor.update(cx, |input_state, input_cx| {
+            let text = input_state.text().clone();
+
             if let Some(diagnostic_set) = input_state.diagnostics_mut() {
                 diagnostic_set.clear();
-                // Use the bridge to convert 0.94 diagnostics to GPUI-compatible ones
-                let gpui_diagnostics = map_diagnostics(lsp_diagnostics);
-                diagnostic_set.extend(gpui_diagnostics);
+
+                for diag in diagnostics {
+                    let range = match diag.span.get() {
+                        // If it's a standard numbered span, we can extract the SpanNumber
+                        typst::syntax::DiagSpanKind::Number { num, .. } => {
+                            source.range(num, None).unwrap_or(0..0)
+                        }
+                        // If it's a raw range span, we can use it directly
+                        typst::syntax::DiagSpanKind::Range { range, .. } => range,
+                        // If it's detached, we have no range
+                        _ => 0..0,
+                    };
+
+                    // Convert byte range to Position range for GPUI
+                    let start_pos = text.offset_to_position(range.start);
+                    let end_pos = text.offset_to_position(range.end);
+                    let position_range = start_pos..end_pos;
+
+                    // Use the constructor provided by gpui_component
+                    let severity = match diag.severity {
+                        Severity::Error => DiagnosticSeverity::Error,
+                        Severity::Warning => DiagnosticSeverity::Warning,
+                    };
+
+                    let diagnostic = Diagnostic::new(position_range, diag.message.to_string())
+                        .with_severity(severity);
+
+                    diagnostic_set.push(diagnostic);
+                }
             }
             input_cx.notify();
         });
     }
 
-    /// Converts a screen position (Pixels) to an LSP-compatible text position (line, character).
-    /// This implementation uses only the public API of InputState to perform the conversion.
-    pub fn screen_to_lsp_position(
-        &self,
-        screen_position: Point<Pixels>,
-        cx: &App,
-    ) -> Option<LspPosition> {
+    /// Converts a screen position to a document byte offset using nested Binary Search O(log R + log C)
+    pub fn screen_to_byte_offset(&self, screen_position: Point<Pixels>, cx: &App) -> Option<usize> {
         let input_state = self.editor.read(cx);
         let text = input_state.text();
 
         let visible_range = input_state.visible_row_range()?;
+        if visible_range.is_empty() {
+            return None;
+        }
 
-        for row in visible_range {
-            // Cast `row` to `u32` for gpui_component::input::Position constructor
+        // 1. Binary search to find the correct row vertically
+        let mut low_row = visible_range.start;
+        let mut high_row = visible_range.end.saturating_sub(1);
+        let mut target_row = None;
+
+        while low_row <= high_row {
+            let mid_row = (low_row + high_row) / 2;
             let row_start = text.position_to_offset(&gpui_component::input::Position {
-                line: row as u32,
+                line: mid_row as u32,
                 character: 0,
             });
             let next_row_start = text.position_to_offset(&gpui_component::input::Position {
-                line: (row + 1) as u32,
+                line: (mid_row + 1) as u32,
                 character: 0,
             });
 
             if let Some(line_bounds) = input_state.range_to_bounds(&(row_start..next_row_start)) {
-                if screen_position.y >= line_bounds.top()
-                    && screen_position.y <= line_bounds.bottom()
-                {
-                    let mut low = row_start;
-                    let mut high = if next_row_start > row_start {
-                        next_row_start - 1
-                    } else {
-                        row_start
-                    };
-                    let mut best_offset = row_start;
-
-                    while low <= high {
-                        let mid = (low + high) / 2;
-                        if let Some(char_bounds) = input_state.range_to_bounds(&(mid..mid + 1)) {
-                            if screen_position.x < char_bounds.left() {
-                                high = mid.saturating_sub(1);
-                            } else if screen_position.x > char_bounds.right() {
-                                low = mid + 1;
-                                best_offset = mid + 1;
-                            } else {
-                                best_offset = mid;
-                                break;
-                            }
-                        } else {
-                            high = mid.saturating_sub(1);
-                        }
-                    }
-
-                    let pos = text.offset_to_position(best_offset);
-                    return Some(LspPosition {
-                        line: pos.line as u32,
-                        character: pos.character as u32,
-                    });
+                if screen_position.y < line_bounds.top() {
+                    high_row = mid_row.saturating_sub(1);
+                } else if screen_position.y > line_bounds.bottom() {
+                    low_row = mid_row + 1;
+                } else {
+                    target_row = Some((row_start, next_row_start));
+                    break;
                 }
+            } else {
+                high_row = mid_row.saturating_sub(1);
             }
         }
+
+        // 2. Binary search characters horizontally within that row
+        if let Some((row_start, next_row_start)) = target_row {
+            let mut low = row_start;
+            let mut high = if next_row_start > row_start {
+                next_row_start - 1
+            } else {
+                row_start
+            };
+            let mut best_offset = row_start;
+
+            while low <= high {
+                let mid = (low + high) / 2;
+                if let Some(char_bounds) = input_state.range_to_bounds(&(mid..mid + 1)) {
+                    if screen_position.x < char_bounds.left() {
+                        high = mid.saturating_sub(1);
+                    } else if screen_position.x > char_bounds.right() {
+                        low = mid + 1;
+                        best_offset = mid + 1;
+                    } else {
+                        best_offset = mid;
+                        break;
+                    }
+                } else {
+                    high = mid.saturating_sub(1);
+                }
+            }
+            return Some(best_offset);
+        }
+
         None
     }
 }
@@ -215,7 +253,6 @@ impl IntoElement for CodeEditor {
     fn into_element(self) -> Self::Element {
         let mut input = Input::new(&self.editor).bordered(true).h_full();
 
-        // Apply font size to the Input component if provided
         if let Some(size) = self.font_size {
             input = input.text_size(size);
         }
