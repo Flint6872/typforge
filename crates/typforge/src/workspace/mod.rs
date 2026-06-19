@@ -93,19 +93,19 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
                         this_note_view.preview_panel.update(
                             app_cx_from_handle,
                             |preview, cx_for_preview| {
-                                // 1. Only trigger a full re-source if the content length is different
-                                // (a simple heuristic to avoid unnecessary re-compiles)
-                                if preview.last_text_len != content.len() {
-                                    preview.set_source(content.clone(), window_ref, cx_for_preview);
-                                }
-
-                                // 2. Always update document info for metadata
+                                // 1. CRITICAL FIX: Always update the document metadata and root folder FIRST
+                                // so that relative image paths and includes resolve correctly during compilation.
                                 preview.update_document_info(
-                                    path,
-                                    content,
+                                    path.clone(),
+                                    content.clone(),
                                     window_ref,
                                     cx_for_preview,
                                 );
+
+                                // 2. CRITICAL FIX: Set the source SECOND (which triggers compile()).
+                                // We always run this to guarantee that switches between files of the same
+                                // length are handled correctly.
+                                preview.set_source(content.clone(), window_ref, cx_for_preview);
                             },
                         );
                     })
