@@ -29,7 +29,7 @@ impl<W: typst::World + typforge_core::IdeWorld + 'static> TypstCompletionProvide
         let world = world_mutex.lock();
         let main_id = world.main();
 
-        let mut items = if let Ok(source) = world.source(main_id) {
+        let items = if let Ok(source) = world.source(main_id) {
             let completions = get_completions(&*world, None, &source, cursor, false);
 
             // 1. Get context-aware trigger details
@@ -254,41 +254,6 @@ fn is_size_context(rope: &Rope, mut offset: usize) -> bool {
     } else {
         false
     }
-}
-
-/// Translates Typst snippet format (e.g., `${body}`) to LSP format (e.g., `${1:body}`)
-fn convert_typst_snippet_to_lsp(snippet: &str) -> String {
-    if snippet.ends_with("()") {
-        return snippet.replace("()", "($1)");
-    }
-
-    let mut result = String::new();
-    let mut chars = snippet.chars().peekable();
-    let mut tab_index = 1;
-
-    while let Some(c) = chars.next() {
-        if c == '$' && chars.peek() == Some(&'{') {
-            chars.next(); // Consume '{'
-            let mut placeholder = String::new();
-            while let Some(&inner_c) = chars.peek() {
-                if inner_c == '}' {
-                    chars.next(); // Consume '}'
-                    break;
-                }
-                placeholder.push(chars.next().unwrap());
-            }
-
-            if placeholder.is_empty() {
-                result.push_str(&format!("${}", tab_index));
-                tab_index += 1;
-            } else {
-                result.push_str(&placeholder);
-            }
-        } else {
-            result.push(c);
-        }
-    }
-    result
 }
 
 /// Scans backwards to find the context-aware trigger boundary.

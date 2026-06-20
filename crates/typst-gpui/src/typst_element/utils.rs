@@ -116,25 +116,6 @@ pub fn resolve_font_with_fallback(family: &str, weight: u16, cx: &App) -> Option
     None
 }
 
-// Helper for converting Typst's LineCap to GPUI's StrokeCap
-// Helper for converting Typst's LineCap to lyon_path::LineCap
-pub fn typst_linecap_to_gpui(cap: &typst::visualize::LineCap) -> lyon_path::LineCap {
-    match cap {
-        typst::visualize::LineCap::Butt => lyon_path::LineCap::Butt,
-        typst::visualize::LineCap::Round => lyon_path::LineCap::Round,
-        typst::visualize::LineCap::Square => lyon_path::LineCap::Square,
-    }
-}
-
-// Helper for converting Typst's LineJoin to lyon_path::LineJoin
-pub fn typst_linejoin_to_gpui(join: &typst::visualize::LineJoin) -> lyon_path::LineJoin {
-    match join {
-        typst::visualize::LineJoin::Miter => lyon_path::LineJoin::Miter,
-        typst::visualize::LineJoin::Round => lyon_path::LineJoin::Round,
-        typst::visualize::LineJoin::Bevel => lyon_path::LineJoin::Bevel,
-    }
-}
-
 // Helper for converting Typst's DashPattern to GPUI's dash array and offset
 pub fn typst_dash_to_gpui(
     // Now takes the exact type from FixedStroke::dash

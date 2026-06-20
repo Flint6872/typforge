@@ -177,7 +177,7 @@ fn toggle_wrapper_ast(content: &str, range: Range<usize>, kind_to_toggle: Syntax
 }
 
 /// Helper function to find the inner content range of a trailing content block of a FuncCall.
-fn get_content_body_range(content: &str, func_call: &LinkedNode) -> Option<Range<usize>> {
+fn get_content_body_range(func_call: &LinkedNode) -> Option<Range<usize>> {
     // Search both directly under FuncCall and under its Args child (Typst 0.14 layout)
     let content_node = func_call
         .children()
@@ -218,7 +218,6 @@ fn collect_text_nodes<'a>(node: &LinkedNode<'a>, nodes: &mut Vec<LinkedNode<'a>>
 
 /// Find if there's a valid `#text` node we can merge arguments into instead of nesting.
 fn find_target_text_node_for_merge<'a>(
-    content: &str,
     root: &'a LinkedNode<'a>,
     range: Range<usize>,
 ) -> Option<(LinkedNode<'a>, Range<usize>)> {
@@ -228,7 +227,7 @@ fn find_target_text_node_for_merge<'a>(
     // Innermost first
     for node in candidates.iter().rev() {
         let node_range = node.range();
-        if let Some(body_range) = get_content_body_range(content, node) {
+        if let Some(body_range) = get_content_body_range(node) {
             // Case 1: Selection is inside/covers content body
             if range.start >= body_range.start && range.end <= body_range.end {
                 if range.is_empty()
@@ -273,17 +272,17 @@ fn adjust_selection(
 }
 
 /// Parses arguments to find if a key is present and returns its value
-fn get_arg_value(inner_args: &str, key: &str) -> Option<String> {
-    for param in inner_args.split(',') {
-        let trimmed = param.trim();
-        if let Some((p_key, p_val)) = trimmed.split_once(':') {
-            if p_key.trim() == key {
-                return Some(p_val.trim().to_string());
-            }
-        }
-    }
-    None
-}
+// fn get_arg_value(inner_args: &str, key: &str) -> Option<String> {
+//     for param in inner_args.split(',') {
+//         let trimmed = param.trim();
+//         if let Some((p_key, p_val)) = trimmed.split_once(':') {
+//             if p_key.trim() == key {
+//                 return Some(p_val.trim().to_string());
+//             }
+//         }
+//     }
+//     None
+// }
 
 /// Removes a key from the arguments, returning the new inner args string and whether it is now empty.
 fn remove_arg(inner_args: &str, key: &str) -> (String, bool) {
@@ -334,7 +333,7 @@ fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &s
     let root = LinkedNode::new(&tree);
 
     if let Some((formatting_node, body_range)) =
-        find_target_text_node_for_merge(content, &root, active_range.clone())
+        find_target_text_node_for_merge(&root, active_range.clone())
     {
         if let Some(args_node) = formatting_node
             .children()

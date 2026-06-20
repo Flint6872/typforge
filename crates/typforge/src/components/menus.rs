@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::actions::{self, ChangeTheme};
-use gpui::{App, Menu, MenuItem, SharedString};
+use gpui::{App, Menu, MenuItem};
 use gpui_component::{ThemeRegistry, ThemeSet};
 
 pub fn setup_menus(cx: &mut App) {
@@ -28,19 +28,16 @@ pub fn setup_menus(cx: &mut App) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().map_or(false, |ext| ext == "json") {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    // Try to read the "name" field from the JSON
-                    if let Ok(file_content) = std::fs::read_to_string(&path) {
-                        if let Ok(theme_set) = serde_json::from_str::<ThemeSet>(&file_content) {
-                            for theme in theme_set.themes {
-                                let display_name = theme.name.clone();
-                                let registry_key = display_name.clone(); // Assuming name in JSON is the key
+                if let Ok(file_content) = std::fs::read_to_string(&path) {
+                    if let Ok(theme_set) = serde_json::from_str::<ThemeSet>(&file_content) {
+                        for theme in theme_set.themes {
+                            let display_name = theme.name.clone();
+                            let registry_key = display_name.clone(); // Assuming name in JSON is the key
 
-                                if !theme_map.contains_key(&registry_key.to_string()) {
-                                    theme_map
-                                        .insert(registry_key.to_string(), display_name.to_string());
-                                    eprintln!("Found custom theme from file: '{}'", display_name);
-                                }
+                            if !theme_map.contains_key(&registry_key.to_string()) {
+                                theme_map
+                                    .insert(registry_key.to_string(), display_name.to_string());
+                                eprintln!("Found custom theme from file: '{}'", display_name);
                             }
                         }
                     }

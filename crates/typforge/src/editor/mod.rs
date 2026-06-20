@@ -148,13 +148,3 @@ fn render_hover_popup<W: typst::World + typforge_core::IdeWorld + 'static>(
         .w(px(400.0)) // Max width
         .child(content)
 }
-
-// Helper to render an element and then other elements on top in a stack.
-fn element_to_parent_stack(
-    parent_element: AnyElement,
-    children: impl Iterator<Item = AnyElement>,
-) -> AnyElement {
-    let mut elements: Vec<AnyElement> = vec![parent_element];
-    elements.extend(children);
-    div().children(elements).into_any_element()
-}

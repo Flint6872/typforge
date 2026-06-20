@@ -69,20 +69,6 @@ impl RibbonPanel {
         self.active_tab = tab;
         cx.notify();
     }
-
-    // Help UI reflect changes from outside
-    pub fn update_text_states(
-        &mut self,
-        is_bold: bool,
-        is_italic: bool,
-        size: f32,
-        cx: &mut Context<Self>,
-    ) {
-        self.is_bold = is_bold;
-        self.is_italic = is_italic;
-        self.font_size = size;
-        cx.notify();
-    }
 }
 
 impl EventEmitter<RibbonAction> for RibbonPanel {}

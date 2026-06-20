@@ -1,5 +1,5 @@
 use crate::{
-    actions::{self, ReloadSettings},
+    actions::{self},
     workspace::TypstNoteView,
 };
 use gpui::prelude::FluentBuilder;

@@ -1,4 +1,4 @@
-//#![windows_subsystem = "windows"]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -11,10 +11,7 @@ use crate::{
 };
 
 use gpui::*;
-use gpui_component::{
-    Root,
-    theme::{Theme, ThemeMode, ThemeRegistry},
-};
+use gpui_component::Root;
 use gpui_component_assets::Assets;
 
 use parking_lot::Mutex;

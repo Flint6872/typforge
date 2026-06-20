@@ -2,8 +2,7 @@
 
 use crate::editor::{CodeEditor, DraggedTab, EditorPanel, FileContentUpdated, TabDrag};
 use gpui::*;
-use gpui_component::popover::Popover;
-use gpui_component::{ActiveTheme, StyledExt, h_flex, scroll::ScrollableElement};
+use gpui_component::{ActiveTheme, h_flex};
 
 use std::time::Duration;
 use std::time::Instant;

@@ -1,11 +1,8 @@
-use std::path::PathBuf;
-
 use gpui::{App, SharedString};
 use gpui_component::{Theme, ThemeRegistry};
 
 use crate::actions::ChangeTheme;
 use crate::components::menus::setup_menus;
-use crate::settings::update_theme_setting;
 
 pub fn init(cx: &mut App) {
     // 1. Try to find the absolute path to be sure

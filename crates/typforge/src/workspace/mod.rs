@@ -6,13 +6,12 @@ use std::sync::Arc;
 
 // Import necessary types
 use crate::{
-    actions::{self, RibbonAction},
+    actions::RibbonAction,
     editor::{FileContentUpdated, editor_panel::EditorPanel},
     panels::{FilesPanel, OpenFileEvent},
-    ribbon::panel::RibbonPanel,
+    ribbon::RibbonPanel,
 };
 use gpui_component::{
-    RopeExt,
     dock::{DockArea, DockItem},
     menu::AppMenuBar,
 };
@@ -62,7 +61,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         // --- Handles to be captured by closures ---
         let window_handle = window.window_handle();
         let editor_panel_entity_clone_for_subscriptions = editor_panel_entity.clone();
-        let preview_panel_clone_for_subscriptions = preview_panel.clone();
+        // let preview_panel_clone_for_subscriptions = preview_panel.clone();
         let files_panel_clone_for_subscriptions = files_panel.clone();
 
         // --- 1. Ribbon Event Subscription ---
@@ -134,11 +133,24 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
             let active_file_path_from_initial_read =
                 editor_panel_entity.read(cx).active_file_path.clone(); // Re-read path
 
-            // The `editor_panel_entity.update` needs to capture these values, so it must be `move`.
-            let content_clone = content_from_initial_read.clone();
-            let path_clone = active_file_path_from_initial_read.clone();
+            let preview_panel_clone = preview_panel.clone();
 
-            editor_panel_entity.update(cx, move |editor_panel_view, cx_for_editor_panel| {});
+            let _ = window_handle
+                .clone()
+                .update(cx, move |_, window_ref, app_cx_in_init| {
+                    preview_panel_clone.update(app_cx_in_init, |panel, cx_for_preview| {
+                        // Pass the content and path to the preview panel
+                        // The order is critical: update_document_info first, then set_source.
+                        panel.update_document_info(
+                            active_file_path_from_initial_read,
+                            content_from_initial_read.clone(), // Clone for update_document_info, as set_source consumes
+                            window_ref,
+                            cx_for_preview,
+                        );
+                        panel.set_source(content_from_initial_read, window_ref, cx_for_preview);
+                    });
+                })
+                .log_err();
         } else {
             // If no active file, set a default "Hello, Typst!"
             // Use window_handle to get &mut Window.
@@ -146,13 +158,13 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
                 .clone()
                 .update(cx, |_, window_ref, app_cx_in_init| {
                     preview_panel.update(app_cx_in_init, |panel, cx_for_preview| {
-                        panel.set_source("Hello, Typst!".to_string(), window_ref, cx_for_preview);
                         panel.update_document_info(
                             None,
                             "Hello, Typst!".to_string(),
                             window_ref,
                             cx_for_preview,
                         );
+                        panel.set_source("Hello, Typst!".to_string(), window_ref, cx_for_preview);
                     });
                 })
                 .log_err();
@@ -160,8 +172,6 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
 
         // --- 4. Preview -> Editor Synchronization (via PreviewPanelEvent::AppendChar) ---
         // This listener takes input from the PreviewPanel and pushes it to the EditorPanel.
-        let editor_panel_handle_for_preview_sync =
-            editor_panel_entity_clone_for_subscriptions.clone();
         cx.subscribe(
             &preview_panel,
             move |this_note_view, _emitter, event, cx_for_note_view| {

@@ -3,17 +3,13 @@ mod handlers;
 mod render;
 
 use crate::editor::{CodeEditor, FileContentUpdated, OpenedFile};
-use crate::typst_world::GpuiWorld;
+
 use gpui::*;
-use gpui_component::{
-    dock::Panel as DockPanel,
-    input::{CompletionProvider, InputState},
-};
-use parking_lot::{Mutex, RawMutex};
+use gpui_component::{dock::Panel as DockPanel, input::InputState};
+use parking_lot::Mutex;
 use std::rc::Rc;
 use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
-use typst_gpui::TypstGpuiWorld;
 
 use typforge_core::intel::{Completion, Tooltip, get_completions, get_hover_info};
 
@@ -136,7 +132,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
     }
 
     fn subscribe_to_editor_changes(
-        this: &mut Self,
+        _this: &mut Self,
         path: PathBuf,
         editor_state: &Entity<InputState>,
         cx: &mut Context<Self>,
@@ -146,7 +142,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
             editor_state,
             move |this_view, editor_entity, event: &gpui_component::input::InputEvent, cx| {
                 if let gpui_component::input::InputEvent::Change = event {
-                    if let Some(file) = this_view.open_files.iter_mut().find(|f| f.path == path) {
+                    if let Some(_file) = this_view.open_files.iter_mut().find(|f| f.path == path) {
                         let content = editor_entity.read(cx).text().to_string();
                         let cursor = editor_entity.read(cx).cursor();
 

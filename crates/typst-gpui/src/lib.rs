@@ -585,7 +585,7 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                     cx.stop_propagation();
                 }),
             )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
                 let mut over_link = false;
                 for link in &this.last_hit_map.links {
                     if link.bounds.contains(&event.position) {
@@ -661,15 +661,6 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                     // .overflow_y_scrollbar() // Enables both X and Y
                     .items_start()
                     .child(if let Some(doc) = &self.document {
-                        // Calculate range from anchor and current cursor
-                        let selection_range = self.selection_anchor.and_then(|anchor| {
-                            if anchor == self.cursor_offset {
-                                None
-                            } else {
-                                Some(anchor.min(self.cursor_offset)..anchor.max(self.cursor_offset))
-                            }
-                        });
-
                         // Create the resolver closure accessing the world
                         let world_clone = self.world.clone();
                         let span_resolver = Some(std::sync::Arc::new(

@@ -191,7 +191,7 @@ impl RibbonPanel {
                                                 cx.notify();
                                             }),
                                         )
-                                        .on_mouse_move(cx.listener(move |_, _, _, cx| {
+                                        .on_mouse_move(cx.listener(move |_, _, _, _cx| {
                                             //  cx.emit(RibbonAction::SetFontSize(size));
                                         }))
                                         .child(format!("{}", size))
