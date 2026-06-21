@@ -4,12 +4,11 @@ mod typst_curve;
 mod typst_point;
 mod utils;
 
-use typst_layout::PagedDocument;
+use typst_curve::TypstCurveExt;
 use typst_point::TypstPointExt;
 
-use gpui::{App, Bounds, Element, ElementId, EventEmitter, LayoutId, Pixels, Point, Window};
-
 use crate::PreviewPanelEvent;
+use gpui::{App, Bounds, Element, ElementId, EventEmitter, LayoutId, Pixels, Point, Window};
 use parking_lot::Mutex;
 use std::{
     collections::HashMap,
@@ -24,6 +23,7 @@ use typst::{
     layout::{Frame, FrameItem},
     syntax::Span,
 };
+use typst_layout::PagedDocument;
 
 const DPI: f32 = 96.0;
 const PT_TO_PX: f32 = DPI / 72.0;

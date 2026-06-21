@@ -1,17 +1,16 @@
-use crate::typst_element::TypstElement;
-use crate::typst_element::typst_curve::TypstCurveExt;
-use crate::typst_element::typst_point::TypstPointExt;
-use crate::typst_element::utils::{
-    typst_color_to_gpui_hsla, typst_dash_to_gpui, typst_paint_to_gpui_background,
-    typst_paint_to_gpui_hsla_from_paint,
+use crate::typst_element::{
+    AnimationState, HitMap, TypstCurveExt, TypstElement, TypstPointExt,
+    utils::{
+        typst_color_to_gpui_hsla, typst_dash_to_gpui, typst_paint_to_gpui_background,
+        typst_paint_to_gpui_hsla_from_paint,
+    },
 };
-use crate::typst_element::{AnimationState, HitMap};
 use gpui::{App, Bounds, Pixels, Point, Window};
-use std::sync::Arc;
-use std::time::Instant;
-use typst::visualize::{Gradient, Paint};
-use typst_library::layout::Size;
-use typst_library::visualize::Image;
+use std::{sync::Arc, time::Instant};
+use typst::{
+    layout::Size,
+    visualize::{Gradient, Image, Paint},
+};
 
 // We will pass a reference to the TypstElement or a struct containing these dependencies
 pub fn frame_item_image(

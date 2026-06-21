@@ -1,11 +1,11 @@
-// crates/typforge/src/typst_element/frame_item_text.rs
-
-use crate::typst_element::utils::{
-    resolve_font_with_fallback, typst_color_to_gpui_hsla, typst_paint_to_gpui_hsla_from_paint,
+use crate::typst_element::{
+    GlyphInfo, HitMap,
+    utils::{
+        resolve_font_with_fallback, typst_color_to_gpui_hsla, typst_paint_to_gpui_hsla_from_paint,
+    },
 };
-use crate::typst_element::{GlyphInfo, HitMap};
 use gpui::{App, Bounds, GlyphId, Pixels, Point, Window, size};
-use typst_library::text::TextItem;
+use typst::text::TextItem;
 
 pub fn frame_item_text(
     text_item: &TextItem,
