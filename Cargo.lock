@@ -8064,6 +8064,7 @@ dependencies = [
  "typsdocx",
  "typst",
  "typst-layout",
+ "typst-library",
  "typst-pdf",
 ]
 
