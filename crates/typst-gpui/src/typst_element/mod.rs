@@ -8,7 +8,10 @@ use typst_curve::TypstCurveExt;
 use typst_point::TypstPointExt;
 
 use crate::PreviewPanelEvent;
-use gpui::{App, Bounds, Element, ElementId, EventEmitter, LayoutId, Pixels, Point, Window};
+use gpui::{
+    App, Bounds, Element, ElementId, EventEmitter, LayoutId, Pixels, Point, TransformationMatrix,
+    Window,
+};
 use parking_lot::Mutex;
 use std::{
     collections::HashMap,
@@ -19,6 +22,7 @@ use std::{
     },
     time::Instant,
 };
+use typst::text::Font;
 use typst::{
     layout::{Frame, FrameItem},
     syntax::Span,
@@ -261,6 +265,7 @@ impl Element for TypstElement {
                 window,
                 cx,
                 1,
+                gpui::TransformationMatrix::unit(),
                 &mut generated_hit_map,
             );
 
@@ -408,22 +413,26 @@ impl TypstElement {
         window: &mut Window,
         cx: &mut App,
         depth: usize,
+        current_transform: TransformationMatrix,
         hit_map_collector: &mut HitMap,
     ) {
         for (item_relative_pos_typst, frame_item_variant) in frame.items() {
+            // `item_absolute_origin_gpui` here represents the UNTRANSFORMED base origin of the current item,
+            // relative to the `origin` of the current frame/group.
+            // The `current_transform` will be applied to the *contents* of this item.
             let item_absolute_origin_gpui =
                 origin + item_relative_pos_typst.to_gpui_pixels(scale_factor);
 
-            let item_relative_pos_gpui = item_relative_pos_typst.to_gpui_pixels(scale_factor);
-
-            // This is for drawing pixels on the screen
-            //let item_screen_origin = origin + item_relative_pos_gpui;
-
-            // This is for the stable scroll target (Top of Page + Item Offset)
-            let item_document_y = y_offset_from_top + item_relative_pos_gpui.y;
+            let item_document_y =
+                y_offset_from_top + item_relative_pos_typst.to_gpui_pixels(scale_factor).y;
 
             match frame_item_variant {
                 FrameItem::Text(text_item) => {
+                    // Debug print: Check if the transform is non-identity
+                    // if current_transform != gpui::TransformationMatrix::unit() {
+                    //     println!("Painting text with transform: {:?}", current_transform);
+                    // }
+
                     frame_item_text::frame_item_text(
                         text_item,
                         item_absolute_origin_gpui,
@@ -431,6 +440,7 @@ impl TypstElement {
                         window,
                         cx,
                         &self.span_resolver,
+                        current_transform,
                         hit_map_collector,
                     );
                 }
@@ -448,14 +458,26 @@ impl TypstElement {
                 }
 
                 FrameItem::Group(group_item) => {
+                    // if !group_item.transform.is_identity() {
+                    //     println!("Applying transform: {:?}", group_item.transform);
+                    // }
+                    // This is crucial: compose the parent transform with the group's local transform
+                    // 1. Convert the Typst group transform to GPUI matrix
+                    let group_local_transform =
+                        utils::typst_transform_to_gpui_matrix(group_item.transform, scale_factor);
+
+                    // 2. Compose: ParentTransform * GroupTransform
+                    let new_current_transform = current_transform.compose(group_local_transform);
+
                     self.paint_frame_items(
-                        item_absolute_origin_gpui,
+                        item_absolute_origin_gpui, // This is already the transformed origin
                         y_offset_from_top,
                         scale_factor,
                         &group_item.frame,
                         window,
                         cx,
                         depth + 1,
+                        new_current_transform, // Pass the NEW composed transform
                         hit_map_collector,
                     );
                 }
@@ -497,6 +519,7 @@ impl TypstElement {
         bounds: gpui::Bounds<Pixels>,
         y_offset_from_top: Pixels,
         scale_factor: f32,
+        current_transform: TransformationMatrix,
         hit_map: &mut HitMap,
     ) {
         let cell_w = Pixels::from(tiling.size().x.to_pt() as f32 * scale_factor);
@@ -523,6 +546,7 @@ impl TypstElement {
                     window,
                     cx,
                     100, // Arbitrary depth limit for recursion
+                    current_transform,
                     hit_map,
                 );
             }

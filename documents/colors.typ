@@ -5,6 +5,8 @@
   footer: none,
 )
 
+#rotate(-1.571rad)[Space!]
+
 #grid(
   columns: 2,
   rows: 2,
@@ -104,87 +106,86 @@ A rainbow using a predefined color map
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.turbo, angle: 90deg)),
-    rotate(-90deg, reflow:true)[turbo],
+    align(center  , rotate(-90deg, reflow: true)[turbo]),
   ),
-   
-    stack(
+
+  stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.cividis, angle: 90deg)),
-    rotate(-90deg, reflow:true)[cividis],
+    align(center, rotate(-90deg, reflow: true)[cividis]),
   ),
-  
+
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.rainbow, angle: 90deg)),
-    rotate(-90deg, reflow:true)[rainbow],
+    align(center, rotate(-90deg, reflow: true)[rainbow]),
   ),
-  
+
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.spectral, angle: 90deg)),
-    rotate(-90deg, reflow:true)[spectral],
+    align(center, rotate(-90deg, reflow: true)[spectral]),
   ),
 
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.viridis, angle: 90deg)),
-    rotate(-90deg, reflow:true)[viridis],
+    align(center, rotate(-90deg, reflow: true)[viridis]),
   ),
 
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.inferno, angle: 90deg)),
-    rotate(-90deg, reflow:true)[inferno],
+    align(center, rotate(-90deg, reflow: true)[inferno]),
   ),
 
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.magma, angle: 90deg)),
-    rotate(-90deg, reflow:true)[magma],
+    align(center, rotate(-90deg, reflow: true)[magma]),
   ),
 
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.plasma, angle: 90deg)),
-    rotate(-90deg, reflow:true)[plasma],
+    align(center, rotate(-90deg, reflow: true)[plasma]),
   ),
-  
+
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.rocket, angle: 90deg)),
-    rotate(-90deg, reflow:true)[rocket],
+    align(center, rotate(-90deg, reflow: true)[rocket]),
   ),
 
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.mako, angle: 90deg)),
-    rotate(-90deg, reflow:true)[cividis],
+    align(center, rotate(-90deg, reflow: true)[cividis]),
   ),
 
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.vlag, angle: 90deg)),
-    rotate(-90deg, reflow:true)[vlag],
+    align(center, rotate(-90deg, reflow: true)[vlag]),
   ),
 
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.icefire, angle: 90deg)),
-    rotate(-90deg, reflow:true)[icefire],
+    align(center, rotate(-90deg, reflow: true)[icefire]),
   ),
 
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.flare, angle: 90deg)),
-    rotate(-90deg, reflow:true)[flare],
+    align(center, rotate(-90deg, reflow: true)[flare]),
   ),
 
   stack(
     spacing: 5pt,
     rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.crest, angle: 90deg)),
-    rotate(-90deg, reflow:true)[crest],
+    align(center, rotate(-90deg, reflow: true)[crest]),
   ),
-
 )
 
 

@@ -181,6 +181,7 @@ pub fn frame_item_shape(
                 bbox,
                 y_offset_from_top,
                 scale_factor,
+                gpui::TransformationMatrix::unit(),
                 hit_map_collector,
             );
             was_tiling_applied = true;

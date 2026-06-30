@@ -21,5 +21,7 @@ typsdocx = { path = "../typsdocx" }
 
 parking_lot.workspace = true
 
+ttf-parser = "0.25.0"
+
 [lib]
 path = "src/lib.rs"

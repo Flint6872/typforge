@@ -1,4 +1,4 @@
-use gpui::{App, Pixels};
+use gpui::{App, Pixels, TransformationMatrix};
 
 pub fn typst_paint_to_gpui_hsla_from_paint(paint: &typst::visualize::Paint) -> gpui::Hsla {
     match paint {
@@ -141,5 +141,23 @@ pub fn typst_dash_to_gpui(
         (Some(dash_array), dash_offset)
     } else {
         (None, Pixels::ZERO)
+    }
+}
+
+pub fn typst_transform_to_gpui_matrix(
+    transform: typst::layout::Transform,
+    scale_factor: f32,
+) -> TransformationMatrix {
+    // Typst transform: (sx, ky, kx, sy, tx, ty)
+    // GPUI TransformationMatrix: [[sx, kx], [ky, sy]] and translation [tx, ty]
+    TransformationMatrix {
+        rotation_scale: [
+            [transform.sx.get() as f32, transform.kx.get() as f32],
+            [transform.ky.get() as f32, transform.sy.get() as f32],
+        ],
+        translation: [
+            transform.tx.to_pt() as f32 * scale_factor,
+            transform.ty.to_pt() as f32 * scale_factor,
+        ],
     }
 }
