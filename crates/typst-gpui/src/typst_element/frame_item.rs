@@ -5,7 +5,7 @@ use crate::typst_element::{
         typst_paint_to_gpui_hsla_from_paint,
     },
 };
-use gpui::{App, Bounds, Pixels, Point, Window};
+use gpui::{App, Bounds, PathBuilder, Pixels, Point, Svg, TransformationMatrix, Window, svg};
 use std::{sync::Arc, time::Instant};
 use typst::{
     layout::Size,
@@ -20,6 +20,7 @@ pub fn frame_item_image(
     scale_factor: f32,
     window: &mut Window,
     cx: &mut App,
+    _current_transform: TransformationMatrix, // Transformation support limited: GPUI 0.2.2 paint_glyph/paint_image APIs do not support custom transformation matrices.
     render_state: &Arc<crate::typst_element::TypstRenderState>,
 ) {
     let width_px = Pixels::from(typst_image_size.x.to_pt() as f32 * scale_factor);
@@ -105,6 +106,27 @@ pub fn frame_item_image(
                 false, // grayscale
             )
             .ok();
+        /*
+         * NOTE: ROTATION LIMITATIONS IN GPUI 0.2.2
+         *
+         * We are currently unable to implement native rotation for Text glyphs and Images
+         * while maintaining the 'paint' loop architecture.
+         *
+         * 1. Text Rotation: GPUI's public API `window.paint_glyph` hardcodes the
+         *    `transformation` field of the resulting `MonochromeSprite` to `Identity`.
+         *    Since this field is private to the GPUI crate, we cannot override the
+         *    transformation matrix to apply rotation on the GPU.
+         *
+         * 2. Image Rotation: `window.paint_image` also does not expose an interface
+         *    to apply a `TransformationMatrix` to the underlying `PolychromeSprite`.
+         *
+         * Path for future optimization:
+         * To enable full transformation support (rotation/skew), we must either:
+         * A) Implement a local patch to GPUI's `window.rs` to expose `paint_glyph_with_transform`.
+         * B) Migrate the Typst rendering engine from an immediate-mode `paint` loop to
+         *    an element-based tree using `gpui::div().transform()`. This would allow GPUI
+         *    to handle the transformation matrix at the scene graph level for all child elements.
+         */
     } else {
         // Image is still loading or failed.
         // When use_render_image returns None, it implies the asset is not ready yet.
@@ -134,6 +156,7 @@ pub fn frame_item_shape(
     window: &mut Window,
     cx: &mut App,
     y_offset_from_top: Pixels,
+    current_transform: TransformationMatrix,
     hit_map_collector: &mut HitMap,
 ) {
     let fill_background = shape
@@ -442,11 +465,17 @@ pub fn frame_item_link(
     size: typst::layout::Size,
     origin: Point<Pixels>,
     scale_factor: f32,
+    current_transform: TransformationMatrix,
     hit_map: &mut HitMap,
 ) {
     let width = Pixels::from(size.x.to_pt() as f32 * scale_factor);
     let height = Pixels::from(size.y.to_pt() as f32 * scale_factor);
-    let bounds = Bounds::new(origin, gpui::size(width, height));
+
+    // Apply the transform to the origin point so the hit-box moves
+    // to where the link is actually rendered on screen.
+    let transformed_origin = current_transform.apply(origin);
+
+    let bounds = Bounds::new(transformed_origin, gpui::size(width, height));
     hit_map.push_link(bounds, destination.clone());
 }
 

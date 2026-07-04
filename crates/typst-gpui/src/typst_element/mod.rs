@@ -428,11 +428,6 @@ impl TypstElement {
 
             match frame_item_variant {
                 FrameItem::Text(text_item) => {
-                    // Debug print: Check if the transform is non-identity
-                    // if current_transform != gpui::TransformationMatrix::unit() {
-                    //     println!("Painting text with transform: {:?}", current_transform);
-                    // }
-
                     frame_item_text::frame_item_text(
                         text_item,
                         item_absolute_origin_gpui,
@@ -453,15 +448,12 @@ impl TypstElement {
                         scale_factor,
                         window,
                         cx,
+                        current_transform,
                         &self.render_state,
                     );
                 }
 
                 FrameItem::Group(group_item) => {
-                    // if !group_item.transform.is_identity() {
-                    //     println!("Applying transform: {:?}", group_item.transform);
-                    // }
-                    // This is crucial: compose the parent transform with the group's local transform
                     // 1. Convert the Typst group transform to GPUI matrix
                     let group_local_transform =
                         utils::typst_transform_to_gpui_matrix(group_item.transform, scale_factor);
@@ -491,6 +483,7 @@ impl TypstElement {
                         window,
                         cx,
                         y_offset_from_top,
+                        current_transform,
                         hit_map_collector,
                     );
                 }
@@ -501,6 +494,7 @@ impl TypstElement {
                         *size,
                         item_absolute_origin_gpui,
                         scale_factor,
+                        current_transform,
                         hit_map_collector,
                     );
                 }
