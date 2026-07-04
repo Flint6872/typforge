@@ -219,7 +219,7 @@ Sharp stripes instead of a smooth fade
     sized to fit content.
   ],
 
-  circle(fill: gradient.linear(orange, yellow)),
+  circle(fill: gradient.linear(..color.map.rainbow)),
 
   circle(
     radius: 40pt,

@@ -1,11 +1,11 @@
 use crate::typst_element::{
-    AnimationState, HitMap, TypstCurveExt, TypstElement, TypstPointExt,
+    AnimationState, GradientCacheKey, HitMap, TypstCurveExt, TypstElement, TypstPointExt,
     utils::{
         typst_color_to_gpui_hsla, typst_dash_to_gpui, typst_paint_to_gpui_background,
         typst_paint_to_gpui_hsla_from_paint,
     },
 };
-use gpui::{App, Bounds, PathBuilder, Pixels, Point, Svg, TransformationMatrix, Window, svg};
+use gpui::{App, Bounds, PathBuilder, Pixels, Point, TransformationMatrix, Window};
 use std::{sync::Arc, time::Instant};
 use typst::{
     layout::Size,
@@ -20,7 +20,7 @@ pub fn frame_item_image(
     scale_factor: f32,
     window: &mut Window,
     cx: &mut App,
-    _current_transform: TransformationMatrix, // Transformation support limited: GPUI 0.2.2 paint_glyph/paint_image APIs do not support custom transformation matrices.
+    _current_transform: TransformationMatrix, // Transformation support limited
     render_state: &Arc<crate::typst_element::TypstRenderState>,
 ) {
     let width_px = Pixels::from(typst_image_size.x.to_pt() as f32 * scale_factor);
@@ -79,11 +79,6 @@ pub fn frame_item_image(
             let elapsed_since_last_update =
                 current_paint_time.duration_since(animation_state.last_frame_updated_time);
 
-            // --- NEW DEBUGGING BLOCK ---
-            let _is_first_entry = animation_state.last_frame_updated_time == current_paint_time; // Check if it's the very first time
-
-            // --- END NEW DEBUGGING BLOCK ---
-
             if elapsed_since_last_update >= frame_delay_duration {
                 animation_state.current_frame_index =
                     (animation_state.current_frame_index + 1) % render_image.frame_count();
@@ -106,37 +101,7 @@ pub fn frame_item_image(
                 false, // grayscale
             )
             .ok();
-        /*
-         * NOTE: ROTATION LIMITATIONS IN GPUI 0.2.2
-         *
-         * We are currently unable to implement native rotation for Text glyphs and Images
-         * while maintaining the 'paint' loop architecture.
-         *
-         * 1. Text Rotation: GPUI's public API `window.paint_glyph` hardcodes the
-         *    `transformation` field of the resulting `MonochromeSprite` to `Identity`.
-         *    Since this field is private to the GPUI crate, we cannot override the
-         *    transformation matrix to apply rotation on the GPU.
-         *
-         * 2. Image Rotation: `window.paint_image` also does not expose an interface
-         *    to apply a `TransformationMatrix` to the underlying `PolychromeSprite`.
-         *
-         * Path for future optimization:
-         * To enable full transformation support (rotation/skew), we must either:
-         * A) Implement a local patch to GPUI's `window.rs` to expose `paint_glyph_with_transform`.
-         * B) Migrate the Typst rendering engine from an immediate-mode `paint` loop to
-         *    an element-based tree using `gpui::div().transform()`. This would allow GPUI
-         *    to handle the transformation matrix at the scene graph level for all child elements.
-         */
     } else {
-        // Image is still loading or failed.
-        // When use_render_image returns None, it implies the asset is not ready yet.
-        // To trigger a re-render when it *is* ready, GPUI usually handles this via its
-        // asset system's internal notification. However, if that's not happening,
-        // we'd need to manually notify the view associated with this element.
-        // For TypstElement, its ID is used.
-        // This might already be happening if gpui::Image::use_render_image uses `cx.notify()`.
-        // If not, we'd need to explicitly `cx.notify(self.id());`
-        // For now, let's just draw the fallback.
         window.paint_quad(gpui::quad(
             image_bounds,
             gpui::Corners::default(),
@@ -156,7 +121,7 @@ pub fn frame_item_shape(
     window: &mut Window,
     cx: &mut App,
     y_offset_from_top: Pixels,
-    current_transform: TransformationMatrix,
+    _current_transform: TransformationMatrix,
     hit_map_collector: &mut HitMap,
 ) {
     let fill_background = shape
@@ -182,9 +147,7 @@ pub fn frame_item_shape(
                 let h = Pixels::from(size.y.to_pt() as f32 * scale_factor);
                 gpui::Bounds::new(item_absolute_origin_gpui, gpui::size(w, h))
             }
-            // For curves, use bbox_size for tiling if it's a closed shape
             typst::visualize::Geometry::Curve(curve) if curve.is_closed() => {
-                // **New: Check for closed curve**
                 let typst_bbox_size = curve.bbox(None).size();
                 let w = Pixels::from(typst_bbox_size.x.to_pt() as f32 * scale_factor);
                 let h = Pixels::from(typst_bbox_size.y.to_pt() as f32 * scale_factor);
@@ -211,61 +174,95 @@ pub fn frame_item_shape(
         }
     }
 
+    if !was_tiling_applied {
+        let bbox = match &shape.geometry {
+            typst::visualize::Geometry::Rect(size) => {
+                let w = Pixels::from(size.x.to_pt() as f32 * scale_factor);
+                let h = Pixels::from(size.y.to_pt() as f32 * scale_factor);
+                gpui::Bounds::new(item_absolute_origin_gpui, gpui::size(w, h))
+            }
+            typst::visualize::Geometry::Curve(curve) => {
+                let typst_bbox_size = curve.bbox(None).size();
+                let w = Pixels::from(typst_bbox_size.x.to_pt() as f32 * scale_factor);
+                let h = Pixels::from(typst_bbox_size.y.to_pt() as f32 * scale_factor);
+                gpui::Bounds::new(item_absolute_origin_gpui, gpui::size(w, h))
+            }
+            _ => gpui::Bounds::new(
+                item_absolute_origin_gpui,
+                gpui::size(Pixels::ZERO, Pixels::ZERO),
+            ),
+        };
+
+        if bbox.size.width > Pixels::ZERO && bbox.size.height > Pixels::ZERO {
+            // High-fidelity CPU rasterization of ALL Typst Gradients (Linear, Radial, Conic)
+            if let Some(Paint::Gradient(grad)) = &shape.fill {
+                let width_px = bbox.size.width.as_f32().round() as u32;
+                let height_px = bbox.size.height.as_f32().round() as u32;
+
+                if width_px > 0 && height_px > 0 {
+                    let cache_key = GradientCacheKey {
+                        gradient: grad.clone(),
+                        width: width_px,
+                        height: height_px,
+                    };
+
+                    let gpui_image_arc = {
+                        let mut cache = element.render_state.gradient_cache.lock();
+                        cache
+                            .entry(cache_key)
+                            .or_insert_with(|| {
+                                let png_bytes =
+                                    rasterize_gradient_to_png(grad, width_px, height_px);
+                                Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, png_bytes))
+                            })
+                            .clone()
+                    };
+
+                    if let Some(render_image) = gpui_image_arc.use_render_image(window, cx) {
+                        let corner_radius = if matches!(&shape.geometry, typst::visualize::Geometry::Curve(curve) if curve.is_ellipse())
+                        {
+                            bbox.size.width.min(bbox.size.height) / 2.0
+                        } else {
+                            Pixels::ZERO
+                        };
+
+                        // Render the gradient fill
+                        window
+                            .paint_image(
+                                bbox,
+                                gpui::Corners::all(corner_radius),
+                                render_image,
+                                0,     // frame_index
+                                false, // grayscale
+                            )
+                            .ok();
+
+                        // Render the stroke on top (if one exists)
+                        if thickness > Pixels::ZERO {
+                            window.paint_quad(gpui::quad(
+                                bbox,
+                                gpui::Corners::all(corner_radius),
+                                gpui::solid_background(gpui::transparent_black()),
+                                gpui::Edges::all(thickness),
+                                stroke_color,
+                                gpui::BorderStyle::default(),
+                            ));
+                        }
+
+                        return; // Successfully rendered gradient shape!
+                    }
+                }
+            }
+        }
+    }
+
     match &shape.geometry {
         typst::visualize::Geometry::Rect(size) => {
             let w = Pixels::from(size.x.to_pt() as f32 * scale_factor);
             let h = Pixels::from(size.y.to_pt() as f32 * scale_factor);
             let bounds = gpui::Bounds::new(item_absolute_origin_gpui, gpui::size(w, h));
 
-            let mut was_gradient_tessellated = false;
-            if let Some(Paint::Gradient(grad)) = &shape.fill {
-                if let Gradient::Linear(linear) = grad {
-                    let angle_deg = linear.angle.to_deg() as f32;
-
-                    if (angle_deg % 180.0).abs() < 1.0 || (angle_deg % 180.0 - 90.0).abs() < 1.0 {
-                        let is_vertical = (angle_deg % 180.0 - 90.0).abs() < 1.0;
-                        was_gradient_tessellated = true;
-
-                        for stops in linear.stops.windows(2) {
-                            let (c1, p1) = (&stops[0].0, stops[0].1.get() as f32);
-                            let (c2, p2) = (&stops[1].0, stops[1].1.get() as f32);
-
-                            let sub_origin = if is_vertical {
-                                item_absolute_origin_gpui + gpui::point(Pixels::ZERO, h * p1)
-                            } else {
-                                item_absolute_origin_gpui + gpui::point(w * p1, Pixels::ZERO)
-                            };
-
-                            let sub_size = if is_vertical {
-                                gpui::size(w, h * (p2 - p1))
-                            } else {
-                                gpui::size(w * (p2 - p1), h)
-                            };
-
-                            window.paint_quad(gpui::quad(
-                                gpui::Bounds::new(sub_origin, sub_size),
-                                gpui::Corners::default(),
-                                gpui::linear_gradient(
-                                    (angle_deg + 90.0) % 360.0,
-                                    gpui::LinearColorStop {
-                                        color: typst_color_to_gpui_hsla(c1),
-                                        percentage: 0.0,
-                                    },
-                                    gpui::LinearColorStop {
-                                        color: typst_color_to_gpui_hsla(c2),
-                                        percentage: 1.0,
-                                    },
-                                ),
-                                gpui::Edges::all(thickness),
-                                stroke_color,
-                                gpui::BorderStyle::default(),
-                            ));
-                        }
-                    }
-                }
-            }
-
-            if !was_tiling_applied && !was_gradient_tessellated {
+            if !was_tiling_applied {
                 window.paint_quad(gpui::quad(
                     bounds,
                     gpui::Corners::default(),
@@ -285,63 +282,21 @@ pub fn frame_item_shape(
                 let line_thickness_px =
                     Pixels::from(typst_stroke.thickness.to_pt() as f32 * scale_factor);
 
-                // Check if we should tessellate the line for a multi-stop gradient
-                let mut was_tessellated = false;
-                if let Paint::Gradient(grad) = &typst_stroke.paint {
-                    if let Gradient::Linear(linear) = grad {
-                        if linear.stops.len() > 2 {
-                            was_tessellated = true;
-                            for stops in linear.stops.windows(2) {
-                                let (c1, p1) = (&stops[0].0, stops[0].1.get() as f32);
-                                let (c2, p2) = (&stops[1].0, stops[1].1.get() as f32);
+                let mut path_builder = gpui::PathBuilder::stroke(line_thickness_px);
+                path_builder.move_to(start_p);
+                path_builder.line_to(end_p);
 
-                                // Interpolate start/end points for this segment
-                                let sub_start = start_p + target_gpui_rel * p1;
-                                let sub_end = start_p + target_gpui_rel * p2;
-
-                                let mut path_builder = gpui::PathBuilder::stroke(line_thickness_px);
-                                path_builder.move_to(sub_start);
-                                path_builder.line_to(sub_end);
-
-                                if let Ok(tessellated_path) = path_builder.build() {
-                                    // Correct angle for line direction
-                                    let angle = (linear.angle.to_deg() as f32 + 90.0) % 360.0;
-                                    let sub_bg = gpui::linear_gradient(
-                                        angle,
-                                        gpui::LinearColorStop {
-                                            color: typst_color_to_gpui_hsla(c1),
-                                            percentage: 0.0,
-                                        },
-                                        gpui::LinearColorStop {
-                                            color: typst_color_to_gpui_hsla(c2),
-                                            percentage: 1.0,
-                                        },
-                                    );
-                                    window.paint_path(tessellated_path, sub_bg);
-                                }
-                            }
-                        }
-                    }
+                let (dash_array, _dash_offset) =
+                    typst_dash_to_gpui(&typst_stroke.dash, scale_factor);
+                if let Some(da) = dash_array {
+                    path_builder = path_builder.dash_array(&da);
                 }
 
-                // Fallback: Single segment for simple colors/gradients
-                if !was_tessellated {
-                    let mut path_builder = gpui::PathBuilder::stroke(line_thickness_px);
-                    path_builder.move_to(start_p);
-                    path_builder.line_to(end_p);
-
-                    let (dash_array, _dash_offset) =
-                        typst_dash_to_gpui(&typst_stroke.dash, scale_factor);
-                    if let Some(da) = dash_array {
-                        path_builder = path_builder.dash_array(&da);
-                    }
-
-                    if let Ok(tessellated_path) = path_builder.build() {
-                        window.paint_path(
-                            tessellated_path,
-                            typst_paint_to_gpui_background(&typst_stroke.paint),
-                        );
-                    }
+                if let Ok(tessellated_path) = path_builder.build() {
+                    window.paint_path(
+                        tessellated_path,
+                        typst_paint_to_gpui_background(&typst_stroke.paint),
+                    );
                 }
             }
         }
@@ -361,16 +316,8 @@ pub fn frame_item_shape(
             let is_ellipse = curve.is_ellipse();
             let is_circle = is_ellipse && (w.as_f32() - h.as_f32()).abs() < 0.1;
 
-            // 1. High-quality Circle/Ellipse rendering via paint_quad
-            // This handles circles, squares, and "pill" shapes.
             if (is_circle || is_ellipse) && !was_tiling_applied {
-                let corner_radius = if is_circle {
-                    w / 2.0
-                } else {
-                    // For general ellipses, we use the smaller dimension's half
-                    // to create a "pill" shape (best GPUI approximation).
-                    w.min(h) / 2.0
-                };
+                let corner_radius = if is_circle { w / 2.0 } else { w.min(h) / 2.0 };
 
                 window.paint_quad(gpui::quad(
                     bounds,
@@ -381,9 +328,6 @@ pub fn frame_item_shape(
                     gpui::BorderStyle::default(),
                 ));
             } else {
-                // 2. Generic Curve / Polygon Fallback
-
-                // Render fill as a background quad (approximation)
                 if has_fill && !was_tiling_applied && w > Pixels::ZERO && h > Pixels::ZERO {
                     window.paint_quad(gpui::quad(
                         bounds,
@@ -395,7 +339,6 @@ pub fn frame_item_shape(
                     ));
                 }
 
-                // Render stroke using an accurate path
                 if has_stroke && !was_tiling_applied && (w > Pixels::ZERO || h > Pixels::ZERO) {
                     let mut gpui_path = gpui::Path::new(item_absolute_origin_gpui);
                     let mut last_p = typst::layout::Point::zero();
@@ -419,7 +362,6 @@ pub fn frame_item_shape(
                                 last_p = *p;
                             }
                             typst::visualize::CurveItem::Cubic(c1, c2, p) => {
-                                // We must flatten cubics, otherwise they look like squares!
                                 const SEGMENTS: usize = 12;
                                 for i in 1..=SEGMENTS {
                                     let t = i as f32 / SEGMENTS as f32;
@@ -471,8 +413,6 @@ pub fn frame_item_link(
     let width = Pixels::from(size.x.to_pt() as f32 * scale_factor);
     let height = Pixels::from(size.y.to_pt() as f32 * scale_factor);
 
-    // Apply the transform to the origin point so the hit-box moves
-    // to where the link is actually rendered on screen.
     let transformed_origin = current_transform.apply(origin);
 
     let bounds = Bounds::new(transformed_origin, gpui::size(width, height));
@@ -485,4 +425,37 @@ pub fn frame_item_tag(
     hit_map: &mut HitMap,
 ) {
     hit_map.push_anchor(tag.location(), Point::new(Pixels::ZERO, item_document_y));
+}
+
+fn rasterize_gradient_to_png(
+    gradient: &typst::visualize::Gradient,
+    width: u32,
+    height: u32,
+) -> Vec<u8> {
+    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+    let w_f = width as f32;
+    let h_f = height as f32;
+    for y in 0..height {
+        for x in 0..width {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let color = gradient.sample_at((px, py), (w_f, h_f));
+            let rgb = color.to_rgb();
+            pixels.push((rgb.red * 255.0).round() as u8);
+            pixels.push((rgb.green * 255.0).round() as u8);
+            pixels.push((rgb.blue * 255.0).round() as u8);
+            pixels.push((rgb.alpha * 255.0).round() as u8);
+        }
+    }
+
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        if let Ok(mut writer) = encoder.write_header() {
+            let _ = writer.write_image_data(&pixels);
+        }
+    }
+    png_bytes
 }

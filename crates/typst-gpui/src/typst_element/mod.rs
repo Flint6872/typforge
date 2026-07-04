@@ -87,10 +87,18 @@ impl HitMap {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct GradientCacheKey {
+    pub gradient: typst::visualize::Gradient,
+    pub width: u32,
+    pub height: u32,
+}
+
 pub struct TypstRenderState {
     pub image_cache: Mutex<HashMap<typst::visualize::Image, Arc<gpui::Image>>>,
     pub animation_cache: Mutex<HashMap<gpui::ImageId, AnimationState>>,
     pub has_active_animations: AtomicBool,
+    pub gradient_cache: Mutex<HashMap<GradientCacheKey, Arc<gpui::Image>>>, // <-- ADDED
 }
 
 impl Default for TypstRenderState {
@@ -99,6 +107,7 @@ impl Default for TypstRenderState {
             image_cache: Mutex::new(HashMap::new()),
             animation_cache: Mutex::new(HashMap::new()),
             has_active_animations: AtomicBool::new(false),
+            gradient_cache: Mutex::new(HashMap::new()), // <-- ADDED
         }
     }
 }

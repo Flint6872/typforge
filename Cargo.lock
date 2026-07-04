@@ -8061,6 +8061,7 @@ dependencies = [
  "lyon_path",
  "lyon_tessellation",
  "parking_lot",
+ "png 0.18.1",
  "ttf-parser",
  "typsdocx",
  "typst",
