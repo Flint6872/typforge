@@ -1,5 +1,3 @@
-// C:\Users\xerxe\Rust\typforge0.0.1\crates\typst-gpui\src\typst_element\frame_item.rs
-
 use crate::typst_element::{
     AnimationState, GradientCacheKey, HitMap, TypstCurveExt, TypstElement, TypstPointExt,
     utils::{
@@ -17,37 +15,23 @@ use typst::{
 
 // --- Helper Functions for SVG Masks & CPU Rasterization ---
 
-// Helper to calculate the bounding box for a line, accounting for stroke thickness
-fn calculate_line_bbox(
-    origin_gpui: Point<Pixels>,
-    target_rel_typst: typst::layout::Point, // This is the relative end point in Typst units
-    stroke_thickness_pt: f32,               // Line's stroke thickness in Typst points
-    scale_factor: f32,
-) -> gpui::Bounds<Pixels> {
-    let target_gpui_rel = target_rel_typst.to_gpui_pixels(scale_factor);
-    let end_p = origin_gpui + target_gpui_rel;
-
-    let min_x = origin_gpui.x.min(end_p.x);
-    let max_x = origin_gpui.x.max(end_p.x);
-    let min_y = origin_gpui.y.min(end_p.y);
-    let max_y = origin_gpui.y.max(end_p.y);
-
-    let half_stroke_px = Pixels::from(stroke_thickness_pt / 2.0 * scale_factor);
-
-    gpui::Bounds::new(
-        gpui::point(min_x - half_stroke_px, min_y - half_stroke_px),
-        gpui::size(
-            max_x - min_x + half_stroke_px * 2.0,
-            max_y - min_y + half_stroke_px * 2.0,
-        ),
+// Helper to convert Typst Color to an SVG RGBA string
+fn svg_color(color: &typst::visualize::Color) -> String {
+    let rgb = color.to_rgb();
+    format!(
+        "rgba({}, {}, {}, {})",
+        (rgb.red * 255.0).round() as u8,
+        (rgb.green * 255.0).round() as u8,
+        (rgb.blue * 255.0).round() as u8,
+        rgb.alpha
     )
 }
 
-// Helper to generate a monochrome SVG mask of a shape geometry
+// Helper to generate a monochrome SVG mask of a shape geometry with stroke padding
 fn render_shape_mask_as_svg(
     geometry: &typst::visualize::Geometry,
     stroke: Option<&typst::visualize::FixedStroke>,
-    fill_rule: typst::visualize::FillRule, // <-- ADDED fill_rule parameter
+    fill_rule: typst::visualize::FillRule,
     scale_factor: f32,
 ) -> Option<Vec<u8>> {
     let (w, h) = match geometry {
@@ -62,14 +46,23 @@ fn render_shape_mask_as_svg(
                 bbox_size.y.to_pt() as f32 * scale_factor,
             )
         }
-        _ => return None,
+        typst::visualize::Geometry::Line(target) => {
+            let target_gpui_rel = target.to_gpui_pixels(scale_factor);
+            (
+                target_gpui_rel.x.as_f32().abs(),
+                target_gpui_rel.y.as_f32().abs(),
+            )
+        }
     };
 
-    if w <= 0.0 || h <= 0.0 {
+    if w <= 0.0 && h <= 0.0 {
         return None;
     }
 
-    // Calculate padding needed to prevent stroke clipping
+    // Ensure non-zero dimensions
+    let w = w.max(1.0);
+    let h = h.max(1.0);
+
     let thickness = stroke
         .map(|s| s.thickness.to_pt() as f32 * scale_factor)
         .unwrap_or(0.0);
@@ -93,8 +86,6 @@ fn render_shape_mask_as_svg(
 
     let stroke_attr = if let Some(stroke) = stroke {
         let mut attr = format!(r#"stroke="black" stroke-width="{}""#, thickness);
-
-        // --- ADD THESE LINES TO ENSURE CAPS AND JOINS ARE ADDED ---
         let line_cap = match stroke.cap {
             typst::visualize::LineCap::Butt => "butt",
             typst::visualize::LineCap::Round => "round",
@@ -109,7 +100,6 @@ fn render_shape_mask_as_svg(
             r#" stroke-linecap="{}" stroke-linejoin="{}""#,
             line_cap, line_join
         ));
-        // --- END ADDITION ---
 
         if let Some(dash) = &stroke.dash {
             let dash_array: Vec<String> = dash
@@ -129,7 +119,6 @@ fn render_shape_mask_as_svg(
     };
 
     let svg_fill_rule_attr = match fill_rule {
-        // Convert Typst fill rule to SVG attribute
         typst::visualize::FillRule::NonZero => r#"fill-rule="nonzero""#,
         typst::visualize::FillRule::EvenOdd => r#"fill-rule="evenodd""#,
     };
@@ -139,6 +128,29 @@ fn render_shape_mask_as_svg(
             svg.push_str(&format!(
                 r#"<rect x="{}" y="{}" width="{}" height="{}" {} {} />"#,
                 half_padding, half_padding, w, h, fill_attr, stroke_attr
+            ));
+        }
+        typst::visualize::Geometry::Line(target) => {
+            let target_gpui_rel = target.to_gpui_pixels(scale_factor);
+            // Translate line coordinates to sit inside the padded container
+            let x1 = half_padding
+                + if target_gpui_rel.x.as_f32() < 0.0 {
+                    target_gpui_rel.x.as_f32().abs()
+                } else {
+                    0.0
+                };
+            let y1 = half_padding
+                + if target_gpui_rel.y.as_f32() < 0.0 {
+                    target_gpui_rel.y.as_f32().abs()
+                } else {
+                    0.0
+                };
+            let x2 = x1 + target_gpui_rel.x.as_f32();
+            let y2 = y1 + target_gpui_rel.y.as_f32();
+
+            svg.push_str(&format!(
+                r#"<line x1="{}" y1="{}" x2="{}" y2="{}" {} />"#,
+                x1, y1, x2, y2, stroke_attr
             ));
         }
         typst::visualize::Geometry::Curve(curve) => {
@@ -192,7 +204,6 @@ fn render_shape_mask_as_svg(
                         }
                     }
                 }
-                // <-- HERE: Add the fill-rule to the path tag
                 svg.push_str(&format!(
                     r#"<path d="{}" {} {} {} />"#,
                     d, svg_fill_rule_attr, fill_attr, stroke_attr
@@ -200,7 +211,6 @@ fn render_shape_mask_as_svg(
                 svg.push_str("</g>");
             }
         }
-        _ => return None,
     }
 
     svg.push_str("</svg>");
@@ -241,6 +251,32 @@ fn rasterize_gradient_to_png(
     png_bytes
 }
 
+// Helper to calculate the bounding box for a line, accounting for stroke thickness
+fn calculate_line_bbox(
+    origin_gpui: Point<Pixels>,
+    target_rel_typst: typst::layout::Point,
+    stroke_thickness_pt: f32,
+    scale_factor: f32,
+) -> gpui::Bounds<Pixels> {
+    let target_gpui_rel = target_rel_typst.to_gpui_pixels(scale_factor);
+    let end_p = origin_gpui + target_gpui_rel;
+
+    let min_x = origin_gpui.x.min(end_p.x);
+    let max_x = origin_gpui.x.max(end_p.x);
+    let min_y = origin_gpui.y.min(end_p.y);
+    let max_y = origin_gpui.y.max(end_p.y);
+
+    let half_stroke_px = Pixels::from(stroke_thickness_pt / 2.0 * scale_factor);
+
+    gpui::Bounds::new(
+        gpui::point(min_x - half_stroke_px, min_y - half_stroke_px),
+        gpui::size(
+            max_x - min_x + half_stroke_px * 2.0,
+            max_y - min_y + half_stroke_px * 2.0,
+        ),
+    )
+}
+
 // We will pass a reference to the TypstElement or a struct containing these dependencies
 pub fn frame_item_image(
     image: &Image,
@@ -249,14 +285,13 @@ pub fn frame_item_image(
     scale_factor: f32,
     window: &mut Window,
     cx: &mut App,
-    _current_transform: TransformationMatrix, // Transformation support limited
+    _current_transform: TransformationMatrix,
     render_state: &Arc<crate::typst_element::TypstRenderState>,
 ) {
     let width_px = Pixels::from(typst_image_size.x.to_pt() as f32 * scale_factor);
     let height_px = Pixels::from(typst_image_size.y.to_pt() as f32 * scale_factor);
     let image_bounds = gpui::Bounds::new(origin, gpui::size(width_px, height_px));
 
-    // Get or Create the high-level GPUI Image asset (cached)
     let gpui_image_arc = {
         let mut cache = render_state.image_cache.lock();
         cache.entry(image.clone()).or_insert_with(|| {
@@ -279,15 +314,13 @@ pub fn frame_item_image(
                     None
                 }
             }
-            .unwrap_or_else(|| Arc::new(gpui::Image::empty())) // Store an empty image if decoding failed
+            .unwrap_or_else(|| Arc::new(gpui::Image::empty()))
         }).clone()
     };
 
-    // Request the RenderImage (GPU texture) and Paint it
     if let Some(render_image) = gpui_image_arc.use_render_image(window, cx) {
-        let mut current_frame_index = 0; // Default to first frame
+        let mut current_frame_index = 0;
 
-        // --- Animation Logic ---
         if render_image.frame_count() > 1 {
             let mut animation_cache = render_state.animation_cache.lock();
             let image_id_for_cache = render_image.id;
@@ -325,7 +358,7 @@ pub fn frame_item_image(
                 gpui::Corners::default(),
                 render_image,
                 current_frame_index,
-                false, // grayscale
+                false,
             )
             .ok();
     } else {
@@ -399,17 +432,16 @@ pub fn frame_item_shape(
                 let h = Pixels::from(typst_bbox_size.y.to_pt() as f32 * scale_factor);
                 gpui::Bounds::new(item_absolute_origin_gpui, gpui::size(w, h))
             }
-            // For Tiling shapes with Geometry::Line:
             typst::visualize::Geometry::Line(target) => {
                 let line_stroke_thickness_pt = shape
                     .stroke
                     .as_ref()
                     .map(|s| s.thickness.to_pt() as f32)
-                    .unwrap_or(1.0); // Default to 1pt for bbox if line stroke isn't explicitly set.
+                    .unwrap_or(1.0);
 
                 calculate_line_bbox(
                     item_absolute_origin_gpui,
-                    *target, // Pass the Typst point
+                    *target,
                     line_stroke_thickness_pt,
                     scale_factor,
                 )
@@ -421,19 +453,17 @@ pub fn frame_item_shape(
         };
 
         if bbox.size.width > Pixels::ZERO && bbox.size.height > Pixels::ZERO {
-            // Render the tiled fill
             element.render_tiling(
                 window,
                 cx,
                 tiling_paint,
-                bbox, // Use the correctly calculated bbox for the outer shape
+                bbox,
                 y_offset_from_top,
                 scale_factor,
                 gpui::TransformationMatrix::unit(),
                 hit_map_collector,
             );
 
-            // Render the stroke of the outer shape (if any)
             if thickness > Pixels::ZERO {
                 let corner_radius = match &shape.geometry {
                     typst::visualize::Geometry::Rect(_) => gpui::Corners::default(),
@@ -464,8 +494,7 @@ pub fn frame_item_shape(
         }
     }
 
-    // --- Determine bounding box for general rendering (outside tiling block) ---
-    // This block is for non-tiled shapes.
+    // --- Determine bounding box for general rendering ---
     let bbox = match &shape.geometry {
         typst::visualize::Geometry::Rect(size) => {
             let w = Pixels::from(size.x.to_pt() as f32 * scale_factor);
@@ -479,7 +508,6 @@ pub fn frame_item_shape(
             gpui::Bounds::new(item_absolute_origin_gpui, gpui::size(w, h))
         }
         typst::visualize::Geometry::Line(target) => {
-            // <--- NEW ARM
             let line_stroke_thickness_pt = shape
                 .stroke
                 .as_ref()
@@ -499,15 +527,12 @@ pub fn frame_item_shape(
         ),
     };
 
-    // Only proceed if the bounding box has a valid size
     if bbox.size.width <= Pixels::ZERO || bbox.size.height <= Pixels::ZERO {
         return;
     }
 
-    // ... (rest of the gradient and SVG mask rendering logic) ...
-    // This part remains mostly the same, as the initial bbox calculation handles lines now.
-
-    // --- High-Fidelity Gradient Fill (Rasterized PNG) ---
+    // --- CASE A: GRADIENT FILLS (Linear, Radial, Conic) ---
+    // Rendered perfectly using CPU rasterization and cached in the GPU texture atlas
     if let Some(Paint::Gradient(grad)) = &shape.fill {
         let width_px = bbox.size.width.as_f32().round() as u32;
         let height_px = bbox.size.height.as_f32().round() as u32;
@@ -519,7 +544,6 @@ pub fn frame_item_shape(
                 height: height_px,
             };
 
-            // This is where gpui_image_arc is defined.
             let gpui_image_arc = {
                 let mut cache = element.render_state.gradient_cache.lock();
                 cache
@@ -531,7 +555,6 @@ pub fn frame_item_shape(
                     .clone()
             };
 
-            // Move the usage of gpui_image_arc INSIDE this block
             if let Some(render_image) = gpui_image_arc.use_render_image(window, cx) {
                 let corner_radius =
                     if let typst::visualize::Geometry::Curve(curve) = &shape.geometry {
@@ -549,21 +572,14 @@ pub fn frame_item_shape(
                     };
 
                 window
-                    .paint_image(
-                        bbox,
-                        corner_radius,
-                        render_image,
-                        0,     // frame_index
-                        false, // grayscale
-                    )
+                    .paint_image(bbox, corner_radius, render_image, 0, false)
                     .ok();
 
-                // Render stroke on top of the gradient fill if one exists
                 if thickness > Pixels::ZERO {
                     window.paint_quad(gpui::quad(
                         bbox,
                         corner_radius,
-                        gpui::solid_background(gpui::transparent_black()), // Transparent fill
+                        gpui::solid_background(gpui::transparent_black()),
                         gpui::Edges::all(thickness),
                         stroke_color,
                         gpui::BorderStyle::default(),
@@ -574,10 +590,93 @@ pub fn frame_item_shape(
         }
     }
 
-    // --- High-Quality SVG Mask Rendering for Curves/Rects with Solid Colors and Strokes ---
+    // --- CASE B: GRADIENT STROKES (Linear/Radial) ---
+    // If we have a line with a gradient stroke, we tessellate the line natively into
+    // segments to draw the full multi-color gradient (like rainbow or orange-to-blue)
+    let mut was_stroke_gradient_tessellated = false;
+    if let Some(stroke) = &shape.stroke {
+        if let Paint::Gradient(grad) = &stroke.paint {
+            if let Gradient::Linear(linear) = grad {
+                if let typst::visualize::Geometry::Line(target) = &shape.geometry {
+                    let target_gpui_rel = target.to_gpui_pixels(scale_factor);
+                    let start_p = item_absolute_origin_gpui;
+                    let line_thickness_px =
+                        Pixels::from(stroke.thickness.to_pt() as f32 * scale_factor);
+
+                    if linear.stops.len() > 1 {
+                        was_stroke_gradient_tessellated = true;
+
+                        // Break the line into segments matching each gradient color stop
+                        for stops in linear.stops.windows(2) {
+                            let (c1, p1) = (&stops[0].0, stops[0].1.get() as f32);
+                            let (c2, p2) = (&stops[1].0, stops[1].1.get() as f32);
+
+                            let sub_start = start_p + target_gpui_rel * p1;
+                            let sub_end = start_p + target_gpui_rel * p2;
+
+                            let mut path_builder = gpui::PathBuilder::stroke(line_thickness_px);
+
+                            // Apply caps on endpoints of the entire gradient path
+                            let is_start_cap = p1 == 0.0;
+                            let is_end_cap = p2 == 1.0;
+                            if let typst::visualize::LineCap::Round = stroke.cap {
+                                if is_start_cap || is_end_cap {
+                                    let cap_start = if is_start_cap { sub_start } else { sub_end };
+                                    let cap_end = if is_end_cap { sub_end } else { sub_start };
+                                    // Use native quad circle round cap
+                                    let r = line_thickness_px / 2.0;
+                                    window.paint_quad(gpui::quad(
+                                        gpui::Bounds::new(
+                                            cap_start - gpui::point(r, r),
+                                            gpui::size(line_thickness_px, line_thickness_px),
+                                        ),
+                                        gpui::Corners::all(r),
+                                        gpui::solid_background(typst_color_to_gpui_hsla(
+                                            if is_start_cap { c1 } else { c2 },
+                                        )),
+                                        gpui::Edges::all(Pixels::ZERO),
+                                        gpui::transparent_black(),
+                                        gpui::BorderStyle::default(),
+                                    ));
+                                }
+                            }
+
+                            path_builder.move_to(sub_start);
+                            path_builder.line_to(sub_end);
+
+                            if let Ok(tessellated_path) = path_builder.build() {
+                                let angle = (linear.angle.to_deg() as f32 + 90.0) % 360.0;
+                                let sub_bg = gpui::linear_gradient(
+                                    angle,
+                                    gpui::LinearColorStop {
+                                        color: typst_color_to_gpui_hsla(c1),
+                                        percentage: 0.0,
+                                    },
+                                    gpui::LinearColorStop {
+                                        color: typst_color_to_gpui_hsla(c2),
+                                        percentage: 1.0,
+                                    },
+                                );
+                                window.paint_path(tessellated_path, sub_bg);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if was_stroke_gradient_tessellated {
+        return; // Stroke gradient fully drawn, exit
+    }
+
+    // --- CASE C: SOLID SHAPES, COMPLEX CURVES, STARS, AND SHAPES WITH FILL-RULES ---
+    // Handled dynamically via Vector SVG Masking to guarantee flawless vector-math support
+    // (such as "even-odd" vs "non-zero" star polygons) and perfect line cap/joins.
     let should_render_via_svg_mask =
         matches!(&shape.geometry, typst::visualize::Geometry::Curve(_))
-            || matches!(&shape.geometry, typst::visualize::Geometry::Rect(_));
+            || matches!(&shape.geometry, typst::visualize::Geometry::Rect(_))
+            || matches!(&shape.geometry, typst::visualize::Geometry::Line(_));
 
     if should_render_via_svg_mask {
         let stroke_thickness = thickness.as_f32();
@@ -591,6 +690,7 @@ pub fn frame_item_shape(
             ),
         );
 
+        // 1. Draw Solid Fill using SVG Mask
         if let Some(Paint::Solid(solid_color)) = &shape.fill {
             if let Some(svg_bytes) =
                 render_shape_mask_as_svg(&shape.geometry, None, shape.fill_rule, scale_factor)
@@ -613,8 +713,9 @@ pub fn frame_item_shape(
             }
         }
 
+        // 2. Draw Solid Stroke using SVG Mask (respects round caps, dashes, joins, etc.)
         if let Some(stroke) = &shape.stroke {
-            if stroke.thickness.to_pt() > 0.0 {
+            if stroke.thickness.to_pt() > 0.0 && !matches!(stroke.paint, Paint::Gradient(_)) {
                 if let Some(svg_bytes) = render_shape_mask_as_svg(
                     &shape.geometry,
                     Some(stroke),
@@ -642,7 +743,7 @@ pub fn frame_item_shape(
         return;
     }
 
-    // --- Final Fallback Rendering for Simple Lines (if not handled by earlier SVG/Gradient paths) ---
+    // --- Final Fallback Rendering (Only reached if not captured by above cases) ---
     match &shape.geometry {
         typst::visualize::Geometry::Line(target) => {
             let target_gpui_rel = target.to_gpui_pixels(scale_factor);
@@ -671,7 +772,6 @@ pub fn frame_item_shape(
                 }
             }
         }
-        _ => { /* Other geometries are covered by early returns or not supported for direct fallback */
-        }
+        _ => {}
     }
 }
