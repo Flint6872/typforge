@@ -515,43 +515,62 @@ impl TypstElement {
     }
 
     pub fn render_tiling(
-        &self, // Added &self here
+        &self,
         window: &mut Window,
         cx: &mut App,
         tiling: &typst::visualize::Tiling,
-        bounds: gpui::Bounds<Pixels>,
+        bounds: gpui::Bounds<Pixels>, // This is the overall area to fill
         y_offset_from_top: Pixels,
         scale_factor: f32,
         current_transform: TransformationMatrix,
         hit_map: &mut HitMap,
     ) {
-        let cell_w = Pixels::from(tiling.size().x.to_pt() as f32 * scale_factor);
-        let cell_h = Pixels::from(tiling.size().y.to_pt() as f32 * scale_factor);
+        let cell_w_typst = tiling.size().x.to_pt() as f32;
+        let cell_h_typst = tiling.size().y.to_pt() as f32;
 
-        if cell_w <= Pixels::ZERO || cell_h <= Pixels::ZERO {
+        let cell_w_px = Pixels::from(cell_w_typst * scale_factor);
+        let cell_h_px = Pixels::from(cell_h_typst * scale_factor);
+
+        if cell_w_px <= Pixels::ZERO || cell_h_px <= Pixels::ZERO {
             return;
         }
 
-        // Corrected: Use f32::from() for explicit conversion to f32 before division
-        let cols = (f32::from(bounds.size.width) / f32::from(cell_w)).ceil() as i32;
-        let rows = (f32::from(bounds.size.height) / f32::from(cell_h)).ceil() as i32;
+        let cols = (f32::from(bounds.size.width) / f32::from(cell_w_px)).ceil() as i32;
+        let rows = (f32::from(bounds.size.height) / f32::from(cell_h_px)).ceil() as i32;
 
         for row in 0..rows {
             for col in 0..cols {
-                let offset = gpui::point(cell_w * col as f32, cell_h * row as f32);
-                let sub_origin = bounds.origin + offset;
+                let cell_origin_in_target_area =
+                    gpui::point(cell_w_px * col as f32, cell_h_px * row as f32);
+                let sub_origin = bounds.origin + cell_origin_in_target_area;
 
-                self.paint_frame_items(
-                    sub_origin,
-                    y_offset_from_top,
-                    scale_factor,
-                    tiling.frame(),
-                    window,
-                    cx,
-                    100, // Arbitrary depth limit for recursion
-                    current_transform,
-                    hit_map,
-                );
+                // 1. Calculate cell bounds
+                let cell_bounds = gpui::Bounds::new(sub_origin, gpui::size(cell_w_px, cell_h_px));
+
+                // 2. Intersect with the parent rect bounds (the 'bounds' argument)
+                // This forces absolute clipping to the rect's original dimensions
+                let clipped_cell_bounds = cell_bounds.intersect(&bounds);
+
+                if !clipped_cell_bounds.is_empty() {
+                    window.with_content_mask(
+                        Some(gpui::ContentMask {
+                            bounds: clipped_cell_bounds,
+                        }),
+                        |window| {
+                            self.paint_frame_items(
+                                sub_origin,
+                                y_offset_from_top + cell_origin_in_target_area.y,
+                                scale_factor,
+                                tiling.frame(),
+                                window,
+                                cx,
+                                100,
+                                current_transform,
+                                hit_map,
+                            );
+                        },
+                    );
+                }
             }
         }
     }

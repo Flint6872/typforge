@@ -200,11 +200,49 @@ Sharp stripes instead of a smooth fade
   fill: gradient.linear((red, 0%), (yellow, 10%), (green, 20%), (lime, 80%), (blue, 100%)),
 )
 
-#block(fill: red)[opaque]
-#block(fill: red.transparentize(50%))[half red]
-#block(fill: red.transparentize(75%))[quarter red]
+#stack(
+  dir: ltr,
+  spacing: 1cm,
+
+  stack(spacing: 1em, block(fill: red)[opaque], block(fill: red.transparentize(50%))[half red], block(
+    fill: red.transparentize(75%),
+  )[quarter red]),
+
+  stack(
+    spacing: 0.5em,
+    text()[gradient.linear],
+    square(fill: gradient.linear(..color.map.rainbow)),
+  ),
+  stack(
+    spacing: 0.5em,
+    text()[gradient.radial],
+    square(fill: gradient.radial(..color.map.rainbow)),
+  ),
+
+  stack(
+    spacing: 0.5em,
+
+    text()[gradient.conic],
+    circle(fill: gradient.conic(
+      ..color.map.viridis,
+    )),
+  ),
+
+  stack(
+    spacing: 0.5em,
+
+    text()[gradient.conic center: 20%, 30%],
+    circle(fill: gradient.conic(
+      ..color.map.viridis,
+      center: (20%, 30%),
+    )),
+  ),
+)
 
 
+#pagebreak()
+
+Circles
 
 #stack(
   dir: ltr,
@@ -228,7 +266,18 @@ Sharp stripes instead of a smooth fade
 )
 
 
+#let star = curve.with(
+  fill: red,
+  curve.move((25pt, 0pt)),
+  curve.line((10pt, 50pt)),
+  curve.line((50pt, 20pt)),
+  curve.line((0pt, 20pt)),
+  curve.line((40pt, 50pt)),
+  curve.close(),
+)
 
+
+Curves
 #stack(
   dir: ltr,
   spacing: 1em,
@@ -256,7 +305,12 @@ Sharp stripes instead of a smooth fade
     curve.line((10pt, 40pt)),
     curve.close(),
   ),
+
+  star(fill-rule: "non-zero"),
+  star(fill-rule: "even-odd"),
 )
+
+
 
 
 #stack(
@@ -287,59 +341,48 @@ Sharp stripes instead of a smooth fade
   spacing: 1cm,
 
   stack(
-    spacing: 1em,
-    text()[gradient.linear],
-    square(fill: gradient.linear(..color.map.rainbow)),
-  ),
-  stack(
-    spacing: 1em,
-    text()[gradient.radial],
-    square(fill: gradient.radial(..color.map.rainbow)),
-  ),
-
-  stack(
-    spacing: 1em,
-
-    text()[gradient.conic],
-    circle(fill: gradient.conic(
-      ..color.map.viridis,
-    )),
-
-    text()[gradient.conic center: 20%, 30%],
-    circle(fill: gradient.conic(
-      ..color.map.viridis,
-      center: (20%, 30%),
-    )),
+    text()[polygon
+    ],
+    polygon(
+      fill: blue.lighten(80%),
+      stroke: blue,
+      (20%, 0pt),
+      (60%, 0pt),
+      (80%, 2cm),
+      (0%, 2cm),
+    ),
   ),
 )
 
-#line(length: 100%)
-#line(end: (50%, 50%))
+
+
+
+
+
+#stack(
+  dir: ltr,
+  spacing: 1cm,
+
+  // Without content.
+  square(size: 40pt),
+
+  // With content.
+  square[
+    Automatically \
+    sized to fit.
+  ],
+
+  line(end: (10%, 10%)),
+)
+
+
 #line(
   length: 4cm,
   stroke: 2pt + maroon,
 )
 
-polygon
-#polygon(
-  fill: blue.lighten(80%),
-  stroke: blue,
-  (20%, 0pt),
-  (60%, 0pt),
-  (80%, 2cm),
-  (0%, 2cm),
-)
-
-// Without content.
-#square(size: 40pt)
-
-// With content.
-#square[
-  Automatically \
-  sized to fit.
-]
-
 #set line(length: 100%)
+#line()
 #stack(
   spacing: 1em,
   line(stroke: 2pt + red),
