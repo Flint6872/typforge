@@ -25,13 +25,13 @@ If you are curious about [Typst](https://typst.app), you're in the right place. 
 Our goal is to make Typst accessible to a general audience, bridging the gap between technical power and mainstream accessibility. You shouldn't have to navigate a complex code editor just to create a beautiful document. Should you want to bring in those more advanced feautres of Typst the editor is still available to you. 
 
 
-### v0.1.0: The Foundation
+### The Foundation
 The initial release focuses on a robust "Split-View" writing experience inspired by the clean aesthetic of the Zed editor:
 *   **Zed-Inspired Interface:** A minimal, focused UI with a fast file explorer and customizable window controls.
 *   **Dual-Pane Editing:** Raw Typst markup on the left, with an instant live-preview panel on the right.
 *   **Native Performance:** Leveraging GPUI for GPU-accelerated rendering and a minimal memory footprint.
 
-### The Future: A Hybrid Word Processor
+### The Goal: A Hybrid Word Processor
 As the project evolves, we are working toward a **Hybrid Word Processor** model to invite a wider audience of writers into the Typst ecosystem:
 * **Direct Preview Editing:** The ability to edit content directly within the preview panel for a seamless "What You See Is What You Get" (WYSIWYG) experience.
 * **Contextual Markup:** The raw markup editor stays tucked away, revealing itself only when you need to perform complex custom styling or review the underlying code.
@@ -57,6 +57,10 @@ If you want to explore other projects in the ecosystem, check out these excellen
 * [TypWriter](https://github.com/Ahdeyyy/typwriter)
 * [TypStudio](https://github.com/Cubxity/typstudio)
 * [InkPond](https://github.com/Lin0u0/InkPond) (Tailored for macOS and iOS)
+* [typsteditor](https://github.com/aburousan/typsteditor) (no Windows version)
+* [Edist](https://edist.app/) (for macOS)
+
+* [Velst](https://github.com/voxell-tech/velyst) (Interactive Typst content creator using Vello and Bevy.)
 
 ## Project Structure
 TypForge is organized in a Rust workspace consisting of several specialized crates:
@@ -65,8 +69,8 @@ TypForge is organized in a Rust workspace consisting of several specialized crat
   - The primary entry point and orchestrator. This binary crate integrates all components into a cohesive application using the [GPUI](https://github.com/zed-industries/gpui) framework.
 - **`typst-gpui`**: 
   - The rendering engine. It handles the translation of Typst documents into visual elements rendered via GPUI.
-- **`typstography`**: 
-  - A Language Server Protocol (LSP) implementation providing IDE-like features for Typst, built upon `tower-lsp` and `lsp-types`.
+- **`typforge-core`**:
+  - The core logic and AST manipulation engine. This crate provides functionalities for code editing, formatting, and intelligent features (like code completion and tooltips) by directly interacting with the Typst Abstract Syntax Tree (AST).
 - **`typsdocx`**: 
   - An export utility that maps Typst documents to Microsoft Word (`.docx`) files using `docx-rs`.
 

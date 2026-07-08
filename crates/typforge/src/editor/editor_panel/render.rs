@@ -218,7 +218,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
             .child(
                 div()
                     .flex_grow()
-                    .size_full()
+                    .h_4_5()
                     .flex_col()
                     .child(editor_element)
                     .children(hover_popup),

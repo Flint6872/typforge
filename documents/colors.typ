@@ -21,7 +21,9 @@
 )
 
 #let color-box(name, bg-color) = {
-  let text-color = if bg-color in (black, rgb("#001f3f"), rgb("#800033"), rgb("#3d9970")) { white } else { black }
+  let text-color = if (
+    bg-color in (black, rgb("#001f3f"), rgb("#800033"), rgb("#3d9970"))
+  ) { white } else { black }
 
   // Using layout() or fixed percentages to ensure it fits the 1in margins
   rect(
@@ -94,85 +96,127 @@ A rainbow using a predefined color map
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.turbo, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.turbo,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[turbo]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.cividis, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.cividis,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[cividis]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.rainbow, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.rainbow,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[rainbow]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.spectral, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.spectral,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[spectral]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.viridis, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.viridis,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[viridis]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.inferno, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.inferno,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[inferno]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.magma, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.magma,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[magma]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.plasma, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.plasma,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[plasma]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.rocket, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.rocket,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[rocket]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.mako, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.mako,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[cividis]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.vlag, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.vlag,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[vlag]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.icefire, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.icefire,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[icefire]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.flare, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.flare,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[flare]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.crest, angle: 90deg)),
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.crest,
+      angle: 90deg,
+    )),
     align(center, rotate(-90deg, reflow: true)[crest]),
   ),
 )
@@ -183,7 +227,9 @@ Sharp stripes instead of a smooth fade
 #rect(
   width: 100%,
   height: 20pt,
-  fill: gradient.linear(red, orange, yellow, lime, blue, rgb("#4B0082"), purple).sharp(7),
+  fill: gradient
+    .linear(red, orange, yellow, lime, blue, rgb("#4B0082"), purple)
+    .sharp(7),
 )
 
 #text(fill: gradient.linear(
@@ -197,16 +243,27 @@ Sharp stripes instead of a smooth fade
 #rect(
   width: 100%,
   height: 20pt,
-  fill: gradient.linear((red, 0%), (yellow, 10%), (green, 20%), (lime, 80%), (blue, 100%)),
+  fill: gradient.linear(
+    (red, 0%),
+    (yellow, 10%),
+    (green, 20%),
+    (lime, 80%),
+    (blue, 100%),
+  ),
 )
 
 #stack(
   dir: ltr,
   spacing: 1cm,
 
-  stack(spacing: 1em, block(fill: red)[opaque], block(fill: red.transparentize(50%))[half red], block(
-    fill: red.transparentize(75%),
-  )[quarter red]),
+  stack(
+    spacing: 1em,
+    block(fill: red)[opaque],
+    block(fill: red.transparentize(50%))[half red],
+    block(
+      fill: red.transparentize(75%),
+    )[quarter red],
+  ),
 
   stack(
     spacing: 0.5em,
@@ -388,7 +445,11 @@ Curves
   line(stroke: 2pt + red),
 
   //line stroke does not have round end cap
-  line(stroke: (paint: gradient.linear(orange, blue), thickness: 4pt, cap: "round")),
+  line(stroke: (
+    paint: gradient.linear(orange, blue),
+    thickness: 4pt,
+    cap: "round",
+  )),
   line(stroke: (paint: blue, thickness: 1pt, dash: "dashed")),
   line(stroke: 2pt + gradient.linear(..color.map.rainbow)),
 )

@@ -5,11 +5,12 @@ mod render;
 use crate::editor::{CodeEditor, FileContentUpdated, OpenedFile};
 
 use gpui::*;
-use gpui_component::{dock::Panel as DockPanel, input::InputState};
+use gpui_component::{RopeExt, dock::Panel as DockPanel, input::InputState};
 use parking_lot::Mutex;
 use std::rc::Rc;
 use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
+use typforge_core::format::format_document;
 
 use typforge_core::intel::{Completion, Tooltip, get_completions, get_hover_info};
 
@@ -308,9 +309,63 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
     pub fn save_active_file(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(active_path) = &self.active_file_path {
             if let Some(file) = self.open_files.iter_mut().find(|f| f.path == *active_path) {
-                let content = file.editor_state.read(cx).text();
+                let original_content = file.editor_state.read(cx).text().to_string();
+                let mut content_to_save = original_content.clone();
 
-                if let Err(e) = std::fs::write(active_path, &content.to_string()) {
+                // Only format .typ files
+                if active_path.extension().map_or(false, |ext| ext == "typ") {
+                    // You might want to make line_width configurable
+                    match format_document(&original_content, 80) {
+                        Ok(formatted_text) => {
+                            content_to_save = formatted_text;
+                            // Update the editor's state with the formatted content
+                            file.editor_state.update(cx, |state, input_cx| {
+                                // 1. Save current cursor byte offset and selection range
+                                let old_cursor_byte_offset = state.cursor();
+                                let old_selection_range = state.selected_range();
+
+                                // 2. Replace the document content while preserving undo history
+                                let current_len = state.text().len();
+                                state.replace_range_with_history(
+                                    0..current_len,
+                                    &content_to_save,
+                                    _window,
+                                    input_cx,
+                                );
+
+                                // 3. Attempt to restore the cursor position and selection
+                                //    We clamp the old byte offset to the new document length.
+                                let new_doc_len = state.text().len();
+                                let new_cursor_byte_offset =
+                                    old_cursor_byte_offset.min(new_doc_len);
+                                let new_selection_start =
+                                    old_selection_range.start.min(new_doc_len);
+                                let new_selection_end = old_selection_range.end.min(new_doc_len);
+
+                                // If there was a selection, restore it; otherwise, just restore the cursor.
+                                if !old_selection_range.is_empty()
+                                    && new_selection_start != new_selection_end
+                                {
+                                    state.set_selected_range(
+                                        new_selection_start..new_selection_end,
+                                        input_cx,
+                                    );
+                                } else {
+                                    // Convert byte offset to Position and then set the cursor.
+                                    let new_cursor_pos =
+                                        state.text().offset_to_position(new_cursor_byte_offset);
+                                    state.set_cursor_position(new_cursor_pos, _window, input_cx);
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to format file {}: {}", active_path.display(), e);
+                            // Continue saving original content if formatting fails
+                        }
+                    }
+                }
+
+                if let Err(e) = std::fs::write(active_path, &content_to_save) {
                     eprintln!("Failed to save file: {}", e);
                     return;
                 }
@@ -320,7 +375,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
 
                 cx.emit(FileContentUpdated {
                     path: Some(active_path.clone()),
-                    content: content.to_string(),
+                    content: content_to_save.to_string(),
                 });
             }
         }
