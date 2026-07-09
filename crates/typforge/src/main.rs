@@ -29,6 +29,12 @@ mod workspace;
 use workspace::TypstNoteView;
 
 fn main() -> Result<()> {
+    if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
+        embed_resource::compile("assets/windows/resources.rc", embed_resource::NONE)
+            .manifest_optional()
+            .unwrap();
+    }
+
     gpui_platform::application()
         .with_assets(Assets)
         .run(|cx: &mut App| {
@@ -65,7 +71,10 @@ fn main() -> Result<()> {
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(initial_bounds)),
-                    titlebar: None,
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("TypForge".into()), // Set your desired window title here
+                        ..Default::default()
+                    }),
                     focus: true,
                     show: true,
                     kind: WindowKind::Normal,

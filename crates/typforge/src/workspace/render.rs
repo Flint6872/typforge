@@ -4,12 +4,12 @@ use crate::{
 };
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::{ActiveTheme, button::Button, h_flex};
+use gpui_component::ActiveTheme;
 
 impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
     for TypstNoteView<W>
 {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         //let is_maximized = window.is_fullscreen();
 
         // 1. Root Container (Vertical Flex)
@@ -114,53 +114,6 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
                 this.ribbon_panel
                     .update(cx, |ribbon, cx| ribbon.handle_toggle_italic(action, cx));
             }))
-            //  cx.listener(Self::handle_reload_settings))
-            //.child(self.dock_area.clone())
-            .child(
-                // 2. Title Bar
-                div()
-                    .h_8()
-                    .w_full()
-                    // .bg(rgb(0x323232))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .px_4()
-                            .flex_grow()
-                            // This makes the entire title bar draggable
-                            .window_control_area(WindowControlArea::Drag)
-                            .child("TypForge"),
-                    ) //add menu bar if not on macOS
-                    .child(
-                        h_flex()
-                            .items_center()
-                            .child(Button::new("win-min").label("-").on_click(|_, window, cx| {
-                                println!("Minimize clicked");
-                                window.minimize_window();
-                                cx.stop_propagation();
-                            }))
-                            .child(
-                                Button::new("win-max")
-                                    // In modern GPUI, use is_zoomed() to check maximization
-                                    .label(if window.is_fullscreen() { "❐" } else { "□" })
-                                    .on_click(|_, window, cx| {
-                                        println!("Zoom (Maximize) clicked");
-                                        window.toggle_fullscreen();
-                                        cx.stop_propagation();
-                                    }),
-                            )
-                            .child(Button::new("win-close").label("×").on_click(
-                                |_, window, cx| {
-                                    println!("Close clicked");
-                                    window.remove_window();
-                                    cx.stop_propagation();
-                                },
-                            )),
-                    )
-                    .flex_none(),
-            )
             .when_some(self.menu_bar.clone(), |this, menu_bar| {
                 this.child(
                     div()

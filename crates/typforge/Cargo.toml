@@ -37,3 +37,4 @@ typst-layout.workspace = true
 typst-kit = { version = "0.15.0", features = ["scan-fonts", "embedded-fonts"] }
 
 lsp-types = "0.97.0"
+embed-resource = "3.0.11"
