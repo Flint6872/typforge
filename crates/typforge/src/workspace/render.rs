@@ -15,6 +15,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
         // 1. Root Container (Vertical Flex)
         div()
             .flex_col()
+            .flex_row()
             .size_full()
             //.track_focus(&cx.focus_handle())
             .bg(cx.theme().background) // Dark background
@@ -127,9 +128,32 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
             // --- 3. Render Ribbon Panel ---
             // Positioned cleanly underneath the window menu bar, stretching full-width.
             .child(self.ribbon_panel.clone())
+            .child(div().flex_grow().h_5_6().child(self.dock_area.clone()))
             .child(
-                // 2. Main Body Area (Horizontal Flex) - Now handled by DockArea
-                self.dock_area.clone(),
+                div()
+                    .w_full()
+                    .h_8() // Increase height to something visible, e.g., h_8 (32px)
+                    .bg(cx.theme().foreground) // Give it a background color, slightly different from main background
+                    .text_color(cx.theme().foreground) // Set default text color for content
+                    .p_2() // Add some padding
+                    .flex() // Use flexbox to arrange internal items
+                    .items_center() // Vertically center items
+                    .justify_between() // Distribute space between items (e.g., left and right aligned groups)
+                    .child(
+                        // Example left-aligned group
+                        div().flex().gap_2().children(vec![
+                            // Your buttons or text here
+                            gpui::div().child("Status: Ready"),
+                            // gpui::button("Save").on_click(...),
+                        ]),
+                    )
+                    .child(
+                        // Example right-aligned group
+                        div().flex().gap_2().children(vec![
+                            gpui::div().child("Line: 1, Col: 1"),
+                            // gpui::button("Export").on_click(...),
+                        ]),
+                    ),
             )
     }
 }

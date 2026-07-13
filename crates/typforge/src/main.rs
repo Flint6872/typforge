@@ -29,11 +29,11 @@ mod workspace;
 use workspace::TypstNoteView;
 
 fn main() -> Result<()> {
-    if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
-        embed_resource::compile("assets/windows/resources.rc", embed_resource::NONE)
-            .manifest_optional()
-            .unwrap();
-    }
+    // if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
+    //     embed_resource::compile("assets/windows/resources.rc", embed_resource::NONE)
+    //         .manifest_optional()
+    //         .unwrap();
+    // }
 
     gpui_platform::application()
         .with_assets(Assets)

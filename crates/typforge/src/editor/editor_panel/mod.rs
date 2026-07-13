@@ -12,7 +12,7 @@ use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
 use typforge_core::format::format_document;
 
-use typforge_core::intel::{Completion, Tooltip, get_completions, get_hover_info};
+use typforge_core::intel::{Tooltip, get_hover_info};
 
 impl<W: typst::World + typforge_core::IdeWorld + 'static> EventEmitter<FileContentUpdated>
     for EditorPanel<W>

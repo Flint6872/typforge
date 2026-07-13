@@ -24,7 +24,6 @@ If you are curious about [Typst](https://typst.app), you're in the right place. 
 ## The Vision
 Our goal is to make Typst accessible to a general audience, bridging the gap between technical power and mainstream accessibility. You shouldn't have to navigate a complex code editor just to create a beautiful document. Should you want to bring in those more advanced feautres of Typst the editor is still available to you. 
 
-
 ### The Foundation
 The initial release focuses on a robust "Split-View" writing experience inspired by the clean aesthetic of the Zed editor:
 *   **Zed-Inspired Interface:** A minimal, focused UI with a fast file explorer and customizable window controls.
@@ -71,8 +70,8 @@ TypForge is organized in a Rust workspace consisting of several specialized crat
   - The rendering engine. It handles the translation of Typst documents into visual elements rendered via GPUI.
 - **`typforge-core`**:
   - The core logic and AST manipulation engine. This crate provides functionalities for code editing, formatting, and intelligent features (like code completion and tooltips) by directly interacting with the Typst Abstract Syntax Tree (AST).
-- **`typsdocx`**: 
-  - An export utility that maps Typst documents to Microsoft Word (`.docx`) files using `docx-rs`.
+<!--- **`typsdocx`**: 
+  - An export utility that maps Typst documents to Microsoft Word (`.docx`) files using `docx-rs`.-->
 
 ## How to Contribute
 TypForge is in its early, experimental days, and a huge chunk of it is being built using AI-assisted development (shoutout to Gemini!). Because of that, you don't need to be a seasoned Rust systems engineer to contribute. We are learning, experimenting, and building this in the open.
