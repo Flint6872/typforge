@@ -115,6 +115,12 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
                 this.ribbon_panel
                     .update(cx, |ribbon, cx| ribbon.handle_toggle_italic(action, cx));
             }))
+            .on_action(
+                cx.listener(|this, action: &actions::ToggleUnderline, _, cx| {
+                    this.ribbon_panel
+                        .update(cx, |ribbon, cx| ribbon.handle_toggle_underline(action, cx));
+                }),
+            )
             .when_some(self.menu_bar.clone(), |this, menu_bar| {
                 this.child(
                     div()

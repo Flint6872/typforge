@@ -9,6 +9,7 @@ impl From<RibbonAction> for EditAction {
         match action {
             RibbonAction::ToggleBold => EditAction::ToggleBold,
             RibbonAction::ToggleItalic => EditAction::ToggleItalic,
+            RibbonAction::ToggleUnderline => EditAction::ToggleUnderline,
             RibbonAction::SetFont(f) => EditAction::SetFont(f),
             RibbonAction::SetFontSize(s) => EditAction::SetFontSize(s as f64),
             RibbonAction::SetTextColor(c) => EditAction::SetTextColor(c),
@@ -31,6 +32,7 @@ impl From<&RibbonAction> for EditAction {
 pub struct ActiveProperties {
     pub is_bold: bool,
     pub is_italic: bool,
+    pub is_underline: bool,
     pub size: Option<f32>,
     pub font: Option<String>,
     pub color: Option<String>,
@@ -61,6 +63,9 @@ pub fn detect_properties_at_offset(content: &str, offset: usize) -> ActiveProper
         if node.kind() == SyntaxKind::FuncCall {
             if let Some(callee) = node.children().next() {
                 let callee_text = callee.leaf_text();
+                if callee_text == "underline" || callee_text == "#underline" {
+                    props.is_underline = true;
+                }
                 if callee_text == "text" || callee_text == "#text" {
                     if let Some(args_node) = node.children().find(|c| c.kind() == SyntaxKind::Args)
                     {

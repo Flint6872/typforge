@@ -17,6 +17,14 @@ impl RibbonPanel {
         cx.emit(RibbonAction::ToggleItalic);
     }
 
+    pub fn handle_toggle_underline(
+        &mut self,
+        _: &actions::ToggleUnderline,
+        cx: &mut Context<Self>,
+    ) {
+        cx.emit(RibbonAction::ToggleUnderline);
+    }
+
     pub(super) fn render_home_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors;
 
@@ -216,6 +224,14 @@ impl RibbonPanel {
                 colors,
                 cx.listener(|_, _, _, cx| {
                     cx.emit(RibbonAction::ToggleItalic);
+                }),
+            ))
+            .child(self.render_icon_button(
+                "U",
+                self.is_underline,
+                colors,
+                cx.listener(|_, _, _, cx| {
+                    cx.emit(RibbonAction::ToggleUnderline);
                 }),
             ))
             // Separator

@@ -22,6 +22,7 @@ pub struct RibbonPanel {
     pub original_font_size: Option<f32>,
     pub is_bold: bool,
     pub is_italic: bool,
+    pub is_underline: bool,
     #[allow(dead_code)] //will build this out at a later time
     pub paper_size: String,
     pub is_flipped: bool,
@@ -55,6 +56,7 @@ impl RibbonPanel {
             original_font_size: None,
             is_bold: false,
             is_italic: false,
+            is_underline: false,
             paper_size: "us-letter".to_string(),
             is_flipped: false,
             columns: 1,

@@ -31,6 +31,7 @@ actions!(
         // ribbon actions
         ToggleBold,
         ToggleItalic,
+        ToggleUnderline,
     ]
 );
 
@@ -64,5 +65,6 @@ pub enum RibbonAction {
     SetFontSize(f32), // e.g., 12.0
     ToggleBold,
     ToggleItalic,
+    ToggleUnderline,
     SetTextColor(String), // e.g., "red", "blue", or hex values
 }
