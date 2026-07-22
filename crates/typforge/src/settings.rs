@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct AppSettings {
     pub theme: String,
     pub font_size: f32,
-    pub default_save_folder: Option<String>,
+    pub last_folder_open: Option<String>,
 }
 
 impl Global for AppSettings {}
@@ -15,7 +15,7 @@ impl Default for AppSettings {
         Self {
             theme: "Tokyo Storm".into(),
             font_size: 16.0,
-            default_save_folder: None,
+            last_folder_open: None,
         }
     }
 }
@@ -52,5 +52,15 @@ pub fn update_theme_setting(new_theme: String, cx: &mut App) {
         }
     }
 
+    cx.set_global(settings);
+}
+
+pub fn update_last_folder(path: String, cx: &mut App) {
+    let mut settings = cx.global::<AppSettings>().clone();
+    settings.last_folder_open = Some(path);
+    let path = "settings.json";
+    if let Ok(json) = serde_json::to_string_pretty(&settings) {
+        let _ = std::fs::write(path, json);
+    }
     cx.set_global(settings);
 }

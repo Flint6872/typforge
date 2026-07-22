@@ -103,7 +103,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
                         cx_for_async.update(|app_cx| {
                             let mut settings =
                                 app_cx.global::<crate::settings::AppSettings>().clone();
-                            settings.default_save_folder = Some(path_str);
+                            settings.last_folder_open = Some(path_str);
                             app_cx.set_global(settings);
                         });
 
@@ -145,43 +145,32 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         let editor_panel_handle = self.editor_panel.clone();
         let window_handle = window.window_handle();
 
-        // 1. Capture the current path context
-        let active_file_path = editor_panel_handle.read(cx).active_file_path.clone();
-
-        // 2. Capture the default_save_folder from settings before spawning
-        let default_save_folder = cx
-            .global::<crate::settings::AppSettings>()
-            .default_save_folder
-            .as_ref()
-            .map(std::path::PathBuf::from);
-
         cx.spawn(move |_, spawned_async_cx: &mut AsyncApp| {
-            let mut cx_for_async_block = spawned_async_cx.clone();
+            let mut cx_for_async = spawned_async_cx.clone();
 
             async move {
-                // 3. Determine the directory:
-                // Priority: Active File Folder > Settings Default Folder > Current Directory
-                let dir = if let Some(ref p) = active_file_path {
-                    p.parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|| std::path::PathBuf::from("."))
-                } else if let Some(ref d) = default_save_folder {
-                    d.clone()
+                let (active_path, dir) = cx_for_async.update(|app_cx| {
+                    let editor = editor_panel_handle.read(app_cx);
+                    (
+                        editor.active_file_path.clone(),
+                        Self::get_default_save_dir(editor, app_cx),
+                    )
+                });
+
+                // If active_path exists, combine the dir and the filename so the dialog
+                // defaults to the specific file's location.
+                let default_path = if let Some(path) = active_path {
+                    dir.join(path.file_name().unwrap_or_default())
                 } else {
-                    std::path::PathBuf::from(".")
+                    dir // Just the directory if no active file
                 };
 
-                let name = active_file_path
-                    .as_ref()
-                    .and_then(|p| p.file_name())
-                    .and_then(|n| n.to_str());
-
                 let receiver =
-                    cx_for_async_block.update(|app_cx| app_cx.prompt_for_new_path(&dir, name));
+                    cx_for_async.update(|app_cx| app_cx.prompt_for_new_path(&default_path, None));
 
                 if let Ok(Ok(Some(path))) = receiver.await {
                     window_handle
-                        .update(&mut cx_for_async_block, |_, window, app_cx| {
+                        .update(&mut cx_for_async, |_, window, app_cx| {
                             editor_panel_handle.update(app_cx, |editor, editor_cx| {
                                 let _ = editor.save_file_as(path, window, editor_cx);
                             });
@@ -223,78 +212,40 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        println!("Action: FileExportPdf triggered!");
-
-        // 1. Get the bytes from the preview panel
         let pdf_bytes = self.preview_panel.read(cx).export_pdf();
-
-        // 2. Determine default filename and directory from the active file in the editor
         let editor = self.editor_panel.read(cx);
-        let (default_dir, default_name) = if let Some(path) = &editor.active_file_path {
-            // Get the directory containing the file
-            let dir = path
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-            // Generate "filename.pdf" from "filename.typ"
-            let name = path
-                .with_extension("pdf")
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "document.pdf".to_string());
+        // Get the directory using the helper
+        let dir = Self::get_default_save_dir(editor, cx);
 
-            (dir, Some(name))
-        } else {
-            // Default fallback for unsaved files
-            (
-                std::path::PathBuf::from("."),
-                Some("document.pdf".to_string()),
-            )
-        };
+        // Determine suggested filename
+        let default_name = editor
+            .active_file_path
+            .as_ref()
+            .map(|p| p.with_extension("pdf"))
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .or_else(|| Some("document.pdf".to_string()));
 
         if let Some(bytes) = pdf_bytes {
             cx.spawn(move |_, spawned_async_cx: &mut AsyncApp| {
                 let cx_for_async_block = spawned_async_cx.clone();
-                let bytes = bytes;
-                let dir = default_dir;
-                let name = default_name;
 
                 async move {
-                    let name_ref = name.as_deref();
+                    // 1. Pass the directory path as the first argument
+                    // 2. Pass the filename as the second argument (the &str)
                     let receiver = cx_for_async_block
-                        .update(|app_cx| app_cx.prompt_for_new_path(&dir, name_ref));
+                        .update(|app_cx| app_cx.prompt_for_new_path(&dir, default_name.as_deref()));
 
-                    match receiver.await {
-                        Ok(Ok(Some(path))) => {
-                            // Success: User picked a path
-                            match std::fs::write(&path, &bytes) {
-                                Ok(_) => println!("Successfully exported PDF to {:?}", path),
-                                Err(e) => eprintln!("Failed to save PDF to {:?}: {}", path, e),
-                            }
-                        }
-                        Ok(Ok(None)) => {
-                            // Success: User cancelled the dialog
-                            println!("Export cancelled by user.");
-                        }
-                        Ok(Err(e)) => {
-                            // The prompt logic itself returned an error
-                            eprintln!("Error during prompt interaction: {:?}", e);
-                        }
-                        Err(_) => {
-                            // The oneshot channel was cancelled (e.g. sender dropped)
-                            eprintln!("Prompt channel was closed unexpectedly.");
+                    if let Ok(Ok(Some(path))) = receiver.await {
+                        if let Err(e) = std::fs::write(&path, &bytes) {
+                            eprintln!("Failed to save export to {:?}: {}", path, e);
+                        } else {
+                            println!("Successfully exported to {:?}", path);
                         }
                     }
                 }
             })
             .detach();
-        } else {
-            eprintln!("Export failed: No compiled document available.");
-            // To handle the alert popover mentioned earlier, you could update a state field here
-            // self.export_error = Some("No compiled document".into());
-            // cx.notify();
         }
     }
 
@@ -304,66 +255,36 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        println!("Action: FileExportWord triggered!");
-
-        // 1. Get the bytes from the preview panel
-        let docx_bytes = self.preview_panel.read(cx).export_docx(); // <-- This line now calls your new method
-
-        // 2. Determine default filename and directory
+        let docx_bytes = self.preview_panel.read(cx).export_docx();
         let editor = self.editor_panel.read(cx);
-        let (default_dir, default_name) = if let Some(path) = &editor.active_file_path {
-            let dir = path
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-            let name = path
-                .with_extension("docx")
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "document.docx".to_string());
+        // Use the centralized helper for the base directory
+        let dir = Self::get_default_save_dir(editor, cx);
+        //let dir_clone = dir.clone();
 
-            (dir, Some(name))
-        } else {
-            (
-                std::path::PathBuf::from("."),
-                Some("document.docx".to_string()),
-            )
-        };
+        // Determine suggested filename
+        let default_name = editor
+            .active_file_path
+            .as_ref()
+            .map(|p| p.with_extension("docx"))
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .or_else(|| Some("document.docx".to_string()));
 
         if let Some(bytes) = docx_bytes {
             cx.spawn(move |_, spawned_async_cx: &mut AsyncApp| {
                 let cx_for_async_block = spawned_async_cx.clone();
-                let bytes = bytes;
-                let dir = default_dir;
-                let name = default_name;
 
                 async move {
-                    let name_ref = name.as_deref();
-
+                    // 1. Pass the directory path as the first argument
+                    // 2. Pass the filename as the second argument (the &str)
                     let receiver = cx_for_async_block
-                        .update(|app_cx| app_cx.prompt_for_new_path(&dir, name_ref));
+                        .update(|app_cx| app_cx.prompt_for_new_path(&dir, default_name.as_deref()));
 
-                    match receiver.await {
-                        Ok(Ok(Some(path))) => {
-                            // Success: User picked a path
-                            match std::fs::write(&path, &bytes) {
-                                Ok(_) => println!("Successfully exported DOCX to {:?}", path),
-                                Err(e) => eprintln!("Failed to save DOCX to {:?}: {}", path, e),
-                            }
-                        }
-                        Ok(Ok(None)) => {
-                            // Success: User cancelled the dialog
-                            println!("Export cancelled by user.");
-                        }
-                        Ok(Err(e)) => {
-                            // The prompt logic itself returned an error
-                            eprintln!("Error during prompt interaction: {:?}", e);
-                        }
-                        Err(_) => {
-                            // The oneshot channel was cancelled (e.g. sender dropped)
-                            eprintln!("Prompt channel was closed unexpectedly.");
+                    if let Ok(Ok(Some(path))) = receiver.await {
+                        if let Err(e) = std::fs::write(&path, &bytes) {
+                            eprintln!("Failed to save export to {:?}: {}", path, e);
+                        } else {
+                            println!("Successfully exported to {:?}", path);
                         }
                     }
                 }
@@ -385,6 +306,28 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         cx.notify(); // Or cx.notify() to redraw everything
     }
 
+    fn get_default_save_dir(editor: &EditorPanel<W>, cx: &impl AppContext) -> std::path::PathBuf {
+        // 1. If we have an active file path, suggest its parent directory
+        if let Some(path) = &editor.active_file_path {
+            if let Some(parent) = path.parent() {
+                return parent.to_path_buf();
+            }
+        }
+
+        // 2. Fallback to the user's last opened folder
+        // We use read_global to access the AppSettings securely
+        let last_folder = cx.read_global::<crate::settings::AppSettings, _>(|settings, _| {
+            settings.last_folder_open.clone()
+        });
+
+        if let Some(folder) = last_folder {
+            return std::path::PathBuf::from(folder);
+        }
+
+        // 3. Absolute fallback
+        std::path::PathBuf::from(".")
+    }
+
     // fn handle_undo(&mut self, _: &actions::EditUndo, window: &mut Window, cx: &mut Context<Self>) {
     //     self.editor_panel
     //         .update(cx, |editor: &mut EditorPanel, editor_cx| {
@@ -398,4 +341,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
     //             window.dispatch_action(Box::new(gpui::actions::Redo), cx);
     //         });
     // }
+    //
+    //
+    //
 }
