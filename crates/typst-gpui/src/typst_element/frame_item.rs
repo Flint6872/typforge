@@ -5,10 +5,9 @@ use crate::typst_element::{
         typst_paint_to_gpui_hsla_from_paint,
     },
 };
-use gpui::{App, Bounds, PathBuilder, Pixels, Point, TransformationMatrix, Window};
+use gpui::{App, Bounds, Pixels, Point, TransformationMatrix, Window};
 use std::{sync::Arc, time::Instant};
 use typst::{
-    foundations::Smart,
     layout::Size,
     visualize::{Gradient, Image, Paint},
 };

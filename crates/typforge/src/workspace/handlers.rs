@@ -49,7 +49,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
                             window_handle
                                 .update(&mut cx_for_async_block, |_, window, app_cx| {
                                     editor_panel_handle.update(app_cx, |editor, editor_cx| {
-                                        let _ = editor.open_file(path, window, editor_cx);
+                                        let _ = editor.save_file_as(path, window, editor_cx);
                                     });
                                 })
                                 .ok();
@@ -128,9 +128,34 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        println!("Action: FileSave triggered!"); // Debug print
+        let editor_panel_handle = self.editor_panel.clone();
+
+        // Read the editor panel's state to check if any files are open
+        let editor = editor_panel_handle.read(cx); // Read here to avoid multiple reads
+
+        if editor.open_files.is_empty() {
+            println!("Save ignored: No files open.");
+            return;
+        }
+
+        // Find the active file to check its `is_untitled` status
+        let active_file_is_untitled = editor
+            .active_file_path
+            .as_ref()
+            .and_then(|path| editor.open_files.iter().find(|f| &f.path == path))
+            .map_or(false, |file| file.is_untitled);
+
+        if active_file_is_untitled {
+            println!("Save detected an untitled file, delegating to Save As...");
+            // Delegate to handle_file_save_as if the active file is untitled
+            // We call the full handle_file_save_as method as it includes the prompt
+            self.handle_file_save_as(&actions::FileSaveAs, _window, cx);
+            return; // Exit after delegating
+        }
+
         self.editor_panel
             .update(cx, |editor: &mut EditorPanel<W>, editor_cx| {
+                println!("Action: FileSave triggered!");
                 editor.save_active_file(_window, editor_cx);
             });
     }
@@ -141,6 +166,11 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.editor_panel.read(cx).open_files.is_empty() {
+            println!("Save As ignored: No active file to save.");
+            return;
+        }
+
         println!("Action: FileSaveAs triggered!");
         let editor_panel_handle = self.editor_panel.clone();
         let window_handle = window.window_handle();
@@ -212,6 +242,11 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.editor_panel.read(cx).open_files.is_empty() {
+            println!("Save As ignored: No active file to export to pdf.");
+            return;
+        }
+
         let pdf_bytes = self.preview_panel.read(cx).export_pdf();
         let editor = self.editor_panel.read(cx);
 
@@ -255,6 +290,11 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.editor_panel.read(cx).open_files.is_empty() {
+            println!("Save As ignored: No active file to export to docx.");
+            return;
+        }
+
         let docx_bytes = self.preview_panel.read(cx).export_docx();
         let editor = self.editor_panel.read(cx);
 

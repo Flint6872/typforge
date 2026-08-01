@@ -372,6 +372,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
 
                 file.has_unsaved_changes = false;
                 file.lsp_version += 1;
+                file.is_untitled = false;
 
                 cx.emit(FileContentUpdated {
                     path: Some(active_path.clone()),
@@ -426,6 +427,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
             lsp_version: 0,
             diagnostics: Vec::new(),
             code_editor_entity,
+            is_untitled: true,
         };
         new_file.lsp_version += 1;
 
@@ -467,6 +469,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                 *active_path_mut = new_path.clone();
                 file.has_unsaved_changes = false;
                 file.lsp_version += 1;
+                file.is_untitled = false;
 
                 cx.emit(FileContentUpdated {
                     path: Some(new_path),

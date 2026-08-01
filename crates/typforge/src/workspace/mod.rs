@@ -74,6 +74,19 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         )
         .detach();
 
+        // Central observer: Keep the top-level menus in sync with the Editor's file state
+        cx.observe(&editor_panel_entity, |_this, editor_handle, cx| {
+            let editor = editor_handle.read(cx);
+            let has_file = !editor.open_files.is_empty();
+
+            crate::components::menus::update_menu_file_state(has_file, cx);
+        })
+        .detach();
+
+        editor_panel_entity.update(cx, |editor_panel, cx| {
+            editor_panel.new_file(window, cx); // Call the new_file method
+        });
+
         // --- 2. Editor -> Preview Synchronization (via FileContentUpdated events) ---
         // This listener ensures that any change originating from the EditorPanel
         // updates the PreviewPanel.

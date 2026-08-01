@@ -50,6 +50,7 @@ pub struct OpenedFile {
     pub lsp_version: i32,          // Track document version
     pub diagnostics: Vec<typst::diag::SourceDiagnostic>, // Store native diagnostics
     pub code_editor_entity: Entity<CodeEditor>,
+    pub is_untitled: bool,
 }
 
 impl OpenedFile {
@@ -85,6 +86,7 @@ impl OpenedFile {
             lsp_version: 0,
             diagnostics: Vec::new(),
             code_editor_entity,
+            is_untitled: false,
         })
     }
 

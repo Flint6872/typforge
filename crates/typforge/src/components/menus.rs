@@ -1,8 +1,26 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, eprintln};
 
-use crate::actions::{self, ChangeTheme};
-use gpui::{App, Menu, MenuItem};
+use crate::{
+    actions::{self, ChangeTheme},
+    editor::editor_panel,
+};
+use gpui::{App, Global, Menu, MenuItem};
 use gpui_component::{ThemeRegistry, ThemeSet};
+
+// 1. Define global state to track if a file is active
+pub struct MenuState {
+    pub has_active_file: bool,
+}
+
+impl Global for MenuState {}
+
+// 2. Helper function to update MenuState and refresh the application menus
+pub fn update_menu_file_state(has_file: bool, cx: &mut App) {
+    cx.set_global(MenuState {
+        has_active_file: has_file,
+    });
+    setup_menus(cx);
+}
 
 pub fn setup_menus(cx: &mut App) {
     let registry = ThemeRegistry::global(cx);
@@ -66,6 +84,10 @@ pub fn setup_menus(cx: &mut App) {
         .map(|name| MenuItem::action(name.clone(), ChangeTheme { name: name.clone() }))
         .collect::<Vec<_>>();
 
+    let has_file = cx
+        .try_global::<MenuState>()
+        .map_or(false, |state| state.has_active_file);
+
     cx.set_menus(vec![
         // File Menu
         Menu {
@@ -75,16 +97,17 @@ pub fn setup_menus(cx: &mut App) {
                 MenuItem::action("Open File...", actions::FileOpen),
                 MenuItem::action("Open Folder...", actions::FolderOpen),
                 MenuItem::separator(),
-                MenuItem::action("Save", actions::FileSave),
-                MenuItem::action("Save As...", actions::FileSaveAs),
-                MenuItem::action("Close File", actions::FileClose),
+                MenuItem::action("Save", actions::FileSave).disabled(!has_file),
+                MenuItem::action("Save As...", actions::FileSaveAs).disabled(!has_file),
+                MenuItem::action("Close File", actions::FileClose).disabled(!has_file),
                 MenuItem::separator(),
-                MenuItem::action("Package Manager", actions::PackageManager),
+                MenuItem::action("Package Manager", actions::PackageManager).disabled(true),
                 MenuItem::submenu(Menu {
                     name: "Export To".into(),
                     items: vec![
-                        MenuItem::action("PDF", actions::FileExportPdf),
-                        MenuItem::action("Word Document", actions::FileExportDocx),
+                        MenuItem::action("PDF", actions::FileExportPdf).disabled(!has_file),
+                        MenuItem::action("Word Document", actions::FileExportDocx)
+                            .disabled(!has_file),
                     ],
                     disabled: false,
                 }),

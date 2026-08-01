@@ -49,6 +49,17 @@ fn main() -> Result<()> {
             bind_keys(cx);
             theme::init(cx);
             theme::apply_settings_theme(cx);
+
+            #[cfg(target_os = "windows")]
+            cx.set_global(crate::components::menus::MenuState {
+                has_active_file: true,
+            });
+
+            #[cfg(not(target_os = "windows"))]
+            cx.set_global(crate::components::menus::MenuState {
+                has_active_file: false,
+            });
+
             setup_menus(cx);
 
             #[cfg(not(target_os = "macos"))]
