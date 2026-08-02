@@ -383,6 +383,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
     }
 
     pub fn new_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        eprintln!("--- NEW FILE CALLED ---");
         let mut i = 1;
         let mut candidate_filename: PathBuf;
         let temp_dir = std::env::temp_dir();

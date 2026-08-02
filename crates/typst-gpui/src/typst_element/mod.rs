@@ -22,7 +22,7 @@ use std::{
     },
     time::Instant,
 };
-use typst::text::Font;
+
 use typst::{
     layout::{Frame, FrameItem},
     syntax::Span,

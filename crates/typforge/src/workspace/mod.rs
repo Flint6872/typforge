@@ -42,9 +42,9 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         let editor_panel_entity =
             cx.new(|cx| EditorPanel::new(shared_world_arc.clone(), window, cx));
 
-        editor_panel_entity.update(cx, |editor_panel, cx| {
-            editor_panel.new_file(window, cx); // Call the new_file method
-        });
+        // editor_panel_entity.update(cx, |editor_panel, cx| {
+        //     editor_panel.new_file(window, cx); // Call the new_file method
+        // });
 
         let font_families: Vec<String> = {
             let world = shared_world_arc.lock();
@@ -83,9 +83,9 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         })
         .detach();
 
-        editor_panel_entity.update(cx, |editor_panel, cx| {
-            editor_panel.new_file(window, cx); // Call the new_file method
-        });
+        // editor_panel_entity.update(cx, |editor_panel, cx| {
+        //     editor_panel.new_file(window, cx); // Call the new_file method
+        // });
 
         // --- 2. Editor -> Preview Synchronization (via FileContentUpdated events) ---
         // This listener ensures that any change originating from the EditorPanel

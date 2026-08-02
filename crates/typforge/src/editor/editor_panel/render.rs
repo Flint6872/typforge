@@ -2,6 +2,7 @@
 
 use crate::editor::{CodeEditor, DraggedTab, EditorPanel, FileContentUpdated, TabDrag};
 use gpui::*;
+use gpui_component::StyledExt;
 use gpui_component::{ActiveTheme, h_flex};
 
 use std::time::Duration;
@@ -16,6 +17,12 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
 
         let font_size = px(16.0 * self.zoom_level);
         let line_height = font_size * 1.5;
+
+        #[cfg(not(target_os = "macos"))]
+        let ctrl_or_cmd = "Ctrl";
+
+        #[cfg(target_os = "macos")]
+        let ctrl_or_cmd = "Cmd";
 
         // 1. Create the base Editor UI
         let editor_element = if let Some(ref active_path) = active_file_path {
@@ -64,9 +71,84 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
             div()
                 .size_full()
                 .flex()
+                .flex_col()
                 .items_center()
                 .justify_center()
-                .child("No files open")
+                .text_color(cx.theme().foreground)
+                .child(
+                    div()
+                        .text_xl()
+                        .font_weight(FontWeight((2.0)))
+                        .child("No Document Open"),
+                )
+                .child(
+                    div()
+                        .text_lg()
+                        .margins(px(8.))
+                        .child("Create a new file or open an existing project to get started."),
+                )
+                .child(
+                    div()
+                        .flex_row()
+                        .gap_4() // Space between actions
+                        .margins(px(16.))
+                        .children(vec![
+                            // New File Action
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .justify_between()
+                                .gap_4()
+                                .child(div().text_lg().font_bold().child("New File"))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_row()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(div().child(ctrl_or_cmd))
+                                        .child(div().child("+"))
+                                        .child(div().child("N")),
+                                ),
+                            // Open File Action
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .justify_between()
+                                .gap_4()
+                                .child(div().text_lg().font_bold().child("Open File"))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_row()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(div().child(ctrl_or_cmd))
+                                        .child(div().child("+"))
+                                        .child(div().child("O")),
+                                ),
+                            // Open Recent Action
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .justify_between()
+                                .gap_4()
+                                .child(div().text_lg().font_bold().child("Open Recent"))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_row()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(div().child(ctrl_or_cmd))
+                                        .child(div().child("+"))
+                                        .child(div().child("R")),
+                                ),
+                        ]),
+                )
                 .into_any_element()
         };
 

@@ -6,6 +6,7 @@ pub struct AppSettings {
     pub theme: String,
     pub font_size: f32,
     pub last_folder_open: Option<String>,
+    pub recent_files: Option<Vec<String>>,
 }
 
 impl Global for AppSettings {}
@@ -16,6 +17,7 @@ impl Default for AppSettings {
             theme: "Tokyo Storm".into(),
             font_size: 16.0,
             last_folder_open: None,
+            recent_files: None,
         }
     }
 }
