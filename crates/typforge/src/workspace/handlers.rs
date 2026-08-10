@@ -48,6 +48,10 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
                         if let Some(path) = paths.into_iter().next() {
                             window_handle
                                 .update(&mut cx_for_async_block, |_, window, app_cx| {
+                                    crate::settings::update_recent_files(
+                                        path.to_string_lossy().to_string(),
+                                        app_cx,
+                                    );
                                     editor_panel_handle.update(app_cx, |editor, editor_cx| {
                                         let _ = editor.save_file_as(path, window, editor_cx);
                                     });
@@ -68,6 +72,44 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
             }
         })
         .detach();
+    }
+
+    /// Handles the `Ctrl+R` / `Cmd+R` keybinding to show/hide the recent files picker
+    pub(crate) fn handle_file_open_recent(
+        &mut self,
+        _action: &actions::FileOpenRecent, // Unparameterized action
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        println!("Action: FileOpenRecent triggered! Toggling picker UI.");
+        self.show_recent_files_picker = !self.show_recent_files_picker;
+        cx.notify(); // Request a redraw to show/hide the picker
+    }
+
+    /// Handles opening a specific recent file selected from the menu or picker UI.
+    pub(crate) fn handle_open_specific_recent_file(
+        // Renamed for clarity
+        &mut self,
+        action: &actions::OpenRecentFiles, // Parameterized action struct
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = std::path::PathBuf::from(&action.path);
+        println!("Opening specific recent file: {:?}", path);
+
+        // 1. Load the file in the editor
+        self.editor_panel.update(cx, |editor, editor_cx| {
+            // Assuming editor.open_file takes PathBuf, Window, Context
+            let _ = editor.open_file(path.clone(), window, editor_cx);
+        });
+
+        // 2. Bring file to the top of the recents list
+        let path_str = action.path.clone();
+        crate::settings::update_recent_files(path_str, cx);
+
+        // 3. Hide the picker if it's currently open (important after selection)
+        self.show_recent_files_picker = false;
+        cx.notify();
     }
 
     pub(crate) fn handle_folder_open(

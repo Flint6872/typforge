@@ -8,6 +8,7 @@ actions!(
     [
         FileNew,
         FileOpen,
+        FileOpenRecent,
         FileSave,
         FileSaveAs,
         FileClose,
@@ -48,6 +49,12 @@ pub struct ChangeTheme {
 // pub struct GoToLine {
 //     pub line_number: usize,
 // }
+
+#[derive(gpui::Action, Clone, PartialEq, Eq, Deserialize)]
+#[action(namespace = actions, no_json)]
+pub struct OpenRecentFiles {
+    pub path: String,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RibbonAction {

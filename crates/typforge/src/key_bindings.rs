@@ -11,6 +11,7 @@ pub fn bind_keys(cx: &mut App) {
     bindings.extend([
         KeyBinding::new("cmd-n", actions::FileNew, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-o", actions::FileOpen, GLOBAL_CONTEXT),
+        KeyBinding::new("cmd-r", actions::FileOpenRecent, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-s", actions::FileSave, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-shift-s", actions::FileSaveAs, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-w", actions::FileClose, GLOBAL_CONTEXT),
@@ -32,6 +33,7 @@ pub fn bind_keys(cx: &mut App) {
     bindings.extend([
         KeyBinding::new("ctrl-n", actions::FileNew, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-o", actions::FileOpen, GLOBAL_CONTEXT),
+        KeyBinding::new("ctrl-r", actions::FileOpenRecent, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-k", actions::FolderOpen, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-s", actions::FileSave, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-shift-s", actions::FileSaveAs, GLOBAL_CONTEXT),

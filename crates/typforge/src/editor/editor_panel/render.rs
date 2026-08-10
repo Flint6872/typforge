@@ -78,7 +78,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                 .child(
                     div()
                         .text_xl()
-                        .font_weight(FontWeight((2.0)))
+                        .font_weight(FontWeight(2.0))
                         .child("No Document Open"),
                 )
                 .child(

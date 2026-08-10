@@ -84,6 +84,29 @@ pub fn setup_menus(cx: &mut App) {
         .map(|name| MenuItem::action(name.clone(), ChangeTheme { name: name.clone() }))
         .collect::<Vec<_>>();
 
+    let settings = cx.global::<crate::settings::AppSettings>();
+
+    let recent_files_items = if settings.recent_files.is_empty() {
+        vec![MenuItem::action("No Recent Files", actions::FileOpen).disabled(true)]
+    } else {
+        settings
+            .recent_files
+            .iter()
+            .map(|path| {
+                let path_buf = std::path::PathBuf::from(path);
+                let display_name = path_buf
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.clone());
+
+                MenuItem::action(
+                    display_name,
+                    actions::OpenRecentFiles { path: path.clone() }, // <--- Correct parameterized action
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
     let has_file = cx
         .try_global::<MenuState>()
         .map_or(false, |state| state.has_active_file);
@@ -96,6 +119,11 @@ pub fn setup_menus(cx: &mut App) {
                 MenuItem::action("New File", actions::FileNew),
                 MenuItem::action("Open File...", actions::FileOpen),
                 MenuItem::action("Open Folder...", actions::FolderOpen),
+                MenuItem::submenu(Menu {
+                    name: "Open Recent".into(),
+                    items: recent_files_items,
+                    disabled: false,
+                }),
                 MenuItem::separator(),
                 MenuItem::action("Save", actions::FileSave).disabled(!has_file),
                 MenuItem::action("Save As...", actions::FileSaveAs).disabled(!has_file),

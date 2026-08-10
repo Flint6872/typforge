@@ -29,6 +29,7 @@ pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld
     pub preview_panel: Entity<PreviewPanel<W>>,
     pub files_panel: Entity<FilesPanel>,
     pub window_handle: AnyWindowHandle,
+    pub show_recent_files_picker: bool,
 }
 
 impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
@@ -264,9 +265,15 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
                     cx_for_note_view
                         .spawn(move |_, spawned_async_cx: &mut AsyncApp| {
                             let mut async_cx = spawned_async_cx.clone();
+                            let path_for_recent = path.clone();
                             async move {
                                 window_handle
                                     .update(&mut async_cx, |_, window_ref, app_cx| {
+                                        crate::settings::update_recent_files(
+                                            path_for_recent.to_string_lossy().to_string(),
+                                            app_cx,
+                                        );
+
                                         editor_panel_handle.update(
                                             app_cx,
                                             |editor_panel_view, editor_cx| {
@@ -333,6 +340,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
             preview_panel,
             files_panel,
             window_handle, // Store the handle
+            show_recent_files_picker: false,
         }
     }
 
