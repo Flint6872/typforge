@@ -77,13 +77,21 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
     /// Handles the `Ctrl+R` / `Cmd+R` keybinding to show/hide the recent files picker
     pub(crate) fn handle_file_open_recent(
         &mut self,
-        _action: &actions::FileOpenRecent, // Unparameterized action
-        _window: &mut Window,
+        _action: &actions::FileOpenRecent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         println!("Action: FileOpenRecent triggered! Toggling picker UI.");
         self.show_recent_files_picker = !self.show_recent_files_picker;
-        cx.notify(); // Request a redraw to show/hide the picker
+
+        if self.show_recent_files_picker {
+            self.recent_picker_selected_index = Some(0); // Default to the first item
+            self.recent_picker_focus_handle.focus(window, cx);
+        } else {
+            self.recent_picker_selected_index = None;
+        }
+
+        cx.notify();
     }
 
     /// Handles opening a specific recent file selected from the menu or picker UI.

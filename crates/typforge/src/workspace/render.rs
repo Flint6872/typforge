@@ -2,22 +2,26 @@ use crate::{
     actions::{self},
     workspace::TypstNoteView,
 };
+use gpui::Focusable;
+use gpui::InteractiveElement;
 use gpui::prelude::FluentBuilder;
-use gpui::*;
+use gpui::{
+    Context, Element, IntoElement, MouseButton, ParentElement, Render, StatefulInteractiveElement,
+    Styled, Window, deferred, div, px, rgb,
+};
 use gpui_component::ActiveTheme;
+use gpui_component::scroll::ScrollableElement;
+//use gpui_component::dock::PanelView;
 
 impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
     for TypstNoteView<W>
 {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        //let is_maximized = window.is_fullscreen();
-
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 1. Root Container (Vertical Flex)
-        div()
+        let mut root = div()
             .flex_col()
             .flex_row()
             .size_full()
-            //.track_focus(&cx.focus_handle())
             .bg(cx.theme().background) // Dark background
             // --- FileNew Action ---
             .on_action(cx.listener(Self::handle_file_new))
@@ -33,10 +37,13 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
             .on_action(cx.listener(Self::handle_file_quit))
             //file save
             .on_action(cx.listener(Self::handle_file_save))
+            // --- FileOpenRecent Action (Ctrl+R) ---
+            .on_action(cx.listener(Self::handle_file_open_recent))
+            // --- OpenRecentFiles Action (Selecting a file) ---
+            .on_action(cx.listener(Self::handle_open_specific_recent_file))
             //zoom in
             .on_action(
                 cx.listener(|this, _action: &crate::actions::ZoomIn, window, cx| {
-                    // Use 'window' from the closure arguments, not the render method
                     if this
                         .editor_panel
                         .focus_handle(cx)
@@ -59,7 +66,6 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
             // zoom out
             .on_action(
                 cx.listener(|this, _action: &crate::actions::ZoomOut, window, cx| {
-                    // Use 'window' from the closure arguments
                     if this
                         .editor_panel
                         .focus_handle(cx)
@@ -122,44 +128,174 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
                 }),
             )
             .when_some(self.menu_bar.clone(), |this, menu_bar| {
-                this.child(
-                    div()
-                        // .bg(rgb(0x252525))
-                        .border_b_1()
-                        // .border_color(rgb(0x3c3c3c))
-                        // Now menu_bar is the unwrapped Entity, which implements IntoElement
-                        .child(menu_bar),
-                )
+                this.child(div().border_b_1().child(menu_bar))
             })
             // --- 3. Render Ribbon Panel ---
-            // Positioned cleanly underneath the window menu bar, stretching full-width.
             .child(self.ribbon_panel.clone())
             .child(div().flex_grow().h_5_6().child(self.dock_area.clone()))
             .child(
                 div()
                     .w_full()
-                    .h_8() // Increase height to something visible, e.g., h_8 (32px)
-                    .bg(cx.theme().foreground) // Give it a background color, slightly different from main background
-                    .text_color(cx.theme().foreground) // Set default text color for content
-                    .p_2() // Add some padding
-                    .flex() // Use flexbox to arrange internal items
-                    .items_center() // Vertically center items
-                    .justify_between() // Distribute space between items (e.g., left and right aligned groups)
+                    .h_8()
+                    .bg(cx.theme().foreground)
+                    .text_color(cx.theme().foreground)
+                    .p_2()
+                    .flex()
+                    .items_center()
+                    .justify_between()
                     .child(
-                        // Example left-aligned group
-                        div().flex().gap_2().children(vec![
-                            // Your buttons or text here
-                            gpui::div().child("Status: Ready"),
-                            // gpui::button("Save").on_click(...),
-                        ]),
+                        div()
+                            .flex()
+                            .gap_2()
+                            .children(vec![gpui::div().child("Status: Ready")]),
                     )
                     .child(
-                        // Example right-aligned group
-                        div().flex().gap_2().children(vec![
-                            gpui::div().child("Line: 1, Col: 1"),
-                            // gpui::button("Export").on_click(...),
-                        ]),
+                        div()
+                            .flex()
+                            .gap_2()
+                            .children(vec![gpui::div().child("Line: 1, Col: 1")]),
                     ),
-            )
+            );
+
+        // --- 4. Conditionally render picker as overlay ---
+        if self.show_recent_files_picker {
+            root = root.child(render_recent_files_picker(self, window, cx));
+        }
+
+        root
     }
+}
+
+/// Renders the modal picker UI for recent files.
+pub fn render_recent_files_picker<
+    W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static,
+>(
+    this: &mut TypstNoteView<W>,
+    _window: &mut Window,
+    cx: &mut Context<TypstNoteView<W>>,
+) -> impl IntoElement {
+    let settings = cx.global::<crate::settings::AppSettings>();
+    let recent_files = settings.recent_files.clone();
+
+    // Use `deferred()` to lift the modal into a separate rendering pass.
+    deferred(
+        div()
+            .size_full()
+            .absolute()
+            .top_0()
+            .left_0()
+            .flex()
+            .justify_center()
+            // .items_center()
+            // Semi-transparent black backdrop overlay using hex rgba (b0 is ~70% opacity)
+            .bg(gpui::Rgba {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.7,
+            })
+            // Dismiss picker when pressing Escape
+            .on_action(cx.listener(|this, _: &actions::Dismiss, _window, cx| {
+                this.show_recent_files_picker = false;
+                cx.notify();
+            }))
+            // Close picker when clicking the background overlay
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _window, cx| {
+                    this.show_recent_files_picker = false;
+                    cx.notify();
+                }),
+            )
+            .child(
+                // Centered modal dialog box
+                div()
+                    .w(px(500.0))
+                    .max_h(px(400.0))
+                    .bg(rgb(0x1e1e24)) // Dark background matching the editor
+                    .rounded_lg()
+                    .p_4()
+                    .border_1()
+                    .border_color(rgb(0x3e3e4a))
+                    .shadow_lg()
+                    .track_focus(&this.recent_picker_focus_handle)
+                    // Prevent clicks inside the dialog from bubbling to the backdrop
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(rgb(0x808080))
+                                    .pb_2()
+                                    .border_b_1()
+                                    .border_color(rgb(0x3e3e4a))
+                                    .child("Recent Files"),
+                            )
+                            .child(
+                                // Scrollable list of items
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .overflow_y_hidden()
+                                    .gap_1()
+                                    .children(recent_files.into_iter().enumerate().map(
+                                        |(ix, path)| {
+                                            let path_buf = std::path::PathBuf::from(&path);
+                                            let file_name = path_buf
+                                                .file_name()
+                                                .map(|n| n.to_string_lossy().to_string())
+                                                .unwrap_or_else(|| path.clone());
+
+                                            let path_clone = path.clone();
+
+                                            let is_selected =
+                                                this.recent_picker_selected_index == Some(ix);
+
+                                            div()
+                                                .id(ix) // <--- CRITICAL: Gives the div an ID, enabling interactive listeners
+                                                .p_2()
+                                                .rounded_md()
+                                                .flex()
+                                                .flex_col()
+                                                .cursor_pointer()
+                                                // Conditional selection backgrounds
+                                                .when(is_selected, |style| style.bg(rgb(0x2d3139)))
+                                                .when(!is_selected, |style| {
+                                                    style.hover(|hover_style| {
+                                                        hover_style.bg(rgb(0x252931))
+                                                    })
+                                                })
+                                                .on_click(cx.listener(
+                                                    move |this, _, window, cx| {
+                                                        this.handle_open_specific_recent_file(
+                                                            &actions::OpenRecentFiles {
+                                                                path: path_clone.clone(),
+                                                            },
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    },
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .text_sm()
+                                                        .text_color(rgb(0xffffff))
+                                                        .child(file_name),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(rgb(0x808080))
+                                                        .child(path),
+                                                )
+                                        },
+                                    )),
+                            ),
+                    ),
+            ),
+    )
 }

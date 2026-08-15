@@ -25,49 +25,8 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
         let ctrl_or_cmd = "Cmd";
 
         // 1. Create the base Editor UI
-        let editor_element = if let Some(ref active_path) = active_file_path {
-            if let Some(file) = self.open_files.iter().find(|f| f.path == *active_path) {
-                let active_path = active_path.clone();
-
-                CodeEditor::new(file.editor_state.clone(), file.language.clone(), Vec::new())
-                    .font_size(font_size)
-                    .line_height(line_height)
-                    .h_full()
-                    .on_mouse_move(cx.listener(
-                        move |this_entity, event: &MouseMoveEvent, _, cx| {
-                            let now = Instant::now();
-                            if this_entity.last_hover_request_time.map_or(true, |t| {
-                                now.duration_since(t) > Duration::from_millis(500)
-                            }) {
-                                this_entity.last_hover_request_time = Some(now);
-                                let Some(active_file) = this_entity
-                                    .open_files
-                                    .iter()
-                                    .find(|f| f.path == active_path)
-                                else {
-                                    return;
-                                };
-
-                                let code_editor_entity = active_file.code_editor_entity.clone();
-                                let Some(byte_offset) = code_editor_entity
-                                    .read(cx)
-                                    .screen_to_byte_offset(event.position, cx)
-                                else {
-                                    return;
-                                };
-
-                                this_entity.request_hover(byte_offset, event.position, cx);
-                            }
-                        },
-                    ))
-                    .on_mouse_down(cx.listener(|this, _, _, cx| {
-                        this.clear_hover(cx);
-                    }))
-                    .into_any_element()
-            } else {
-                div().into_any_element()
-            }
-        } else {
+        let editor_element = if self.open_files.is_empty() {
+            // <--- PRIMARY CONDITION: Is the list of open files empty?
             div()
                 .size_full()
                 .flex()
@@ -129,6 +88,24 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                                         .child(div().child("+"))
                                         .child(div().child("O")),
                                 ),
+                            // Open Folder Action
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .justify_between()
+                                .gap_4()
+                                .child(div().text_lg().font_bold().child("Open Folder"))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_row()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(div().child(ctrl_or_cmd))
+                                        .child(div().child("+"))
+                                        .child(div().child("K")),
+                                ),
                             // Open Recent Action
                             div()
                                 .flex()
@@ -150,6 +127,57 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                         ]),
                 )
                 .into_any_element()
+        } else if let Some(ref active_path) = active_file_path {
+            // <--- THEN, if files are open, check for an active path
+            if let Some(file) = self.open_files.iter().find(|f| f.path == *active_path) {
+                let active_path = active_path.clone();
+
+                CodeEditor::new(file.editor_state.clone(), file.language.clone(), Vec::new())
+                    .font_size(font_size)
+                    .line_height(line_height)
+                    .h_full()
+                    .on_mouse_move(cx.listener(
+                        move |this_entity, event: &MouseMoveEvent, _, cx| {
+                            let now = Instant::now();
+                            if this_entity.last_hover_request_time.map_or(true, |t| {
+                                now.duration_since(t) > Duration::from_millis(500)
+                            }) {
+                                this_entity.last_hover_request_time = Some(now);
+                                let Some(active_file) = this_entity
+                                    .open_files
+                                    .iter()
+                                    .find(|f| f.path == active_path)
+                                else {
+                                    return;
+                                };
+
+                                let code_editor_entity = active_file.code_editor_entity.clone();
+                                let Some(byte_offset) = code_editor_entity
+                                    .read(cx)
+                                    .screen_to_byte_offset(event.position, cx)
+                                else {
+                                    return;
+                                };
+
+                                this_entity.request_hover(byte_offset, event.position, cx);
+                            }
+                        },
+                    ))
+                    .on_mouse_down(cx.listener(|this, _, _, cx| {
+                        this.clear_hover(cx);
+                    }))
+                    .into_any_element()
+            } else {
+                // This case handles if active_file_path is Some, but the file is somehow not in open_files.
+                // It should ideally not happen if state is consistent, but a fallback to blank div is okay.
+                div().into_any_element()
+            }
+        } else {
+            // This case covers when open_files is NOT empty, but active_file_path IS None.
+            // This indicates a state where files are open, but none are currently selected.
+            // You might want a different message here, or simply default to the first open file.
+            // For now, it will render a blank div.
+            div().into_any_element()
         };
 
         // 2. Prepare the Hover Popup if it exists

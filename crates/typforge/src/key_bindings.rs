@@ -9,6 +9,7 @@ pub fn bind_keys(cx: &mut App) {
     // --- Application-specific Global Keybindings ---
     #[cfg(target_os = "macos")]
     bindings.extend([
+        KeyBinding::new("escape", actions::Dismiss, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-n", actions::FileNew, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-o", actions::FileOpen, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-r", actions::FileOpenRecent, GLOBAL_CONTEXT),
@@ -31,6 +32,7 @@ pub fn bind_keys(cx: &mut App) {
 
     #[cfg(not(target_os = "macos"))] // Windows / Linux
     bindings.extend([
+        KeyBinding::new("escape", actions::Dismiss, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-n", actions::FileNew, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-o", actions::FileOpen, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-r", actions::FileOpenRecent, GLOBAL_CONTEXT),

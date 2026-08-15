@@ -28,6 +28,7 @@ actions!(
         FileExportDocx,
         PackageManager,
         ReloadSettings,
+        Dismiss,
         // ChangeTheme,
         // ribbon actions
         ToggleBold,

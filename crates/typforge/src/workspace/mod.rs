@@ -11,8 +11,10 @@ use crate::{
     panels::{FilesPanel, OpenFileEvent},
     ribbon::RibbonPanel,
 };
+
 use gpui_component::{
     dock::{DockArea, DockItem},
+    list::{List, ListItem, ListState},
     menu::AppMenuBar,
 };
 use gpui_util::ResultExt;
@@ -30,6 +32,8 @@ pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld
     pub files_panel: Entity<FilesPanel>,
     pub window_handle: AnyWindowHandle,
     pub show_recent_files_picker: bool,
+    pub recent_picker_selected_index: Option<usize>,
+    pub recent_picker_focus_handle: FocusHandle,
 }
 
 impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
@@ -341,6 +345,8 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
             files_panel,
             window_handle, // Store the handle
             show_recent_files_picker: false,
+            recent_picker_selected_index: None,
+            recent_picker_focus_handle: cx.focus_handle(),
         }
     }
 
