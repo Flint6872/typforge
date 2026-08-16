@@ -83,9 +83,25 @@ fn main() -> Result<()> {
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(initial_bounds)),
                     titlebar: Some(TitlebarOptions {
-                        title: Some("TypForge".into()), // Set your desired window title here
+                        title: Some("TypForge".into()),
+
+                        // macOS: Makes the titlebar area transparent so your UI draws behind it
+                        appears_transparent: cfg!(target_os = "macos"),
+
+                        // macOS: Insets the red/yellow/green buttons
+                        traffic_light_position: if cfg!(target_os = "macos") {
+                            Some(point(px(16.0), px(16.0)))
+                        } else {
+                            None
+                        },
                         ..Default::default()
                     }),
+                    // Linux: Request native window borders
+                    window_decorations: if cfg!(target_os = "linux") {
+                        Some(WindowDecorations::Server)
+                    } else {
+                        None // Let macOS/Windows use their defaults
+                    },
                     focus: true,
                     show: true,
                     kind: WindowKind::Normal,
