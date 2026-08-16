@@ -7,6 +7,7 @@ use typst_syntax::{LinkedNode, Side, SyntaxKind, parse};
 pub enum EditAction {
     ToggleBold,
     ToggleItalic,
+    ToggleUnderline,
     SetFont(String),
     SetFontSize(f64),
     SetTextColor(String),
@@ -27,8 +28,11 @@ pub struct TextEdit {
 /// Applies an EditAction to the source text.
 /// Returns the localized TextEdit to apply.
 pub fn apply_edit_action(content: &str, selection: Range<usize>, action: &EditAction) -> TextEdit {
-    let start = selection.start.min(content.len());
-    let end = selection.end.min(content.len());
+    let mut start = selection.start.min(content.len());
+    let mut end = selection.end.min(content.len());
+    if start > end {
+        std::mem::swap(&mut start, &mut end);
+    }
     let selection_clamped = start..end;
 
     match action {
@@ -38,6 +42,9 @@ pub fn apply_edit_action(content: &str, selection: Range<usize>, action: &EditAc
         }
         EditAction::ToggleItalic => {
             toggle_wrapper_ast(content, selection_clamped, SyntaxKind::Emph)
+        }
+        EditAction::ToggleUnderline => {
+            toggle_func_call_wrapper_ast(content, selection_clamped, "underline")
         }
         EditAction::SetFont(font_family) => apply_text_param_ast(
             content,
@@ -177,7 +184,7 @@ fn toggle_wrapper_ast(content: &str, range: Range<usize>, kind_to_toggle: Syntax
 }
 
 /// Helper function to find the inner content range of a trailing content block of a FuncCall.
-fn get_content_body_range(content: &str, func_call: &LinkedNode) -> Option<Range<usize>> {
+fn get_content_body_range(func_call: &LinkedNode) -> Option<Range<usize>> {
     // Search both directly under FuncCall and under its Args child (Typst 0.14 layout)
     let content_node = func_call
         .children()
@@ -218,7 +225,6 @@ fn collect_text_nodes<'a>(node: &LinkedNode<'a>, nodes: &mut Vec<LinkedNode<'a>>
 
 /// Find if there's a valid `#text` node we can merge arguments into instead of nesting.
 fn find_target_text_node_for_merge<'a>(
-    content: &str,
     root: &'a LinkedNode<'a>,
     range: Range<usize>,
 ) -> Option<(LinkedNode<'a>, Range<usize>)> {
@@ -228,7 +234,7 @@ fn find_target_text_node_for_merge<'a>(
     // Innermost first
     for node in candidates.iter().rev() {
         let node_range = node.range();
-        if let Some(body_range) = get_content_body_range(content, node) {
+        if let Some(body_range) = get_content_body_range(node) {
             // Case 1: Selection is inside/covers content body
             if range.start >= body_range.start && range.end <= body_range.end {
                 if range.is_empty()
@@ -269,21 +275,25 @@ fn adjust_selection(
         new_end = (selection.end as isize + diff) as usize;
     }
 
+    if new_start > new_end {
+        new_start = new_end;
+    }
+
     new_start..new_end
 }
 
 /// Parses arguments to find if a key is present and returns its value
-fn get_arg_value(inner_args: &str, key: &str) -> Option<String> {
-    for param in inner_args.split(',') {
-        let trimmed = param.trim();
-        if let Some((p_key, p_val)) = trimmed.split_once(':') {
-            if p_key.trim() == key {
-                return Some(p_val.trim().to_string());
-            }
-        }
-    }
-    None
-}
+// fn get_arg_value(inner_args: &str, key: &str) -> Option<String> {
+//     for param in inner_args.split(',') {
+//         let trimmed = param.trim();
+//         if let Some((p_key, p_val)) = trimmed.split_once(':') {
+//             if p_key.trim() == key {
+//                 return Some(p_val.trim().to_string());
+//             }
+//         }
+//     }
+//     None
+// }
 
 /// Removes a key from the arguments, returning the new inner args string and whether it is now empty.
 fn remove_arg(inner_args: &str, key: &str) -> (String, bool) {
@@ -334,7 +344,7 @@ fn apply_text_param_ast(content: &str, range: Range<usize>, key: &str, value: &s
     let root = LinkedNode::new(&tree);
 
     if let Some((formatting_node, body_range)) =
-        find_target_text_node_for_merge(content, &root, active_range.clone())
+        find_target_text_node_for_merge(&root, active_range.clone())
     {
         if let Some(args_node) = formatting_node
             .children()
@@ -511,6 +521,69 @@ fn update_or_insert_page_rule_ast(content: &str, key: &str, value: &str) -> (Ran
     (0..0, format!("#set page({}: {})\n", key, value))
 }
 
+/// Toggles a function call wrapper (e.g., #underline) on a given range.
+fn toggle_func_call_wrapper_ast(content: &str, range: Range<usize>, func_name: &str) -> TextEdit {
+    let tree = parse(content);
+    let root = LinkedNode::new(&tree);
+
+    // Find if selection is already wrapped in func_name
+    if let Some(node) = find_func_call_ancestor(&root, range.clone(), func_name) {
+        if let Some(body_range) = get_content_body_range(&node) {
+            let inner_text = &content[body_range.clone()];
+            let mut node_range = node.range();
+
+            // Check if there's a leading hash '#' right before the function call, and include it in the range to delete
+            if node_range.start > 0 && content[..node_range.start].ends_with('#') {
+                node_range.start -= 1;
+            }
+
+            return TextEdit {
+                range: node_range.clone(),
+                new_text: inner_text.to_string(),
+                new_selection: node_range.start..(node_range.start + inner_text.len()),
+            };
+        }
+    }
+
+    // Default: Wrap range in func_name
+    let selected_text = &content[range.clone()];
+    let prefix = format!("#{}[\"", func_name).replace("[\"", "["); // results in "#underline["
+    let suffix = "]";
+    let new_text = format!("{}{}{}", prefix, selected_text, suffix);
+
+    TextEdit {
+        range: range.clone(),
+        new_text,
+        new_selection: (range.start + prefix.len())..(range.end + prefix.len()),
+    }
+}
+
+/// Find a function call ancestor of a target range with a specific name.
+fn find_func_call_ancestor<'a>(
+    root: &'a LinkedNode<'a>,
+    range: Range<usize>,
+    func_name: &str,
+) -> Option<LinkedNode<'a>> {
+    let leaf = root
+        .leaf_at(range.start, Side::After)
+        .or_else(|| root.leaf_at(range.start, Side::Before))?;
+    let mut current = Some(leaf);
+    while let Some(node) = current {
+        if node.kind() == SyntaxKind::FuncCall {
+            if let Some(callee) = node.children().next() {
+                let callee_text = callee.full_text();
+                if callee_text == func_name || callee_text == format!("#{}", func_name) {
+                    if node.range().start <= range.start && node.range().end >= range.end {
+                        return Some(node.clone());
+                    }
+                }
+            }
+        }
+        current = node.parent().cloned();
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -570,5 +643,28 @@ mod tests {
         );
         assert_eq!(edit_update.new_text, "(paper: \"A4\", flipped: true)");
         assert_eq!(edit_update.range, 9..22);
+    }
+
+    #[test]
+    fn test_toggle_underline() {
+        let content = "Hello world";
+
+        // 1. Underline the word "world"
+        let edit = apply_edit_action(content, 6..11, &EditAction::ToggleUnderline);
+        assert_eq!(edit.new_text, "#underline[world]");
+        assert_eq!(edit.range, 6..11);
+
+        let new_content = format!(
+            "{}{}{}",
+            &content[..edit.range.start],
+            edit.new_text,
+            &content[edit.range.end..]
+        );
+        assert_eq!(new_content, "Hello #underline[world]");
+
+        // 2. Remove underline
+        let edit_unwrap = apply_edit_action(&new_content, 17..22, &EditAction::ToggleUnderline);
+        assert_eq!(edit_unwrap.new_text, "world");
+        assert_eq!(edit_unwrap.range, 6..23);
     }
 }

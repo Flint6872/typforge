@@ -11,10 +11,7 @@ use crate::{
 };
 
 use gpui::*;
-use gpui_component::{
-    Root,
-    theme::{Theme, ThemeMode, ThemeRegistry},
-};
+use gpui_component::Root;
 use gpui_component_assets::Assets;
 
 use parking_lot::Mutex;
@@ -32,6 +29,12 @@ mod workspace;
 use workspace::TypstNoteView;
 
 fn main() -> Result<()> {
+    // if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
+    //     embed_resource::compile("assets/windows/resources.rc", embed_resource::NONE)
+    //         .manifest_optional()
+    //         .unwrap();
+    // }
+
     gpui_platform::application()
         .with_assets(Assets)
         .run(|cx: &mut App| {
@@ -46,6 +49,17 @@ fn main() -> Result<()> {
             bind_keys(cx);
             theme::init(cx);
             theme::apply_settings_theme(cx);
+
+            #[cfg(target_os = "windows")]
+            cx.set_global(crate::components::menus::MenuState {
+                has_active_file: true,
+            });
+
+            #[cfg(not(target_os = "windows"))]
+            cx.set_global(crate::components::menus::MenuState {
+                has_active_file: false,
+            });
+
             setup_menus(cx);
 
             #[cfg(not(target_os = "macos"))]
@@ -68,7 +82,10 @@ fn main() -> Result<()> {
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(initial_bounds)),
-                    titlebar: None,
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("TypForge".into()), // Set your desired window title here
+                        ..Default::default()
+                    }),
                     focus: true,
                     show: true,
                     kind: WindowKind::Normal,

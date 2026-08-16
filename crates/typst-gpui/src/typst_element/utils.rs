@@ -1,4 +1,4 @@
-use gpui::{App, Pixels};
+use gpui::{App, Pixels, TransformationMatrix};
 
 pub fn typst_paint_to_gpui_hsla_from_paint(paint: &typst::visualize::Paint) -> gpui::Hsla {
     match paint {
@@ -116,25 +116,6 @@ pub fn resolve_font_with_fallback(family: &str, weight: u16, cx: &App) -> Option
     None
 }
 
-// Helper for converting Typst's LineCap to GPUI's StrokeCap
-// Helper for converting Typst's LineCap to lyon_path::LineCap
-pub fn typst_linecap_to_gpui(cap: &typst::visualize::LineCap) -> lyon_path::LineCap {
-    match cap {
-        typst::visualize::LineCap::Butt => lyon_path::LineCap::Butt,
-        typst::visualize::LineCap::Round => lyon_path::LineCap::Round,
-        typst::visualize::LineCap::Square => lyon_path::LineCap::Square,
-    }
-}
-
-// Helper for converting Typst's LineJoin to lyon_path::LineJoin
-pub fn typst_linejoin_to_gpui(join: &typst::visualize::LineJoin) -> lyon_path::LineJoin {
-    match join {
-        typst::visualize::LineJoin::Miter => lyon_path::LineJoin::Miter,
-        typst::visualize::LineJoin::Round => lyon_path::LineJoin::Round,
-        typst::visualize::LineJoin::Bevel => lyon_path::LineJoin::Bevel,
-    }
-}
-
 // Helper for converting Typst's DashPattern to GPUI's dash array and offset
 pub fn typst_dash_to_gpui(
     // Now takes the exact type from FixedStroke::dash
@@ -160,5 +141,23 @@ pub fn typst_dash_to_gpui(
         (Some(dash_array), dash_offset)
     } else {
         (None, Pixels::ZERO)
+    }
+}
+
+pub fn typst_transform_to_gpui_matrix(
+    transform: typst::layout::Transform,
+    scale_factor: f32,
+) -> TransformationMatrix {
+    // Typst transform: (sx, ky, kx, sy, tx, ty)
+    // GPUI TransformationMatrix: [[sx, kx], [ky, sy]] and translation [tx, ty]
+    TransformationMatrix {
+        rotation_scale: [
+            [transform.sx.get() as f32, transform.kx.get() as f32],
+            [transform.ky.get() as f32, transform.sy.get() as f32],
+        ],
+        translation: [
+            transform.tx.to_pt() as f32 * scale_factor,
+            transform.ty.to_pt() as f32 * scale_factor,
+        ],
     }
 }

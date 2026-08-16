@@ -543,6 +543,7 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
 
         gpui::div()
             .id("preview-panel-root")
+            .relative()
             .size_full()
             .bg(rgb(0x1a1a1a))
             .track_focus(&self.focus_handle)
@@ -585,7 +586,7 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                     cx.stop_propagation();
                 }),
             )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
                 let mut over_link = false;
                 for link in &this.last_hit_map.links {
                     if link.bounds.contains(&event.position) {
@@ -652,69 +653,68 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                 }),
             )
             .child(
-                // Single container for both X and Y scrolling
+                // Stationary wrapper that hosts the scrollbar so it stays in place
                 gpui::div()
-                    .id("preview-scroll-container") // Giving it an ID helps GPUI track scroll state
-                    .overflow_scroll()
-                    .track_scroll(&self.scroll_handle)
-                    .size_full()
-                    // .overflow_y_scrollbar() // Enables both X and Y
-                    .items_start()
-                    .child(if let Some(doc) = &self.document {
-                        // Calculate range from anchor and current cursor
-                        let selection_range = self.selection_anchor.and_then(|anchor| {
-                            if anchor == self.cursor_offset {
-                                None
-                            } else {
-                                Some(anchor.min(self.cursor_offset)..anchor.max(self.cursor_offset))
-                            }
-                        });
-
-                        // Create the resolver closure accessing the world
-                        let world_clone = self.world.clone();
-                        let span_resolver = Some(std::sync::Arc::new(
-                            move |span: typst::syntax::Span, offset: u16| {
-                                if let Some(file_id) = span.id() {
-                                    if let Ok(source) = world_clone.lock().source(file_id) {
-                                        // Use .get() to access the internal data of the Span
-                                        if let typst::syntax::SpanKind::Number { num, .. } =
-                                            span.get()
-                                        {
-                                            // Now you have the SpanNumber (num) to pass to range()
-                                            if let Some(range) = source.range(num, None) {
-                                                return range.start + offset as usize;
+                    .id("preview-scroll-wrapper")
+                    .relative()
+                    .h_5_6()
+                    .vertical_scrollbar(&self.scroll_handle)
+                    .child(
+                        // The actual scrolling container that handles the viewport and tracking
+                        gpui::div()
+                            .id("preview-scroll-container")
+                            .overflow_scroll()
+                            .track_scroll(&self.scroll_handle)
+                            .size_full()
+                            .items_start()
+                            .child(if let Some(doc) = &self.document {
+                                // Create the resolver closure accessing the world
+                                let world_clone = self.world.clone();
+                                let span_resolver = Some(std::sync::Arc::new(
+                                    move |span: typst::syntax::Span, offset: u16| {
+                                        if let Some(file_id) = span.id() {
+                                            if let Ok(source) = world_clone.lock().source(file_id) {
+                                                // Use .get() to access the internal data of the Span
+                                                if let typst::syntax::SpanKind::Number {
+                                                    num, ..
+                                                } = span.get()
+                                                {
+                                                    // Now you have the SpanNumber (num) to pass to range()
+                                                    if let Some(range) = source.range(num, None) {
+                                                        return range.start + offset as usize;
+                                                    }
+                                                }
                                             }
                                         }
-                                    }
-                                }
-                                0
-                            },
-                        )
-                            as std::sync::Arc<
-                                dyn Fn(typst::syntax::Span, u16) -> usize + Send + Sync,
-                            >);
+                                        0
+                                    },
+                                )
+                                    as std::sync::Arc<
+                                        dyn Fn(typst::syntax::Span, u16) -> usize + Send + Sync,
+                                    >);
 
-                        TypstElement::new(
-                            doc.clone(),
-                            self.render_state.clone(),
-                            Some(self.cursor_offset),
-                            self.selection_range(),
-                            self.on_hit_map_updated_callback.clone(),
-                            self.cursor_visible,
-                            span_resolver, // Pass the resolver here
-                        )
-                        .with_zoom(self.zoom)
-                        .into_any_element()
-                    } else {
-                        gpui::div()
-                            .size_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_color(gpui::rgb(0x666666))
-                            .child("No document compiled")
-                            .into_any_element()
-                    }),
+                                TypstElement::new(
+                                    doc.clone(),
+                                    self.render_state.clone(),
+                                    Some(self.cursor_offset),
+                                    self.selection_range(),
+                                    self.on_hit_map_updated_callback.clone(),
+                                    self.cursor_visible,
+                                    span_resolver, // Pass the resolver here
+                                )
+                                .with_zoom(self.zoom)
+                                .into_any_element()
+                            } else {
+                                gpui::div()
+                                    .size_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_color(gpui::rgb(0x666666))
+                                    .child("No document compiled")
+                                    .into_any_element()
+                            }),
+                    ),
             )
             .children(if !self.diagnostics.is_empty() {
                 Some(

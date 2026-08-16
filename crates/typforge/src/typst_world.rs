@@ -11,7 +11,6 @@ use typst::{
     text::{Font, FontBook},
     utils::LazyHash,
 };
-use typst_layout::PagedDocument;
 
 use typst_gpui::TypstGpuiWorld;
 
@@ -40,7 +39,6 @@ pub struct GpuiWorld {
     source_text: String,
     /// A virtual file ID for the source text.
     main_file_id: FileId,
-    compiled_document: Option<std::sync::Arc<PagedDocument>>,
 
     // Thread-safe caches
     sources: Mutex<HashMap<FileId, CachedSource>>,
@@ -63,7 +61,7 @@ impl GpuiWorld {
                 VirtualRoot::Project,
                 VirtualPath::new("/__main__.typ").expect("must be valid"),
             )),
-            compiled_document: None,
+
             sources: Mutex::new(HashMap::new()),
             files: Mutex::new(HashMap::new()),
         }
@@ -114,22 +112,14 @@ impl GpuiWorld {
         }
     }
 
-    fn document(&self) -> Option<std::sync::Arc<PagedDocument>> {
-        self.compiled_document.clone()
-    }
-
-    fn set_document(&mut self, doc: std::sync::Arc<PagedDocument>) {
-        self.compiled_document = Some(doc);
-    }
-
     /// Helper to resolve a Typst FileId to a physical path on disk.
     fn resolve(&self, id: FileId) -> FileResult<PathBuf> {
-        if id.package().is_some() {
-            return Err(FileError::NotFound(
-                id.vpath().as_rooted_path().to_path_buf(),
-            ));
+        if let VirtualRoot::Package(_) = id.root() {
+            return Err(FileError::NotFound(PathBuf::from(
+                id.vpath().get_with_slash(),
+            )));
         }
-        Ok(self.root.join(id.vpath().as_rootless_path()))
+        Ok(self.root.join(id.vpath().get_without_slash()))
     }
 }
 

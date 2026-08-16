@@ -1,6 +1,9 @@
+use gpui::Pixels;
+
 pub trait TypstCurveExt {
     fn is_closed(&self) -> bool;
     fn is_ellipse(&self) -> bool;
+    fn is_circle(&self, width: Pixels, height: Pixels) -> bool;
 }
 
 impl TypstCurveExt for typst::visualize::Curve {
@@ -23,5 +26,9 @@ impl TypstCurveExt for typst::visualize::Curve {
         // Standard Typst circles/ellipses consist of exactly 4 cubic segments.
         // If it has lines, it's a polygon or other complex curve.
         cubic_count == 4 && !has_lines
+    }
+
+    fn is_circle(&self, width: Pixels, height: Pixels) -> bool {
+        self.is_ellipse() && (width.as_f32() - height.as_f32()).abs() < 0.1
     }
 }

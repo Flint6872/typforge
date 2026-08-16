@@ -50,6 +50,7 @@ pub struct OpenedFile {
     pub lsp_version: i32,          // Track document version
     pub diagnostics: Vec<typst::diag::SourceDiagnostic>, // Store native diagnostics
     pub code_editor_entity: Entity<CodeEditor>,
+    pub is_untitled: bool,
 }
 
 impl OpenedFile {
@@ -85,6 +86,7 @@ impl OpenedFile {
             lsp_version: 0,
             diagnostics: Vec::new(),
             code_editor_entity,
+            is_untitled: false,
         })
     }
 
@@ -147,14 +149,4 @@ fn render_hover_popup<W: typst::World + typforge_core::IdeWorld + 'static>(
         .top(screen_pos.y + px(20.0)) // Offset slightly below mouse
         .w(px(400.0)) // Max width
         .child(content)
-}
-
-// Helper to render an element and then other elements on top in a stack.
-fn element_to_parent_stack(
-    parent_element: AnyElement,
-    children: impl Iterator<Item = AnyElement>,
-) -> AnyElement {
-    let mut elements: Vec<AnyElement> = vec![parent_element];
-    elements.extend(children);
-    div().children(elements).into_any_element()
 }

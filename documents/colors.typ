@@ -5,29 +5,25 @@
   footer: none,
 )
 
-#grid(
-  columns: 2,
-  rows: 2,
-  column-gutter: 1em,
-  row-gutter: 1em,
+#stack(
+  dir: ltr,
+  spacing: 1em,
 
-  [
-    #text(red)[Red] \
-    #text(orange)[Orange] \
-    #text(rgb("#FFD700"))[Gold] \
-    #text(yellow)[Yellow] \
-    #text(lime)[Lime]\
-  ],
-  [
-    #text(green)[Green] \
-    #text(blue)[Blue] \
-    #text(rgb("#4B0082"))[Indigo] \
-    #text(purple)[Violet] \
-  ],
+  rotate(-90deg, reflow: true)[#text(red)[Red]],
+  rotate(-90deg, reflow: true)[#text(orange)[Orange]],
+  rotate(-90deg, reflow: true)[#text(rgb("#FFD700"))[Gold]],
+  rotate(-90deg, reflow: true)[#text(yellow)[Yellow]],
+  rotate(-90deg, reflow: true)[#text(lime)[Lime]],
+  rotate(-90deg, reflow: true)[#text(green)[Green]],
+  rotate(-90deg, reflow: true)[#text(blue)[Blue]],
+  rotate(-90deg, reflow: true)[ #text(rgb("#4B0082"))[Indigo]],
+  rotate(-90deg, reflow: true)[ #text(purple)[Violet]],
 )
 
 #let color-box(name, bg-color) = {
-  let text-color = if bg-color in (black, rgb("#001f3f"), rgb("#800033"), rgb("#3d9970")) { white } else { black }
+  let text-color = if (
+    bg-color in (black, rgb("#001f3f"), rgb("#800033"), rgb("#3d9970"))
+  ) { white } else { black }
 
   // Using layout() or fixed percentages to ensure it fits the 1in margins
   rect(
@@ -93,9 +89,6 @@ A rainbow using a predefined color map
 #text(fill: gradient.linear(..color.map.rainbow))[
   This entire sentence is a rainbow!]
 
-#square(
-  fill: oklch(40%, 0.2, 160deg, 50%),
-)
 
 #grid(
   columns: (1fr,) * 14,
@@ -103,88 +96,129 @@ A rainbow using a predefined color map
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.turbo, angle: 90deg)),
-    rotate(-90deg, reflow:true)[turbo],
-  ),
-   
-    stack(
-    spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.cividis, angle: 90deg)),
-    rotate(-90deg, reflow:true)[cividis],
-  ),
-  
-  stack(
-    spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.rainbow, angle: 90deg)),
-    rotate(-90deg, reflow:true)[rainbow],
-  ),
-  
-  stack(
-    spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.spectral, angle: 90deg)),
-    rotate(-90deg, reflow:true)[spectral],
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.turbo,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[turbo]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.viridis, angle: 90deg)),
-    rotate(-90deg, reflow:true)[viridis],
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.cividis,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[cividis]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.inferno, angle: 90deg)),
-    rotate(-90deg, reflow:true)[inferno],
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.rainbow,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[rainbow]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.magma, angle: 90deg)),
-    rotate(-90deg, reflow:true)[magma],
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.spectral,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[spectral]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.plasma, angle: 90deg)),
-    rotate(-90deg, reflow:true)[plasma],
-  ),
-  
-  stack(
-    spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.rocket, angle: 90deg)),
-    rotate(-90deg, reflow:true)[rocket],
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.viridis,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[viridis]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.mako, angle: 90deg)),
-    rotate(-90deg, reflow:true)[cividis],
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.inferno,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[inferno]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.vlag, angle: 90deg)),
-    rotate(-90deg, reflow:true)[vlag],
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.magma,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[magma]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.icefire, angle: 90deg)),
-    rotate(-90deg, reflow:true)[icefire],
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.plasma,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[plasma]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.flare, angle: 90deg)),
-    rotate(-90deg, reflow:true)[flare],
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.rocket,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[rocket]),
   ),
 
   stack(
     spacing: 5pt,
-    rect(width: 20pt, height: 70pt, fill: gradient.linear(..color.map.crest, angle: 90deg)),
-    rotate(-90deg, reflow:true)[crest],
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.mako,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[cividis]),
   ),
 
+  stack(
+    spacing: 5pt,
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.vlag,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[vlag]),
+  ),
+
+  stack(
+    spacing: 5pt,
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.icefire,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[icefire]),
+  ),
+
+  stack(
+    spacing: 5pt,
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.flare,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[flare]),
+  ),
+
+  stack(
+    spacing: 5pt,
+    rect(width: 20pt, height: 70pt, fill: gradient.linear(
+      ..color.map.crest,
+      angle: 90deg,
+    )),
+    align(center, rotate(-90deg, reflow: true)[crest]),
+  ),
 )
 
 
@@ -193,7 +227,9 @@ Sharp stripes instead of a smooth fade
 #rect(
   width: 100%,
   height: 20pt,
-  fill: gradient.linear(red, orange, yellow, lime, blue, rgb("#4B0082"), purple).sharp(7),
+  fill: gradient
+    .linear(red, orange, yellow, lime, blue, rgb("#4B0082"), purple)
+    .sharp(7),
 )
 
 #text(fill: gradient.linear(
@@ -207,103 +243,213 @@ Sharp stripes instead of a smooth fade
 #rect(
   width: 100%,
   height: 20pt,
-  fill: gradient.linear((red, 0%), (yellow, 10%), (green, 20%), (lime, 80%), (blue, 100%)),
+  fill: gradient.linear(
+    (red, 0%),
+    (yellow, 10%),
+    (green, 20%),
+    (lime, 80%),
+    (blue, 100%),
+  ),
 )
-
-#block(fill: red)[opaque]
-#block(fill: red.transparentize(50%))[half red]
-#block(fill: red.transparentize(75%))[quarter red]
-
-
-#circle(radius: 25pt)
-
-// With content.
-#circle[
-  #set align(center + horizon)
-  Automatically \
-  sized to fit.
-]
-
-#circle(fill: gradient.linear(orange, yellow))
-
-#circle(
-  radius: 40pt,
-  fill: gradient.radial(aqua, white).repeat(4),
-)
-
-#curve(
-  fill: blue.lighten(80%),
-  stroke: blue,
-  curve.move((0pt, 50pt)),
-  curve.line((100pt, 50pt)),
-  curve.cubic(none, (90pt, 0pt), (50pt, 0pt)),
-  curve.close(),
-)
-
-#curve(
-  fill: blue.lighten(80%),
-  fill-rule: "even-odd",
-  stroke: blue,
-  curve.line((50pt, 0pt)),
-  curve.line((50pt, 50pt)),
-  curve.line((0pt, 50pt)),
-  curve.close(),
-  curve.move((10pt, 10pt)),
-  curve.line((40pt, 10pt)),
-  curve.line((40pt, 40pt)),
-  curve.line((10pt, 40pt)),
-  curve.close(),
-)
-
-Ellipse Without content.
-#ellipse(width: 35%, height: 30pt, fill: red)
-
-Ellipse With content.
-#ellipse[
-  #set align(center)
-  Automatically sized \
-  to fit the content.
-]
 
 #stack(
   dir: ltr,
-  spacing: 1fr,
-  square(fill: gradient.linear(..color.map.rainbow)),
-  square(fill: gradient.radial(..color.map.rainbow)),
-  square(fill: gradient.conic(..color.map.rainbow)),
+  spacing: 1cm,
+
+  stack(
+    spacing: 1em,
+    block(fill: red)[opaque],
+    block(fill: red.transparentize(50%))[half red],
+    block(
+      fill: red.transparentize(75%),
+    )[quarter red],
+  ),
+
+  stack(
+    spacing: 0.5em,
+    text()[gradient.linear],
+    square(fill: gradient.linear(..color.map.rainbow)),
+  ),
+  stack(
+    spacing: 0.5em,
+    text()[gradient.radial],
+    square(fill: gradient.radial(..color.map.rainbow)),
+  ),
+
+  stack(
+    spacing: 0.5em,
+
+    text()[gradient.conic],
+    circle(fill: gradient.conic(
+      ..color.map.viridis,
+    )),
+  ),
+
+  stack(
+    spacing: 0.5em,
+
+    text()[gradient.conic center: 20%, 30%],
+    circle(fill: gradient.conic(
+      ..color.map.viridis,
+      center: (20%, 30%),
+    )),
+  ),
 )
 
-#line(length: 100%)
-#line(end: (50%, 50%))
+
+#pagebreak()
+
+Circles
+
+#stack(
+  dir: ltr,
+  spacing: 1em,
+
+  circle(radius: 25pt),
+
+  //With content.
+  circle[
+    #set align(center + horizon)
+    Automatically \
+    sized to fit content.
+  ],
+
+  circle(fill: gradient.linear(..color.map.rainbow)),
+
+  circle(
+    radius: 40pt,
+    fill: gradient.radial(aqua, white).repeat(4),
+  ),
+)
+
+
+#let star = curve.with(
+  fill: red,
+  curve.move((25pt, 0pt)),
+  curve.line((10pt, 50pt)),
+  curve.line((50pt, 20pt)),
+  curve.line((0pt, 20pt)),
+  curve.line((40pt, 50pt)),
+  curve.close(),
+)
+
+
+Curves
+#stack(
+  dir: ltr,
+  spacing: 1em,
+
+  curve(
+    fill: blue.lighten(80%),
+    stroke: blue,
+    curve.move((0pt, 50pt)),
+    curve.line((100pt, 50pt)),
+    curve.cubic(none, (90pt, 0pt), (50pt, 0pt)),
+    curve.close(),
+  ),
+
+  curve(
+    fill: blue.lighten(80%),
+    fill-rule: "even-odd",
+    stroke: blue,
+    curve.line((50pt, 0pt)),
+    curve.line((50pt, 50pt)),
+    curve.line((0pt, 50pt)),
+    curve.close(),
+    curve.move((10pt, 10pt)),
+    curve.line((40pt, 10pt)),
+    curve.line((40pt, 40pt)),
+    curve.line((10pt, 40pt)),
+    curve.close(),
+  ),
+
+  star(fill-rule: "non-zero"),
+  star(fill-rule: "even-odd"),
+)
+
+
+
+
+#stack(
+  dir: ltr,
+  spacing: 1em,
+
+  stack(
+    spacing: 1em,
+    text()[Ellipse Without content.
+    ],
+    ellipse(width: 35%, height: 30pt, fill: red),
+  ),
+
+  stack(
+    spacing: 1em,
+    text()[Ellipse With content.
+    ],
+    ellipse[
+      #set align(center)
+      Automatically sized \
+      to fit the content.
+    ],
+  ),
+)
+
+#stack(
+  dir: ltr,
+  spacing: 1cm,
+
+  stack(
+    text()[polygon
+    ],
+    polygon(
+      fill: blue.lighten(80%),
+      stroke: blue,
+      (20%, 0pt),
+      (60%, 0pt),
+      (80%, 2cm),
+      (0%, 2cm),
+    ),
+  ),
+)
+
+
+
+
+
+
+#stack(
+  dir: ltr,
+  spacing: 1cm,
+
+  // Without content.
+  square(size: 40pt),
+
+  // With content.
+  square[
+    Automatically \
+    sized to fit.
+  ],
+
+  line(end: (10%, 10%)),
+)
+
+
 #line(
   length: 4cm,
   stroke: 2pt + maroon,
 )
 
-polygon
-#polygon(
-  fill: blue.lighten(80%),
-  stroke: blue,
-  (20%, 0pt),
-  (60%, 0pt),
-  (80%, 2cm),
-  (0%, 2cm),
-)
-
-// Without content.
-#square(size: 40pt)
-
-// With content.
-#square[
-  Automatically \
-  sized to fit.
-]
-
 #set line(length: 100%)
+#line()
 #stack(
   spacing: 1em,
   line(stroke: 2pt + red),
-  line(stroke: (paint: gradient.linear(orange, blue), thickness: 4pt, cap: "round")),
+
+  //line stroke does not have round end cap
+  line(stroke: (
+    paint: gradient.linear(orange, blue),
+    thickness: 4pt,
+    cap: "round",
+  )),
   line(stroke: (paint: blue, thickness: 1pt, dash: "dashed")),
   line(stroke: 2pt + gradient.linear(..color.map.rainbow)),
 )
@@ -313,4 +459,6 @@ polygon
   #place(line(start: (0%, 100%), end: (100%, 0%)))
 ]
 
+
+//rect not showing around pat
 #rect(fill: pat, width: 100%, height: 60pt, stroke: 1pt)

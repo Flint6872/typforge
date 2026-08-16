@@ -9,8 +9,10 @@ pub fn bind_keys(cx: &mut App) {
     // --- Application-specific Global Keybindings ---
     #[cfg(target_os = "macos")]
     bindings.extend([
+        KeyBinding::new("escape", actions::Dismiss, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-n", actions::FileNew, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-o", actions::FileOpen, GLOBAL_CONTEXT),
+        KeyBinding::new("cmd-r", actions::FileOpenRecent, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-s", actions::FileSave, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-shift-s", actions::FileSaveAs, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-w", actions::FileClose, GLOBAL_CONTEXT),
@@ -21,12 +23,19 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-c", actions::EditCopy, GLOBAL_CONTEXT),
         KeyBinding::new("cmd-v", actions::EditPaste, GLOBAL_CONTEXT),
         // Add more Mac specific global keybindings here
+        //
+        // Ribbon Panel
+        KeyBinding::new("cmd-b", actions::ToggleBold, GLOBAL_CONTEXT),
+        KeyBinding::new("cmd-i", actions::ToggleItalic, GLOBAL_CONTEXT),
+        KeyBinding::new("cmd-u", actions::ToggleUnderline, GLOBAL_CONTEXT),
     ]);
 
     #[cfg(not(target_os = "macos"))] // Windows / Linux
     bindings.extend([
+        KeyBinding::new("escape", actions::Dismiss, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-n", actions::FileNew, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-o", actions::FileOpen, GLOBAL_CONTEXT),
+        KeyBinding::new("ctrl-r", actions::FileOpenRecent, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-k", actions::FolderOpen, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-s", actions::FileSave, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-shift-s", actions::FileSaveAs, GLOBAL_CONTEXT),
@@ -44,6 +53,7 @@ pub fn bind_keys(cx: &mut App) {
         //Ribbon Panel
         KeyBinding::new("ctrl-b", actions::ToggleBold, GLOBAL_CONTEXT),
         KeyBinding::new("ctrl-i", actions::ToggleItalic, GLOBAL_CONTEXT),
+        KeyBinding::new("ctrl-u", actions::ToggleUnderline, GLOBAL_CONTEXT),
         // Add more Windows/Linux specific global keybindings here
     ]);
 

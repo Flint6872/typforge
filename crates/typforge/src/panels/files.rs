@@ -12,6 +12,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::settings::{AppSettings, update_last_folder};
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct OpenFileEvent {
     pub path: PathBuf,
@@ -63,7 +65,14 @@ impl FilesPanel {
             initial_items.len()
         );
 
-        let initial_items = build_file_items(&default_project_root);
+        let settings = cx.global::<AppSettings>();
+        let root_path = settings
+            .last_folder_open
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| default_project_root);
+
+        let initial_items = build_file_items(&root_path);
 
         let tree_state = cx.new(|cx| TreeState::new(cx).items(initial_items.clone()));
 
@@ -89,12 +98,13 @@ impl FilesPanel {
 
     pub fn set_project_root(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if path.is_dir() {
+            // Save to settings
+            let path_str = path.to_string_lossy().to_string();
+            update_last_folder(path_str, cx);
+
+            // Update tree...
             let items = build_file_items(&path);
-
-            // FIX: Update our local source of truth
             self.roots = items.clone();
-            self.loaded_paths.clear(); // Clear cache for new project
-
             self.tree_state.update(cx, |state, _cx| {
                 state.set_items(items, _cx);
             });
@@ -160,7 +170,11 @@ fn build_file_items(path: &Path) -> Vec<TreeItem> {
             if entry_path.is_dir() {
                 // DON'T recurse here. Just create the node.
                 // You can add an empty child or a "Loading..." flag if your TreeItem supports it.
-                items.push(TreeItem::new(id, name).expanded(false));
+                items.push(
+                    TreeItem::new(id, name)
+                        .expanded(false)
+                        .child(TreeItem::new("dummy", "")),
+                );
             } else {
                 items.push(TreeItem::new(id, name));
             }
@@ -192,7 +206,11 @@ fn build_file_items_sync(path: &Path) -> Vec<TreeItem> {
                 // IMPORTANT: Do NOT recurse here.
                 // We just create the directory item. The lazy-loading logic
                 // will call this function again for 'id' when expanded.
-                items.push(TreeItem::new(id, name).expanded(false));
+                items.push(
+                    TreeItem::new(id, name)
+                        .expanded(false)
+                        .child(TreeItem::new("dummy", "")),
+                );
             } else {
                 items.push(TreeItem::new(id, name));
             }

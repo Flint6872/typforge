@@ -8,6 +8,7 @@ actions!(
     [
         FileNew,
         FileOpen,
+        FileOpenRecent,
         FileSave,
         FileSaveAs,
         FileClose,
@@ -27,10 +28,12 @@ actions!(
         FileExportDocx,
         PackageManager,
         ReloadSettings,
+        Dismiss,
         // ChangeTheme,
         // ribbon actions
         ToggleBold,
         ToggleItalic,
+        ToggleUnderline,
     ]
 );
 
@@ -48,6 +51,12 @@ pub struct ChangeTheme {
 //     pub line_number: usize,
 // }
 
+#[derive(gpui::Action, Clone, PartialEq, Eq, Deserialize)]
+#[action(namespace = actions, no_json)]
+pub struct OpenRecentFiles {
+    pub path: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum RibbonAction {
     // Page Parameters
@@ -64,5 +73,6 @@ pub enum RibbonAction {
     SetFontSize(f32), // e.g., 12.0
     ToggleBold,
     ToggleItalic,
+    ToggleUnderline,
     SetTextColor(String), // e.g., "red", "blue", or hex values
 }

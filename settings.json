@@ -1,5 +1,9 @@
 {
-  "theme": "Tokyo Moon",
+  "theme": "Tokyo Night",
   "font_size": 16.0,
-  "default_save_folder": null
+  "last_folder_open": "./documents",
+  "recent_files": [
+
+  ],
+  "recent_files_limit": 5
 }
