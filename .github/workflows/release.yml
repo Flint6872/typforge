@@ -111,9 +111,8 @@ jobs:
             cp -r themes TypstNote.app/Contents/Resources/ || true
             cp -r documents TypstNote.app/Contents/Resources/ || true
 
-            # 3. Create plist metadata
-            cat <<EOF > TypstNote.app/Contents/Info.plist
-            <?xml version="1.0" encoding="UTF-8"?>
+            # 3. Create plist metadata (No heredoc used here to prevent Bash & YAML parser conflicts)
+            echo '<?xml version="1.0" encoding="UTF-8"?>
             <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
             <plist version="1.0">
             <dict>
@@ -128,8 +127,7 @@ jobs:
                 <key>CFBundleShortVersionString</key>
                 <string>1.0.0</string>
             </dict>
-            </plist>
-            EOF
+            </plist>' > TypstNote.app/Contents/Info.plist
 
             # 4. Prepare temporary DMG staging directory with an Applications folder symlink
             mkdir dmg-staging
