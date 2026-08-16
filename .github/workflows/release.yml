@@ -17,10 +17,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04 # Changed per previous discussion
             target: x86_64-unknown-linux-gnu
             archive_name: typforge-linux-x86_64.tar.gz
             binary_name: typforge
+          # Assuming you want aarch64 on latest Ubuntu ARM runner if 22.04 ARM isn't available/preferred
           - os: ubuntu-24.04-arm # Native ARM64 runner avoids cross-compilation headaches
             target: aarch64-unknown-linux-gnu
             archive_name: typforge-linux-aarch64.tar.gz
@@ -29,9 +30,9 @@ jobs:
             target: x86_64-pc-windows-msvc
             archive_name: typforge-windows.zip
             binary_name: typforge.exe
-          - os: macos-latest
-            target: universal-apple-darwin # Custom handle for sequential macOS compilation
-            archive_name: typforge-macos.zip
+          - os: macos-14
+            target: universal-apple-darwin
+            archive_name: typforge-macos.dmg
             binary_name: typforge
 
     steps:
@@ -42,7 +43,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin x86_64-apple-darwin' || matrix.target }}
+          targets: ${{ matrix.os == 'macos-14' && 'aarch64-apple-darwin x86_64-apple-darwin' || matrix.target }}
 
       # Speeds up subsequent compilation tasks
       - name: Rust Cache
@@ -76,7 +77,7 @@ jobs:
       - name: Build Release Binary
         shell: bash
         run: |
-          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+          if [ "${{ matrix.os }}" = "macos-14" ]; then
             # 1. Compile both segments sequentially
             cargo build --release --target aarch64-apple-darwin
             cargo build --release --target x86_64-apple-darwin
@@ -99,24 +100,56 @@ jobs:
       - name: Package Directory and Compress
         shell: bash
         run: |
-          # 1. Create a clean workspace staging folder
-          mkdir typforge-payload
+          if [ "${{ matrix.os }}" = "macos-14" ]; then 
+            # --- macOS DMG packaging ---
+            # 1. Assemble standard macOS .app bundle skeleton structure
+            mkdir -p TypstNote.app/Contents/MacOS
+            mkdir -p TypstNote.app/Contents/Resources
 
-          # 2. Copy the binary and your existing repository folders
-          cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} typforge-payload/
-          cp -r themes typforge-payload/ || true
-          cp -r documents typforge-payload/ || true
+            # 2. Copy binary and configuration items to Resources/
+            cp target/universal-apple-darwin/release/typforge TypstNote.app/Contents/MacOS/
+            cp -r themes TypstNote.app/Contents/Resources/ || true
+            cp -r documents TypstNote.app/Contents/Resources/ || true
 
-          # 3. Compress based on the operating system
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            # Windows target zipped
-            powershell -Command "Compress-Archive -Path typforge-payload/* -DestinationPath ${{ matrix.archive_name }}"
-          elif [[ "${{ matrix.os }}" == ubuntu* ]]; then
-            # Linux target tarballed (preserves permissions)
-            tar -czf ${{ matrix.archive_name }} -C typforge-payload .
+            # 3. Create plist metadata
+            cat <<EOF > TypstNote.app/Contents/Info.plist
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+                <key>CFBundleExecutable</key>
+                <string>typforge</string>
+                <key>CFBundleIdentifier</key>
+                <string>com.typforge.app</string>
+                <key>CFBundleName</key>
+                <string>TypstNote</string>
+                <key>CFBundlePackageType</key>
+                <string>APPL</string>
+                <key>CFBundleShortVersionString</key>
+                <string>1.0.0</string>
+            </dict>
+            </plist>
+            EOF
+
+            # 4. Prepare temporary DMG staging directory with an Applications folder symlink
+            mkdir dmg-staging
+            mv TypstNote.app dmg-staging/
+            ln -s /Applications dmg-staging/Applications
+
+            # 5. Build native macOS HFS+ DMG using hdiutil
+            hdiutil create -fs HFS+ -srcfolder dmg-staging -volname "TypstNote" ${{ matrix.archive_name }}
           else
-            # macOS target zipped
-            cd typforge-payload && zip -r ../${{ matrix.archive_name }} ./* && cd ..
+            # --- Windows & Linux packaging ---
+            mkdir typforge-payload
+            cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} typforge-payload/
+            cp -r themes typforge-payload/ || true
+            cp -r documents typforge-payload/ || true
+
+            if [ "${{ matrix.os }}" = "windows-latest" ]; then
+              powershell -Command "Compress-Archive -Path typforge-payload/* -DestinationPath ${{ matrix.archive_name }}"
+            elif [[ "${{ matrix.os }}" == ubuntu* ]]; then
+              tar -czf ${{ matrix.archive_name }} -C typforge-payload .
+            fi
           fi
 
       # Official, Node 24-ready script automation to manage the release artifacts safely
