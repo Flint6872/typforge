@@ -144,31 +144,31 @@ pub fn setup_menus(cx: &mut App) {
             ],
             disabled: false,
         },
-        // Edit Menu
-        Menu {
-            name: "Edit".into(),
-            items: vec![
-                MenuItem::action("Undo", actions::EditUndo),
-                MenuItem::action("Redo", actions::EditRedo),
-                MenuItem::separator(),
-                MenuItem::action("Cut", actions::EditCut),
-                MenuItem::action("Copy", actions::EditCopy),
-                MenuItem::action("Paste", actions::EditPaste),
-            ],
-            disabled: false,
-        },
-        // View Menu
-        Menu {
-            name: "View".into(),
-            items: vec![
-                MenuItem::action("Toggle Sidebar", actions::ViewToggleSidebar),
-                MenuItem::separator(),
-                MenuItem::action("Zoom In", actions::ZoomIn),
-                MenuItem::action("Zoom Out", actions::ZoomOut),
-                MenuItem::action("Reset Zoom", actions::ResetZoom),
-            ],
-            disabled: false,
-        },
+        // // Edit Menu
+        // Menu {
+        //     name: "Edit".into(),
+        //     items: vec![
+        //         MenuItem::action("Undo", actions::EditUndo),
+        //         MenuItem::action("Redo", actions::EditRedo),
+        //         MenuItem::separator(),
+        //         MenuItem::action("Cut", actions::EditCut),
+        //         MenuItem::action("Copy", actions::EditCopy),
+        //         MenuItem::action("Paste", actions::EditPaste),
+        //     ],
+        //     disabled: false,
+        // },
+        // // View Menu
+        // Menu {
+        //     name: "View".into(),
+        //     items: vec![
+        //         MenuItem::action("Toggle Sidebar", actions::ViewToggleSidebar),
+        //         MenuItem::separator(),
+        //         MenuItem::action("Zoom In", actions::ZoomIn),
+        //         MenuItem::action("Zoom Out", actions::ZoomOut),
+        //         MenuItem::action("Reset Zoom", actions::ResetZoom),
+        //     ],
+        //     disabled: false,
+        // },
         // ... Theme Change ...
         Menu {
             name: "Theme".into(),

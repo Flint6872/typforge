@@ -170,7 +170,11 @@ fn build_file_items(path: &Path) -> Vec<TreeItem> {
             if entry_path.is_dir() {
                 // DON'T recurse here. Just create the node.
                 // You can add an empty child or a "Loading..." flag if your TreeItem supports it.
-                items.push(TreeItem::new(id, name).expanded(false));
+                items.push(
+                    TreeItem::new(id, name)
+                        .expanded(false)
+                        .child(TreeItem::new("dummy", "")),
+                );
             } else {
                 items.push(TreeItem::new(id, name));
             }
@@ -202,7 +206,11 @@ fn build_file_items_sync(path: &Path) -> Vec<TreeItem> {
                 // IMPORTANT: Do NOT recurse here.
                 // We just create the directory item. The lazy-loading logic
                 // will call this function again for 'id' when expanded.
-                items.push(TreeItem::new(id, name).expanded(false));
+                items.push(
+                    TreeItem::new(id, name)
+                        .expanded(false)
+                        .child(TreeItem::new("dummy", "")),
+                );
             } else {
                 items.push(TreeItem::new(id, name));
             }
