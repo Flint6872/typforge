@@ -34,6 +34,17 @@ fn main() -> Result<()> {
     //         .manifest_optional()
     //         .unwrap();
     // }
+    //
+    //    // BAKE OPTION 1: Force XWayland/X11 backend on Linux to get native title bars
+    #[cfg(target_os = "linux")]
+    {
+        use std::env;
+        // Only override if the user hasn't explicitly set it themselves
+        if env::var("WAYLAND_DISPLAY").is_ok() {
+            // Unset or clear it for this process layout
+            env::remove_var("WAYLAND_DISPLAY");
+        }
+    }
 
     gpui_platform::application()
         .with_assets(Assets)
