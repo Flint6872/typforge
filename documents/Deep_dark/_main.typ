@@ -6,28 +6,28 @@
 
 #set page(footer: context align(right, counter(page).display()))
 #counter(page).update(1)
-#include "Chapter-1.typ"
+#include "chapter-1.typ"
 #pagebreak()
 
-#include "Chapter-2.typ"
+#include "chapter-2.typ"
 #pagebreak()
 
-#include "Chapter-3.typ"
+#include "chapter-3.typ"
 #pagebreak()
 
-#include "Chapter-4.typ"
+#include "chapter-4.typ"
 #pagebreak()
 
-#include "Chapter-5.typ"
+#include "chapter-5.typ"
 #pagebreak()
 
-#include "Chapter-6.typ"
+#include "chapter-6.typ"
 #pagebreak()
 
-#include "Chapter-7.typ"
+#include "chapter-7.typ"
 #pagebreak()
 
-#include "Chapter-8.typ"
+#include "chapter-8.typ"
 #pagebreak()
 
-#include "Chapter-9.typ"
+#include "chapter-9.typ"
