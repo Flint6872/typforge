@@ -5,9 +5,9 @@ on:
     tags:
       - "v*" # Triggers automatically when you push a tag like v1.0.0
 
-# --- Opt-in to Node 24 globally to silence deprecation warnings ---
+# --- Allow Node 20 during the transition/deprecation phase ---
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
   build-and-release:
@@ -17,12 +17,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04 # Changed per previous discussion
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             archive_name: typforge-linux-x86_64.tar.gz
             binary_name: typforge
-          # Assuming you want aarch64 on latest Ubuntu ARM runner if 22.04 ARM isn't available/preferred
-          - os: ubuntu-24.04-arm # Native ARM64 runner avoids cross-compilation headaches
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             archive_name: typforge-linux-aarch64.tar.gz
             binary_name: typforge
@@ -55,14 +54,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-                linux-headers-generic \
                 libgtk-3-dev \
                 libxcb-shape0-dev \
                 libxcb-xfixes0-dev \
                 libxkbcommon-dev \
                 libxkbcommon-x11-dev \
                 libwayland-dev \
-                libfuse2 \
                 pkg-config \
                 libssl-dev \
                 libfontconfig1-dev \
@@ -100,7 +97,10 @@ jobs:
       - name: Package Directory and Compress
         shell: bash
         run: |
-          if [ "${{ matrix.os }}" = "macos-14" ]; then 
+          if [ "${{ matrix.os }}" = "macos-14" ]; then
+          # Extract version from GITHUB_REF_NAME (e.g., v0.0.3 -> 0.0.3)
+          VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
+
             # --- macOS DMG packaging ---
             # 1. Assemble standard macOS .app bundle skeleton structure
             mkdir -p TypstNote.app/Contents/MacOS
@@ -111,9 +111,8 @@ jobs:
             cp -r themes TypstNote.app/Contents/Resources/ || true
             cp -r documents TypstNote.app/Contents/Resources/ || true
 
-            # 3. Create plist metadata
-            cat <<EOF > TypstNote.app/Contents/Info.plist
-            <?xml version="1.0" encoding="UTF-8"?>
+            # 3. Create plist metadata (No heredoc used here to prevent Bash & YAML parser conflicts)
+            echo '<?xml version="1.0" encoding="UTF-8"?>
             <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
             <plist version="1.0">
             <dict>
@@ -128,8 +127,7 @@ jobs:
                 <key>CFBundleShortVersionString</key>
                 <string>1.0.0</string>
             </dict>
-            </plist>
-            EOF
+            </plist>' > TypstNote.app/Contents/Info.plist
 
             # 4. Prepare temporary DMG staging directory with an Applications folder symlink
             mkdir dmg-staging
