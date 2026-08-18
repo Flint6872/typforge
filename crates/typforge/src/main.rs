@@ -34,15 +34,22 @@ fn main() -> Result<()> {
     //         .manifest_optional()
     //         .unwrap();
     // }
-    //
-    //    // BAKE OPTION 1: Force XWayland/X11 backend on Linux to get native title bars
+    // BAKE OPTION 1: Force XWayland/X11 backend on Linux to get native title bars
     #[cfg(target_os = "linux")]
     {
-        use std::env;
-        // Only override if the user hasn't explicitly set it themselves
-        if env::var("WAYLAND_DISPLAY").is_ok() {
-            // Unset or clear it for this process layout
-            env::remove_var("WAYLAND_DISPLAY");
+        if std::env::var("WAYLAND_DISPLAY").is_ok() && std::env::var("TYPFORGE_X11_FORCED").is_err()
+        {
+            if let Ok(current_exe) = std::env::current_exe() {
+                let status = std::process::Command::new(current_exe)
+                    .args(std::env::args().skip(1))
+                    .env_remove("WAYLAND_DISPLAY")
+                    .env("TYPFORGE_X11_FORCED", "1")
+                    .status();
+
+                if let Ok(code) = status {
+                    std::process::exit(code.code().unwrap_or(0));
+                }
+            }
         }
     }
 
@@ -94,9 +101,25 @@ fn main() -> Result<()> {
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(initial_bounds)),
                     titlebar: Some(TitlebarOptions {
-                        title: Some("TypForge".into()), // Set your desired window title here
+                        title: Some("TypForge".into()),
+
+                        // macOS: Makes the titlebar area transparent so your UI draws behind it
+                        appears_transparent: cfg!(target_os = "macos"),
+
+                        // macOS: Insets the red/yellow/green buttons
+                        traffic_light_position: if cfg!(target_os = "macos") {
+                            Some(point(px(16.0), px(16.0)))
+                        } else {
+                            None
+                        },
                         ..Default::default()
                     }),
+                    // Linux: Request native window borders
+                    window_decorations: if cfg!(target_os = "linux") {
+                        Some(WindowDecorations::Server)
+                    } else {
+                        None // Let macOS/Windows use their defaults
+                    },
                     focus: true,
                     show: true,
                     kind: WindowKind::Normal,
