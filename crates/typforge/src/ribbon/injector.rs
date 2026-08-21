@@ -1,7 +1,5 @@
-// crates/typforge/src/ribbon/injector.rs
-
 use crate::actions::RibbonAction;
-use typastry::edit::EditAction;
+use typastry::edit::{EditAction, get_arg_value};
 use typst::syntax::{LinkedNode, Side, SyntaxKind, parse};
 
 impl From<RibbonAction> for EditAction {
@@ -126,17 +124,4 @@ pub fn detect_properties_at_offset(content: &str, offset: usize) -> ActiveProper
     }
 
     props
-}
-
-/// Parses arguments to find if a key is present and returns its value
-pub fn get_arg_value(inner_args: &str, key: &str) -> Option<String> {
-    for param in inner_args.split(',') {
-        let trimmed = param.trim();
-        if let Some((p_key, p_val)) = trimmed.split_once(':') {
-            if p_key.trim() == key {
-                return Some(p_val.trim().to_string());
-            }
-        }
-    }
-    None
 }

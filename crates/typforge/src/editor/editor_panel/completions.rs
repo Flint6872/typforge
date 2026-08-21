@@ -1,5 +1,3 @@
-// crates/typforge/src/editor/editor_panel/completions.rs
-
 use gpui::{Context, Task, Window};
 use gpui_component::input::{CompletionProvider, InputState};
 use lsp_types::{
@@ -9,7 +7,9 @@ use lsp_types::{
 use parking_lot::Mutex;
 use ropey::{LineType, Rope};
 use std::sync::Arc;
-use typastry::intel::{CompletionKind, get_completions};
+use typastry::intel::{
+    CompletionKind, get_completions, get_trigger_info, is_physical_dimension_context,
+};
 
 pub struct TypstCompletionProvider<W: typst::World + typastry::IdeWorld + 'static> {
     shared_world: Arc<Mutex<W>>,
@@ -32,8 +32,10 @@ impl<W: typst::World + typastry::IdeWorld + 'static> TypstCompletionProvider<W> 
         let items = if let Ok(source) = world.source(main_id) {
             let completions = get_completions(&*world, None, &source, cursor, false);
 
-            // 1. Get context-aware trigger details
-            let (trigger_offset, is_hash_command) = get_trigger_info(rope, cursor);
+            let rope_str = rope.to_string();
+
+            // 1. Get context-aware trigger details from typastry's core engine
+            let (trigger_offset, is_hash_command) = get_trigger_info(&rope_str, cursor);
             let start_pos = offset_to_lsp_position(rope, trigger_offset);
             let end_pos = offset_to_lsp_position(rope, cursor);
 
@@ -122,7 +124,8 @@ impl<W: typst::World + typastry::IdeWorld + 'static> TypstCompletionProvider<W> 
                 .collect();
 
             // --- 3. COACHING SYSTEM: DYNAMIC ALPHANUMERIC SIZE COACHING ---
-            if !typed_prefix.is_empty() && is_size_context(rope, trigger_offset) {
+            if !typed_prefix.is_empty() && is_physical_dimension_context(&rope_str, trigger_offset)
+            {
                 if let Ok(_number_val) = typed_prefix.parse::<f64>() {
                     let units = ["pt", "em", "cm", "mm"];
                     for unit in units {
@@ -198,88 +201,6 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
 
         Task::ready(Ok(self.fetch_completions(world, rope, offset)))
     }
-}
-
-/// Helper function to detect if the target parameter expects physical dimensions / units
-fn is_size_context(rope: &Rope, mut offset: usize) -> bool {
-    // Skip spaces backwards
-    while offset > 0 {
-        let prev_c = rope.char(offset - 1);
-        if prev_c.is_whitespace() {
-            offset -= 1;
-        } else {
-            break;
-        }
-    }
-    // Check for parameter assignment separator `:`
-    if offset == 0 || rope.char(offset - 1) != ':' {
-        return false;
-    }
-    offset -= 1;
-    // Skip spaces backwards
-    while offset > 0 {
-        let prev_c = rope.char(offset - 1);
-        if prev_c.is_whitespace() {
-            offset -= 1;
-        } else {
-            break;
-        }
-    }
-    // Scan backward to extract parameter name identifier
-    let mut param_start = offset;
-    while param_start > 0 {
-        let prev_c = rope.char(param_start - 1);
-        if prev_c.is_alphanumeric() || prev_c == '_' || prev_c == '-' {
-            param_start -= 1;
-        } else {
-            break;
-        }
-    }
-    if param_start < offset {
-        let param_name = rope.slice(param_start..offset).to_string();
-        matches!(
-            param_name.as_str(),
-            "size"
-                | "margin"
-                | "gap"
-                | "gutter"
-                | "width"
-                | "height"
-                | "radius"
-                | "stroke"
-                | "inset"
-                | "outset"
-                | "spacing"
-        )
-    } else {
-        false
-    }
-}
-
-/// Scans backwards to find the context-aware trigger boundary.
-/// Returns: (trigger_byte_offset, is_hash_command)
-fn get_trigger_info(rope: &Rope, cursor: usize) -> (usize, bool) {
-    if cursor == 0 {
-        return (0, false);
-    }
-
-    // 1. Find the start of the current alphanumeric word/identifier (allowing decimals)
-    let mut word_start = cursor;
-    while word_start > 0 {
-        let prev_c = rope.char(word_start - 1);
-        if prev_c.is_alphanumeric() || prev_c == '_' || prev_c == '-' || prev_c == '.' {
-            word_start -= 1;
-        } else {
-            break;
-        }
-    }
-
-    // 2. Check if the character immediately preceding the word is '#'
-    if word_start > 0 && rope.char(word_start - 1) == '#' {
-        return (word_start - 1, true);
-    }
-
-    (word_start, false)
 }
 
 fn offset_to_lsp_position(rope: &Rope, offset: usize) -> Position {

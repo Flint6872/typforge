@@ -280,18 +280,19 @@ fn adjust_selection(
     new_start..new_end
 }
 
-/// Parses arguments to find if a key is present and returns its value
-// fn get_arg_value(inner_args: &str, key: &str) -> Option<String> {
-//     for param in inner_args.split(',') {
-//         let trimmed = param.trim();
-//         if let Some((p_key, p_val)) = trimmed.split_once(':') {
-//             if p_key.trim() == key {
-//                 return Some(p_val.trim().to_string());
-//             }
-//         }
-//     }
-//     None
-// }
+/// Parses arguments to find if a key is present and returns its value.
+/// Publicly exported so other editors can easily build dynamic properties-inspector loops.
+pub fn get_arg_value(inner_args: &str, key: &str) -> Option<String> {
+    for param in inner_args.split(',') {
+        let trimmed = param.trim();
+        if let Some((p_key, p_val)) = trimmed.split_once(':') {
+            if p_key.trim() == key {
+                return Some(p_val.trim().to_string());
+            }
+        }
+    }
+    None
+}
 
 /// Removes a key from the arguments, returning the new inner args string and whether it is now empty.
 fn remove_arg(inner_args: &str, key: &str) -> (String, bool) {
