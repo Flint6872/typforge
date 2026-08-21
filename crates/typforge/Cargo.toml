@@ -22,7 +22,7 @@ gpui-component.workspace = true
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
 
 typst-gpui = { path = "../typst-gpui" }
-typforge-core = { path = "../typforge-core" }
+typastry = { path = "../typastry" }
 
 parking_lot.workspace = true
 ropey = "2.0.0-beta.1"

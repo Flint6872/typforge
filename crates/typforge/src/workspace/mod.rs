@@ -20,10 +20,10 @@ use gpui_component::{
 use gpui_util::ResultExt;
 use parking_lot::Mutex;
 
-use typforge_core::edit::apply_edit_action;
+use typastry::edit::apply_edit_action;
 use typst_gpui::{PreviewPanel, PreviewPanelEvent};
 
-pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> {
+pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> {
     pub dock_area: Entity<DockArea>,
     pub menu_bar: Option<Entity<AppMenuBar>>,
     pub ribbon_panel: Entity<RibbonPanel>,
@@ -36,7 +36,7 @@ pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld
     pub recent_picker_focus_handle: FocusHandle,
 }
 
-impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
+impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
     // A constructor for your view.
     pub fn new(
         window: &mut Window,

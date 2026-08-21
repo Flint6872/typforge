@@ -10,11 +10,11 @@ use parking_lot::Mutex;
 use std::rc::Rc;
 use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
-use typforge_core::format::format_document;
+use typastry::format::format_document;
 
-use typforge_core::intel::{Tooltip, get_hover_info};
+use typastry::intel::{Tooltip, get_hover_info};
 
-impl<W: typst::World + typforge_core::IdeWorld + 'static> EventEmitter<FileContentUpdated>
+impl<W: typst::World + typastry::IdeWorld + 'static> EventEmitter<FileContentUpdated>
     for EditorPanel<W>
 {
 }
@@ -27,12 +27,12 @@ pub struct EditorSelectionChanged {
     pub color: Option<String>,
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + 'static> EventEmitter<EditorSelectionChanged>
+impl<W: typst::World + typastry::IdeWorld + 'static> EventEmitter<EditorSelectionChanged>
     for EditorPanel<W>
 {
 }
 
-pub struct EditorPanel<W: typst::World + typforge_core::IdeWorld + 'static> {
+pub struct EditorPanel<W: typst::World + typastry::IdeWorld + 'static> {
     pub open_files: Vec<OpenedFile>,
     pub active_file_path: Option<PathBuf>,
     focus_handle: FocusHandle,
@@ -44,7 +44,7 @@ pub struct EditorPanel<W: typst::World + typforge_core::IdeWorld + 'static> {
     pub last_hover_request_time: Option<Instant>,
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Clone
+impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Clone
     for EditorPanel<W>
 {
     fn clone(&self) -> Self {
@@ -61,9 +61,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
     }
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static>
-    EditorPanel<W>
-{
+impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> EditorPanel<W> {
     pub fn new(shared_world: Arc<Mutex<W>>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             open_files: Vec::new(),
@@ -189,9 +187,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
     }
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static>
-    EditorPanel<W>
-{
+impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> EditorPanel<W> {
     pub fn set_zoom(&mut self, zoom: f32, cx: &mut gpui::Context<Self>) {
         self.zoom_level = zoom.clamp(0.25, 5.0);
         cx.notify();
@@ -484,18 +480,18 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
     }
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + 'static> Focusable for EditorPanel<W> {
+impl<W: typst::World + typastry::IdeWorld + 'static> Focusable for EditorPanel<W> {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + 'static>
-    EventEmitter<gpui_component::dock::PanelEvent> for EditorPanel<W>
+impl<W: typst::World + typastry::IdeWorld + 'static> EventEmitter<gpui_component::dock::PanelEvent>
+    for EditorPanel<W>
 {
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> DockPanel
+impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> DockPanel
     for EditorPanel<W>
 {
     fn panel_name(&self) -> &'static str {

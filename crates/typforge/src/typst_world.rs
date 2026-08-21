@@ -288,7 +288,7 @@ impl TypstGpuiWorld for GpuiWorld {
 }
 
 // Implement IdeWorld for compiler-guided autocomplete and tooltip hover support
-impl typforge_core::IdeWorld for GpuiWorld {
+impl typastry::IdeWorld for GpuiWorld {
     fn upcast(&self) -> &dyn World {
         self
     }

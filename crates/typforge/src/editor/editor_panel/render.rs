@@ -7,9 +7,9 @@ use gpui_component::{ActiveTheme, h_flex};
 
 use std::time::Duration;
 use std::time::Instant;
-use typforge_core::intel::Tooltip;
+use typastry::intel::Tooltip;
 
-impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Render
+impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Render
     for EditorPanel<W>
 {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

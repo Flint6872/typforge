@@ -1,5 +1,3 @@
-// typforge-core/src/intel.rs
-
 use typst::syntax::Side;
 use typst::syntax::Source;
 pub use typst_ide::{Completion, CompletionKind, IdeWorld, Tooltip, autocomplete, tooltip};

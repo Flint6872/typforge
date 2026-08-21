@@ -7948,6 +7948,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "typastry"
+version = "0.0.4"
+dependencies = [
+ "serde",
+ "typst",
+ "typst-ide",
+ "typst-layout",
+ "typst-syntax 0.15.0",
+ "typstyle-core",
+]
+
+[[package]]
 name = "typed-arena"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7983,23 +7995,11 @@ dependencies = [
  "ropey",
  "serde",
  "serde_json",
- "typforge-core",
+ "typastry",
  "typst",
  "typst-gpui",
  "typst-kit",
  "typst-layout",
-]
-
-[[package]]
-name = "typforge-core"
-version = "0.0.3"
-dependencies = [
- "serde",
- "typst",
- "typst-ide",
- "typst-layout",
- "typst-syntax 0.15.0",
- "typstyle-core",
 ]
 
 [[package]]

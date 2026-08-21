@@ -1,5 +1,3 @@
-// typforge-core/src/edit.rs
-
 use std::ops::Range;
 use typst_syntax::{LinkedNode, Side, SyntaxKind, parse};
 

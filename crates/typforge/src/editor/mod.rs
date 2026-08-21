@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use typforge_core::intel::Tooltip;
+use typastry::intel::Tooltip;
 
 #[derive(Clone, Debug)]
 pub struct FileContentUpdated {
@@ -127,7 +127,7 @@ pub enum InputEvent {
 }
 
 // Helper to render the hover popup using our new Tooltip enum
-fn render_hover_popup<W: typst::World + typforge_core::IdeWorld + 'static>(
+fn render_hover_popup<W: typst::World + typastry::IdeWorld + 'static>(
     tooltip: &Tooltip,
     screen_pos: Point<Pixels>,
     _cx: &mut Context<EditorPanel<W>>,

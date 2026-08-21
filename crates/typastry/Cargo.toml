@@ -1,5 +1,5 @@
 [package]
-name = "typforge-core"
+name = "typastry"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

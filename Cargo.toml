@@ -1,8 +1,8 @@
 [workspace.package]
-version = "0.0.3"
+version = "0.0.4"
 authors = ["Flint <flint6872@gmail.com>"]
 edition = "2024"
-license = "MIT OR Apache-2.0"             # This is the magic line
+license = "MIT OR Apache-2.0"
 
 [workspace]
 resolver = "2"
@@ -11,7 +11,7 @@ members = [
     "crates/typforge",      #main binary
     "crates/typsdocx",      #typst document to MS word export
     "crates/typst-gpui",    #renderer for typst to gpui
-    "crates/typforge-core", #mostly holds the AST info
+    "crates/typastry", #mostly holds the AST info
 ]
 
 

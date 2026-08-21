@@ -9,13 +9,13 @@ use lsp_types::{
 use parking_lot::Mutex;
 use ropey::{LineType, Rope};
 use std::sync::Arc;
-use typforge_core::intel::{CompletionKind, get_completions};
+use typastry::intel::{CompletionKind, get_completions};
 
-pub struct TypstCompletionProvider<W: typst::World + typforge_core::IdeWorld + 'static> {
+pub struct TypstCompletionProvider<W: typst::World + typastry::IdeWorld + 'static> {
     shared_world: Arc<Mutex<W>>,
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + 'static> TypstCompletionProvider<W> {
+impl<W: typst::World + typastry::IdeWorld + 'static> TypstCompletionProvider<W> {
     pub fn new(shared_world: Arc<Mutex<W>>) -> Self {
         Self { shared_world }
     }
@@ -162,8 +162,8 @@ impl<W: typst::World + typforge_core::IdeWorld + 'static> TypstCompletionProvide
     }
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static>
-    CompletionProvider for TypstCompletionProvider<W>
+impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> CompletionProvider
+    for TypstCompletionProvider<W>
 {
     fn is_completion_trigger(
         &self,

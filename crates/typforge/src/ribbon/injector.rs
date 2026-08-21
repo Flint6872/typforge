@@ -1,7 +1,7 @@
 // crates/typforge/src/ribbon/injector.rs
 
 use crate::actions::RibbonAction;
-use typforge_core::edit::EditAction;
+use typastry::edit::EditAction;
 use typst::syntax::{LinkedNode, Side, SyntaxKind, parse};
 
 impl From<RibbonAction> for EditAction {
