@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-chrono = "0.4.44"
+chrono.workspace = true
 
 gpui.workspace = true
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
@@ -34,7 +34,7 @@ anyhow = "1.0" # Added for consistent error handling in main
 
 typst.workspace = true
 typst-layout.workspace = true
-typst-kit = { version = "0.15.0", features = ["scan-fonts", "embedded-fonts"] }
+typst-kit = { version = "0.15", features = ["scan-fonts", "embedded-fonts"] }
 
 lsp-types = "0.97.0"
 embed-resource = "3.0.11"
