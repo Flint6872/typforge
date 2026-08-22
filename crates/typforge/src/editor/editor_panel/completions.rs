@@ -7,9 +7,7 @@ use lsp_types::{
 use parking_lot::Mutex;
 use ropey::{LineType, Rope};
 use std::sync::Arc;
-use typastry::intel::{
-    CompletionKind, get_completions, get_trigger_info, is_physical_dimension_context,
-};
+use typastry::intel::{CompletionKind, get_enhanced_completions, get_trigger_info};
 
 pub struct TypstCompletionProvider<W: typst::World + typastry::IdeWorld + 'static> {
     shared_world: Arc<Mutex<W>>,
@@ -30,79 +28,32 @@ impl<W: typst::World + typastry::IdeWorld + 'static> TypstCompletionProvider<W> 
         let main_id = world.main();
 
         let items = if let Ok(source) = world.source(main_id) {
-            let completions = get_completions(&*world, None, &source, cursor, false);
+            // 1. Fetch filtered, enhanced, and coached suggestions directly from typastry
+            let enhanced_completions = get_enhanced_completions(&*world, None, &source, cursor);
 
             let rope_str = rope.to_string();
-
-            // 1. Get context-aware trigger details from typastry's core engine
             let (trigger_offset, is_hash_command) = get_trigger_info(&rope_str, cursor);
             let start_pos = offset_to_lsp_position(rope, trigger_offset);
             let end_pos = offset_to_lsp_position(rope, cursor);
 
-            // 2. Fetch the prefix currently typed after the trigger boundary
-            let typed_prefix = if cursor > trigger_offset {
-                let start = if is_hash_command {
-                    trigger_offset + 1
-                } else {
-                    trigger_offset
-                };
-                if cursor > start {
-                    let prefix_slice = rope.slice(start..cursor);
-                    prefix_slice.to_string().to_lowercase()
-                } else {
-                    String::new()
-                }
-            } else {
-                String::new()
-            };
-
-            let mut list: Vec<CompletionItem> = completions
+            // 2. Map clean, portable suggestions to editor-specific LSP types
+            let list: Vec<CompletionItem> = enhanced_completions
                 .into_iter()
-                // --- FILTER SUGGESTIONS DYNAMICALLY ---
-                .filter(|c| {
-                    if typed_prefix.is_empty() {
-                        true
-                    } else {
-                        c.label
-                            .to_string()
-                            .to_lowercase()
-                            .starts_with(&typed_prefix)
-                    }
-                })
                 .map(|c| {
-                    let label = c.label.to_string();
-                    let raw_apply_text = c
-                        .apply
-                        .as_ref()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| label.clone());
-
-                    // Simplify autocomplete text to raw plain text:
-                    let apply_text = if raw_apply_text.contains('(') {
-                        // E.g. "text(${body})" or "text()" -> "text()"
-                        let base = raw_apply_text.split('(').next().unwrap_or(&label);
-                        format!("{}()", base)
-                    } else {
-                        // E.g. "fill: ${}" -> "fill: "
-                        raw_apply_text.replace("${}", "").replace("${1:}", "")
-                    };
-
                     let kind = match c.kind {
                         CompletionKind::Func => CompletionItemKind::FUNCTION,
                         CompletionKind::Type => CompletionItemKind::CLASS,
                         CompletionKind::Param => CompletionItemKind::PROPERTY,
                         CompletionKind::Constant => CompletionItemKind::CONSTANT,
-                        CompletionKind::Symbol(_) => CompletionItemKind::VALUE,
-                        _ => CompletionItemKind::TEXT,
+                        CompletionKind::Symbol => CompletionItemKind::VALUE,
+                        CompletionKind::Unit => CompletionItemKind::UNIT,
+                        CompletionKind::Text => CompletionItemKind::TEXT,
                     };
 
-                    // Force PLAIN_TEXT to avoid literal $1 or ${}
-                    let insert_text_format = Some(InsertTextFormat::PLAIN_TEXT);
-
-                    let replacement_text = if is_hash_command {
-                        format!("#{}", apply_text)
+                    let replacement_text = if is_hash_command && c.kind != CompletionKind::Unit {
+                        format!("#{}", c.apply)
                     } else {
-                        apply_text
+                        c.apply
                     };
 
                     let text_edit = CompletionTextEdit::Edit(TextEdit {
@@ -114,47 +65,15 @@ impl<W: typst::World + typastry::IdeWorld + 'static> TypstCompletionProvider<W> 
                     });
 
                     CompletionItem {
-                        label,
+                        label: c.label,
                         kind: Some(kind),
                         text_edit: Some(text_edit),
-                        insert_text_format,
+                        insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+                        detail: c.detail,
                         ..Default::default()
                     }
                 })
                 .collect();
-
-            // --- 3. COACHING SYSTEM: DYNAMIC ALPHANUMERIC SIZE COACHING ---
-            if !typed_prefix.is_empty() && is_physical_dimension_context(&rope_str, trigger_offset)
-            {
-                if let Ok(_number_val) = typed_prefix.parse::<f64>() {
-                    let units = ["pt", "em", "cm", "mm"];
-                    for unit in units {
-                        let suggested_text = format!("{}{}", typed_prefix, unit);
-                        let text_edit = CompletionTextEdit::Edit(TextEdit {
-                            range: Range {
-                                start: start_pos,
-                                end: end_pos,
-                            },
-                            new_text: suggested_text.clone(),
-                        });
-
-                        list.insert(
-                            0,
-                            CompletionItem {
-                                label: suggested_text.clone(),
-                                kind: Some(CompletionItemKind::UNIT),
-                                text_edit: Some(text_edit),
-                                insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
-                                detail: Some(format!(
-                                    "Coaching: Insert explicit length ({})",
-                                    unit
-                                )),
-                                ..Default::default()
-                            },
-                        );
-                    }
-                }
-            }
 
             list
         } else {
@@ -174,7 +93,6 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         new_text: &str,
         _cx: &mut Context<InputState>,
     ) -> bool {
-        // Trigger on `#`, delimiters, alphanumeric values, or decimal points
         new_text == "#"
             || new_text == "("
             || new_text == ","

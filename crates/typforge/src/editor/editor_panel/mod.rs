@@ -120,7 +120,8 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         cursor: usize,
         cx: &mut Context<Self>,
     ) {
-        let props = crate::ribbon::injector::detect_properties_at_offset(content, cursor);
+        // Query the active cursor styling state directly from typastry's pure AST engine
+        let props = typastry::edit::detect_properties_at_offset(content, cursor);
         cx.emit(EditorSelectionChanged {
             is_bold: props.is_bold,
             is_italic: props.is_italic,

@@ -1,14 +1,21 @@
 [package]
-name = "typastry"
-version.workspace = true
+name = "typastry #typASTry
+version = "0.1.0"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["intel", "format"]
+intel = ["dep:typst-ide", "dep:typst-layout"]
+format = ["dep:typstyle-core"]
+
 [dependencies]
 typst.workspace = true
 typst-syntax.workspace = true
-typst-layout.workspace = true
-typst-ide = "0.15.0"
-typstyle-core = "0.14.4"
 serde.workspace = true
+
+# Optional dependencies mapped to features
+typst-ide = { version = "0.15", optional = true }
+typst-layout = { version = "0.15", optional = true }
+typstyle-core = { version = "0.15", optional = true }
