@@ -583,6 +583,184 @@ fn find_func_call_ancestor<'a>(
     None
 }
 
+// Added to crates/typastry/src/edit.rs
+
+/// High-level formatting state representing the resolved styles at a given cursor position.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct ActiveProperties {
+    pub is_bold: bool,
+    pub is_italic: bool,
+    pub is_underline: bool,
+    pub size: Option<f32>,
+    pub font: Option<String>,
+    pub color: Option<String>,
+}
+
+fn extract_inner_args_from_node<'a>(
+    args_node: &LinkedNode<'a>,
+    content: &'a str,
+) -> Option<&'a str> {
+    let left_paren = args_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::LeftParen);
+    let right_paren = args_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::RightParen);
+
+    if let (Some(lp), Some(rp)) = (left_paren, right_paren) {
+        let range = lp.range().start..rp.range().end;
+        if range.start < content.len() && range.end <= content.len() && range.len() >= 2 {
+            return Some(&content[range.start + 1..range.end - 1]);
+        }
+    } else {
+        let range = args_node.range();
+        if range.start < content.len() && range.end <= content.len() {
+            let text = &content[range];
+            if text.starts_with('(') && text.contains(')') {
+                let inner = text.trim_start_matches('(');
+                if let Some((args_part, _)) = inner.split_once(')') {
+                    return Some(args_part);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn apply_args_to_properties(inner_args: &str, props: &mut ActiveProperties) {
+    if !props.is_bold {
+        if let Some(weight_val) = get_arg_value(inner_args, "weight") {
+            let w = weight_val.trim().trim_matches('"');
+            if w == "bold" || w == "700" {
+                props.is_bold = true;
+            }
+        }
+    }
+
+    if !props.is_italic {
+        if let Some(style_val) = get_arg_value(inner_args, "style") {
+            let s = style_val.trim().trim_matches('"');
+            if s == "italic" || s == "oblique" {
+                props.is_italic = true;
+            }
+        }
+    }
+
+    if props.size.is_none() {
+        if let Some(size_val) = get_arg_value(inner_args, "size") {
+            let cleaned = size_val
+                .trim()
+                .trim_matches('"')
+                .trim_end_matches("pt")
+                .trim_end_matches("em");
+            if let Ok(val) = cleaned.parse::<f32>() {
+                props.size = Some(val);
+            }
+        }
+    }
+
+    if props.font.is_none() {
+        if let Some(font_val) = get_arg_value(inner_args, "font") {
+            let cleaned = font_val.trim().trim_matches('"').to_string();
+            if !cleaned.is_empty() {
+                props.font = Some(cleaned);
+            }
+        }
+    }
+
+    if props.color.is_none() {
+        if let Some(fill_val) = get_arg_value(inner_args, "fill") {
+            let cleaned = fill_val.trim().trim_matches('"').to_string();
+            if !cleaned.is_empty() {
+                props.color = Some(cleaned);
+            }
+        }
+    }
+}
+
+fn collect_set_text_rules<'a>(root: &'a LinkedNode<'a>, set_rules: &mut Vec<LinkedNode<'a>>) {
+    let mut stack = vec![root.clone()];
+    while let Some(node) = stack.pop() {
+        if node.kind() == SyntaxKind::SetRule {
+            if let Some(target) = node
+                .children()
+                .find(|child| child.kind() == SyntaxKind::Ident)
+            {
+                if target.full_text() == "text" {
+                    set_rules.push(node.clone());
+                }
+            }
+        }
+        for child in node.children().rev() {
+            stack.push(child);
+        }
+    }
+}
+
+/// Traverses up the AST hierarchy from the current cursor position to resolve active properties.
+/// Essential for editors to set the active/inactive state of toolbar formatting buttons.
+pub fn detect_properties_at_offset(content: &str, offset: usize) -> ActiveProperties {
+    if content.is_empty() {
+        return ActiveProperties::default();
+    }
+
+    let clamped_offset = offset.min(content.len());
+    let tree = parse(content);
+    let root = LinkedNode::new(&tree);
+    let mut props = ActiveProperties::default();
+
+    // Locate the leaf node containing the cursor
+    let leaf = root
+        .leaf_at(clamped_offset, Side::Before)
+        .or_else(|| root.leaf_at(clamped_offset, Side::After));
+
+    let mut current = leaf;
+    while let Some(node) = current {
+        // 1. Parse Strong/Emph Node Markup
+        if node.kind() == SyntaxKind::Strong {
+            props.is_bold = true;
+        }
+        if node.kind() == SyntaxKind::Emph {
+            props.is_italic = true;
+        }
+
+        // 2. Parse Text Formatting Functions (#text(...) or text(...))
+        if node.kind() == SyntaxKind::FuncCall {
+            if let Some(callee) = node.children().next() {
+                let callee_text = callee.full_text();
+                if callee_text == "underline" || callee_text == "#underline" {
+                    props.is_underline = true;
+                }
+                if callee_text == "text" || callee_text == "#text" {
+                    if let Some(args_node) = node.children().find(|c| c.kind() == SyntaxKind::Args)
+                    {
+                        if let Some(inner_args) = extract_inner_args_from_node(&args_node, content)
+                        {
+                            apply_args_to_properties(inner_args, &mut props);
+                        }
+                    }
+                }
+            }
+        }
+        current = node.parent().cloned();
+    }
+
+    // 3. Fallback: Check document-level `#set text(...)` rules preceding or enclosing the offset
+    let mut set_rules = Vec::new();
+    collect_set_text_rules(&root, &mut set_rules);
+    for rule in set_rules {
+        if rule.range().start <= clamped_offset {
+            if let Some(args_node) = rule.children().find(|c| c.kind() == SyntaxKind::Args) {
+                if let Some(inner_args) = extract_inner_args_from_node(&args_node, content) {
+                    apply_args_to_properties(inner_args, &mut props);
+                }
+            }
+        }
+    }
+
+    props
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -615,12 +793,9 @@ mod tests {
         let content = "Hello #text(font: \"Inter\")[world]";
 
         // Target is "world" which is inside #text(...)
-        // Let's modify size of "world" (selection inside the body)
         let edit = apply_edit_action(content, 27..32, &EditAction::SetFontSize(14.0));
 
-        // It must merge the size parameter rather than wrapping it in `#text(size: 14pt)[...]`
         assert_eq!(edit.new_text, "(font: \"Inter\", size: 14pt)");
-        // The edit range must target only the Args node of the parent '#text(...)`
         assert_eq!(edit.range, 11..26);
     }
 
@@ -628,18 +803,13 @@ mod tests {
     fn test_page_set_rules() {
         let content = "Hello reader";
 
-        // 1. Insert paper attribute on a completely empty set-rule space
         let edit = apply_edit_action(content, 0..0, &EditAction::SetPaper("A4".to_string()));
         assert_eq!(edit.new_text, "#set page(paper: \"A4\")\n");
         assert_eq!(edit.range, 0..0);
 
-        // 2. Update existing set rule
         let content_with_page = "#set page(paper: \"A4\")\nHello reader";
-        let edit_update = apply_edit_action(
-            content_with_page,
-            24..30, // reader
-            &EditAction::SetFlipped(true),
-        );
+        let edit_update =
+            apply_edit_action(content_with_page, 24..30, &EditAction::SetFlipped(true));
         assert_eq!(edit_update.new_text, "(paper: \"A4\", flipped: true)");
         assert_eq!(edit_update.range, 9..22);
     }
@@ -648,7 +818,6 @@ mod tests {
     fn test_toggle_underline() {
         let content = "Hello world";
 
-        // 1. Underline the word "world"
         let edit = apply_edit_action(content, 6..11, &EditAction::ToggleUnderline);
         assert_eq!(edit.new_text, "#underline[world]");
         assert_eq!(edit.range, 6..11);
@@ -661,113 +830,75 @@ mod tests {
         );
         assert_eq!(new_content, "Hello #underline[world]");
 
-        // 2. Remove underline
         let edit_unwrap = apply_edit_action(&new_content, 17..22, &EditAction::ToggleUnderline);
         assert_eq!(edit_unwrap.new_text, "world");
         assert_eq!(edit_unwrap.range, 6..23);
     }
-}
 
-// Added to crates/typastry/src/edit.rs
-
-/// High-level formatting state representing the resolved styles at a given cursor position.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct ActiveProperties {
-    pub is_bold: bool,
-    pub is_italic: bool,
-    pub is_underline: bool,
-    pub size: Option<f32>,
-    pub font: Option<String>,
-    pub color: Option<String>,
-}
-
-/// Traverses up the AST hierarchy from the current cursor position to resolve active properties.
-/// Essential for editors to set the active/inactive state of toolbar formatting buttons.
-pub fn detect_properties_at_offset(content: &str, offset: usize) -> ActiveProperties {
-    let tree = parse(content);
-    let root = LinkedNode::new(&tree);
-    let mut props = ActiveProperties::default();
-
-    // Locate the leaf node containing the cursor
-    let leaf = root
-        .leaf_at(offset, Side::Before)
-        .or_else(|| root.leaf_at(offset, Side::After));
-
-    let mut current = leaf;
-    while let Some(node) = current {
-        // 1. Parse Strong/Emph Node Markup
-        if node.kind() == SyntaxKind::Strong {
-            props.is_bold = true;
-        }
-        if node.kind() == SyntaxKind::Emph {
-            props.is_italic = true;
-        }
-
-        // 2. Parse Text Formatting Functions (#text(...) or text(...))
-        if node.kind() == SyntaxKind::FuncCall {
-            if let Some(callee) = node.children().next() {
-                let callee_text = callee.leaf_text();
-                if callee_text == "underline" || callee_text == "#underline" {
-                    props.is_underline = true;
-                }
-                if callee_text == "text" || callee_text == "#text" {
-                    if let Some(args_node) = node.children().find(|c| c.kind() == SyntaxKind::Args)
-                    {
-                        let args_text = args_node.leaf_text();
-                        let inner_args = if args_text.len() >= 2 {
-                            &args_text[1..args_text.len() - 1]
-                        } else {
-                            ""
-                        };
-
-                        // Check weight
-                        if let Some(weight_val) = get_arg_value(inner_args, "weight") {
-                            let w = weight_val.trim_matches('"');
-                            if w == "bold" || w == "700" {
-                                props.is_bold = true;
-                            }
-                        }
-
-                        // Check style
-                        if let Some(style_val) = get_arg_value(inner_args, "style") {
-                            let s = style_val.trim_matches('"');
-                            if s == "italic" {
-                                props.is_italic = true;
-                            }
-                        }
-
-                        // Check size
-                        if props.size.is_none() {
-                            if let Some(size_val) = get_arg_value(inner_args, "size") {
-                                let cleaned = size_val
-                                    .trim()
-                                    .trim_end_matches("pt")
-                                    .trim_end_matches("em");
-                                if let Ok(val) = cleaned.parse::<f32>() {
-                                    props.size = Some(val);
-                                }
-                            }
-                        }
-
-                        // Check font family
-                        if props.font.is_none() {
-                            if let Some(font_val) = get_arg_value(inner_args, "font") {
-                                props.font = Some(font_val.trim_matches('"').to_string());
-                            }
-                        }
-
-                        // Check color / fill
-                        if props.color.is_none() {
-                            if let Some(fill_val) = get_arg_value(inner_args, "fill") {
-                                props.color = Some(fill_val);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        current = node.parent().cloned();
+    #[test]
+    fn test_detect_properties_default() {
+        let content = "Hello world";
+        let props = detect_properties_at_offset(content, 3);
+        assert_eq!(props, ActiveProperties::default());
     }
 
-    props
+    #[test]
+    fn test_detect_properties_bold_italic_underline() {
+        let content = "*bold* _italic_ #underline[underlined]";
+
+        let bold_props = detect_properties_at_offset(content, 3);
+        assert!(bold_props.is_bold);
+        assert!(!bold_props.is_italic);
+
+        let italic_props = detect_properties_at_offset(content, 9);
+        assert!(!italic_props.is_bold);
+        assert!(italic_props.is_italic);
+
+        let underline_props = detect_properties_at_offset(content, 20);
+        assert!(underline_props.is_underline);
+    }
+
+    #[test]
+    fn test_detect_properties_text_func() {
+        let content = "#text(font: \"Inter\", size: 14pt, fill: \"blue\")[Hello]";
+        let props = detect_properties_at_offset(content, 52);
+        assert_eq!(props.font.as_deref(), Some("Inter"));
+        assert_eq!(props.size, Some(14.0));
+        assert_eq!(props.color.as_deref(), Some("blue"));
+    }
+
+    #[test]
+    fn test_detect_properties_set_rule_fallback() {
+        let content = "#set text(font: \"Liberation Sans\", size: 11pt)\nHello world";
+        let props = detect_properties_at_offset(content, 52);
+        assert_eq!(props.font.as_deref(), Some("Liberation Sans"));
+        assert_eq!(props.size, Some(11.0));
+    }
+
+    #[test]
+    fn test_detect_properties_override_set_rule() {
+        let content =
+            "#set text(font: \"Liberation Sans\", size: 11pt)\n#text(size: 16pt)[Big text]";
+        let props = detect_properties_at_offset(content, 68);
+        assert_eq!(props.font.as_deref(), Some("Liberation Sans"));
+        assert_eq!(props.size, Some(16.0));
+    }
+
+    #[test]
+    fn test_detect_properties_nested_formatting() {
+        let content = "#text(font: \"Inter\")[*bold and #underline[underlined]*]";
+        let props = detect_properties_at_offset(content, 42);
+        assert_eq!(props.font.as_deref(), Some("Inter"));
+        assert!(props.is_bold);
+        assert!(props.is_underline);
+    }
+
+    #[test]
+    fn test_detect_properties_boundary_and_out_of_bounds() {
+        let empty_props = detect_properties_at_offset("", 0);
+        assert_eq!(empty_props, ActiveProperties::default());
+
+        let out_props = detect_properties_at_offset("Hello", 999);
+        assert_eq!(out_props, ActiveProperties::default());
+    }
 }

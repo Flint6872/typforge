@@ -245,6 +245,48 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                                 cx.notify();
                             });
                     }
+                    PreviewPanelEvent::CursorMoved {
+                        offset,
+                        selection: _,
+                    } => {
+                        let window_handle = this_note_view.window_handle.clone();
+                        let ribbon_panel_handle = this_note_view.ribbon_panel.clone();
+
+                        // 1. Get the current active document content from the editor
+                        let content = this_note_view
+                            .editor_panel
+                            .read(cx_for_note_view)
+                            .active_file_path
+                            .as_ref()
+                            .and_then(|path| {
+                                this_note_view
+                                    .editor_panel
+                                    .read(cx_for_note_view)
+                                    .open_files
+                                    .iter()
+                                    .find(|f| &f.path == path)
+                                    .map(|f| {
+                                        f.editor_state.read(cx_for_note_view).text().to_string()
+                                    })
+                            });
+
+                        if let Some(source_code) = content {
+                            // 2. Detect active formatting properties at the caret offset
+                            let active_props =
+                                typastry::edit::detect_properties_at_offset(&source_code, *offset);
+
+                            // 3. Update Ribbon UI controls with the window reference
+                            let _ = window_handle.update(cx_for_note_view, |_, window, app_cx| {
+                                ribbon_panel_handle.update(app_cx, |ribbon, ribbon_cx| {
+                                    ribbon.update_active_properties(
+                                        &active_props,
+                                        window,
+                                        ribbon_cx,
+                                    );
+                                });
+                            });
+                        }
+                    }
                 }
             },
         )

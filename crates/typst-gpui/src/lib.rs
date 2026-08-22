@@ -27,6 +27,10 @@ pub enum PreviewPanelEvent {
     // This will evolve in later phases for more complex edits (deletion, insertion at cursor, etc.).
     SourceChanged(String),
     DiagnosticsChanged(Vec<typst::diag::SourceDiagnostic>),
+    CursorMoved {
+        offset: usize,
+        selection: Option<std::ops::Range<usize>>,
+    },
 }
 
 /// The PreviewPanel is a GPUI View that renders a Typst document.
@@ -143,7 +147,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             this.cursor_offset = new_cursor_offset;
 
             if sel.is_empty() {
-                // Preserve the anchor on a fresh mouse down click (where cursor == anchor)
                 if this.selection_anchor != Some(new_cursor_offset) {
                     this.selection_anchor = None;
                 }
@@ -154,6 +157,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                     Some(sel.start)
                 };
             }
+            this.notify_cursor_moved(cx);
             cx.notify();
         })
         .detach();
@@ -179,6 +183,13 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             _blink_task: Some(blink_task), // Store the task
             compile_task: None,
         }
+    }
+
+    pub fn notify_cursor_moved(&self, cx: &mut Context<Self>) {
+        cx.emit(PreviewPanelEvent::CursorMoved {
+            offset: self.cursor_offset,
+            selection: self.selection_range(),
+        });
     }
 
     pub fn set_zoom(&mut self, zoom: f32, cx: &mut gpui::Context<Self>) {
@@ -490,11 +501,11 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         self.cursor_offset = range.end;
 
         self.input_state.update(cx, |input, input_cx| {
-            // FIX: Explicitly set the selected range so InputState keeps the focus highlighted!
             input.set_selected_range(range.clone(), input_cx);
             let new_pos = input.text().offset_to_position(range.end);
             input.set_cursor_position(new_pos, window, input_cx);
         });
+        self.notify_cursor_moved(cx);
     }
 
     fn handle_link_click(&mut self, point: Point<Pixels>, cx: &mut Context<Self>) -> bool {
@@ -566,17 +577,17 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                         this.cursor_offset = byte_offset;
 
                         this.input_state.update(cx, |input, input_cx| {
-                            // Collapse selection to a single point on click
                             input.set_selected_range(byte_offset..byte_offset, input_cx);
                             let new_pos = input.text().offset_to_position(byte_offset);
                             input.set_cursor_position(new_pos, window, input_cx);
                         });
+                        this.notify_cursor_moved(cx);
                     } else {
-                        // Clear selection if clicking on empty space
                         this.selection_anchor = None;
                         this.input_state.update(cx, |input, input_cx| {
                             input.set_selected_range(0..0, input_cx);
                         });
+                        this.notify_cursor_moved(cx);
                         cx.notify();
                     }
 
@@ -608,10 +619,10 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                             this.input_state.update(cx, |input, input_cx| {
                                 let normalized_range =
                                     anchor.min(byte_offset)..anchor.max(byte_offset);
-                                // This sets both selection bounds AND updates the cursor without collapsing!
                                 input.set_selected_range(normalized_range, input_cx);
                             });
                         }
+                        this.notify_cursor_moved(cx);
                         cx.notify();
                     }
                 }
