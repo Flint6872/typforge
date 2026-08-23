@@ -139,25 +139,29 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         );
 
         // --- SINGLE SMART OBSERVER ---
+        // --- SINGLE SMART OBSERVER ---
         cx.observe(&input_state, |this, handle, cx| {
+            if this.suppressing_events {
+                return;
+            }
+
             let state = handle.read(cx);
             let new_cursor_offset = state.cursor();
             let sel = state.selected_range();
 
             this.cursor_offset = new_cursor_offset;
 
-            if sel.is_empty() {
-                if this.selection_anchor != Some(new_cursor_offset) {
-                    this.selection_anchor = None;
-                }
-            } else {
+            // Only update selection anchor if input_state has an active non-empty selection.
+            // When input_state loses focus (blur), it reports sel.is_empty(), so we preserve
+            // PreviewPanel's existing selection_anchor so the highlight stays visible on screen!
+            if !sel.is_empty() {
                 this.selection_anchor = if new_cursor_offset == sel.start {
                     Some(sel.end)
                 } else {
                     Some(sel.start)
                 };
             }
-            this.notify_cursor_moved(cx);
+
             cx.notify();
         })
         .detach();
@@ -223,19 +227,25 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         let original_tab_stop_state = self.focus_handle.tab_stop;
         self.focus_handle.tab_stop = false;
 
-        // 1. Read and preserve the current selection range before updating input value
+        // 1. Preserve active selection anchor and cursor offset before set_value clears them
+        let saved_anchor = self.selection_anchor;
+        let saved_cursor = self.cursor_offset;
         let current_selection = self.selection_range();
 
         self.input_state.update(cx, |input, input_cx| {
             input.set_value(source_for_input_state, window, input_cx);
 
-            // 2. Restore the selection range on the input state so it is not cleared by set_value
+            // 2. Restore selection range on the input state
             if let Some(ref sel) = current_selection {
                 input.set_selected_range(sel.clone(), input_cx);
                 let new_pos = input.text().offset_to_position(sel.end);
                 input.set_cursor_position(new_pos, window, input_cx);
             }
         });
+
+        // 3. Restore PreviewPanel's internal anchor and cursor
+        self.selection_anchor = saved_anchor;
+        self.cursor_offset = saved_cursor;
 
         cx.defer(move |app_cx| {
             app_cx.update_entity(&preview_panel_entity, |this_panel, cx_for_panel| {
@@ -500,12 +510,16 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         self.selection_anchor = Some(range.start);
         self.cursor_offset = range.end;
 
+        self.suppressing_events = true;
         self.input_state.update(cx, |input, input_cx| {
             input.set_selected_range(range.clone(), input_cx);
             let new_pos = input.text().offset_to_position(range.end);
             input.set_cursor_position(new_pos, window, input_cx);
         });
+        self.suppressing_events = false;
+
         self.notify_cursor_moved(cx);
+        cx.notify();
     }
 
     fn handle_link_click(&mut self, point: Point<Pixels>, cx: &mut Context<Self>) -> bool {
