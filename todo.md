@@ -10,6 +10,13 @@ Post TypForge 0.1.0
 ### `typst-gpui` (Preview Panel)
 * [X] export to pdf using typst-pdf.
 * [ ] setup package manager using typst-kit (questionable to have here or main crate)
+* [ ] **Fix visual caret navigation through markup**
+    - Currently, arrow key navigation in the Preview Panel steps through raw Typst source characters (including `#`, `*`, `_`, `[`, `]`) rather than visual words or glyphs. We need to finalize the spatial 2D navigation (Up/Down) and visual word-stepping (Left/Right) by exclusively using the `HitMap` coordinate data as the source of truth, effectively ignoring the underlying hidden `InputState` caret during navigation.
+    - A quick suggestion for when you return to this:
+    When you pick this back up, I recommend looking at **"The Interceptor Pattern"**. Instead of trying to "fix" the existing hidden `Input` navigation, we could set the `InputState` to be completely detached from the keyboard focus for arrow keys and *only* use it to collect characters for typing.
+    
+    By fully routing navigation through the `capture_key_down` logic we built, and simply "teleporting" the hidden `Input` cursor to the new `HitMap` coordinate after every jump, you'll bypass the raw-code stepping entirely.
+
 
 Issues color.map not working on non-square objects
   - * [X] converted images to png files show properly

@@ -697,6 +697,15 @@ fn collect_set_text_rules<'a>(root: &'a LinkedNode<'a>, set_rules: &mut Vec<Link
     }
 }
 
+fn get_callee_name(func_call: &LinkedNode) -> Option<String> {
+    let mut children = func_call.children();
+    let mut current = children.next()?;
+    if current.kind() == SyntaxKind::Hash {
+        current = children.next()?;
+    }
+    Some(current.full_text().trim().to_string())
+}
+
 /// Traverses up the AST hierarchy from the current cursor position to resolve active properties.
 /// Essential for editors to set the active/inactive state of toolbar formatting buttons.
 pub fn detect_properties_at_offset(content: &str, offset: usize) -> ActiveProperties {
@@ -726,12 +735,11 @@ pub fn detect_properties_at_offset(content: &str, offset: usize) -> ActiveProper
 
         // 2. Parse Text Formatting Functions (#text(...) or text(...))
         if node.kind() == SyntaxKind::FuncCall {
-            if let Some(callee) = node.children().next() {
-                let callee_text = callee.full_text();
-                if callee_text == "underline" || callee_text == "#underline" {
+            if let Some(callee_text) = get_callee_name(&node) {
+                if callee_text == "underline" {
                     props.is_underline = true;
                 }
-                if callee_text == "text" || callee_text == "#text" {
+                if callee_text == "text" {
                     if let Some(args_node) = node.children().find(|c| c.kind() == SyntaxKind::Args)
                     {
                         if let Some(inner_args) = extract_inner_args_from_node(&args_node, content)

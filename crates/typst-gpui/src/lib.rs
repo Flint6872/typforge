@@ -139,7 +139,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         );
 
         // --- SINGLE SMART OBSERVER ---
-        // --- SINGLE SMART OBSERVER ---
         cx.observe(&input_state, |this, handle, cx| {
             if this.suppressing_events {
                 return;
@@ -149,12 +148,11 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             let new_cursor_offset = state.cursor();
             let sel = state.selected_range();
 
-            this.cursor_offset = new_cursor_offset;
-
-            // Only update selection anchor if input_state has an active non-empty selection.
-            // When input_state loses focus (blur), it reports sel.is_empty(), so we preserve
-            // PreviewPanel's existing selection_anchor so the highlight stays visible on screen!
-            if !sel.is_empty() {
+            if sel.is_empty() {
+                if this.cursor_offset != new_cursor_offset || this.selection_anchor.is_none() {
+                    this.selection_anchor = None;
+                }
+            } else {
                 this.selection_anchor = if new_cursor_offset == sel.start {
                     Some(sel.end)
                 } else {
@@ -162,6 +160,12 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                 };
             }
 
+            let moved = this.cursor_offset != new_cursor_offset;
+            this.cursor_offset = new_cursor_offset;
+
+            if moved {
+                this.notify_cursor_moved(cx);
+            }
             cx.notify();
         })
         .detach();
@@ -572,6 +576,36 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
             .size_full()
             .bg(rgb(0x1a1a1a))
             .track_focus(&self.focus_handle)
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let key = event.keystroke.key.to_lowercase();
+                match key.as_str() {
+                    "left" | "arrowleft" => {
+                        if let Some(next_offset) = this.prev_visual_offset(this.cursor_offset) {
+                            this.set_selection(next_offset..next_offset, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }
+                    "right" | "arrowright" => {
+                        if let Some(next_offset) = this.next_visual_offset(this.cursor_offset) {
+                            this.set_selection(next_offset..next_offset, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }
+                    "up" | "arrowup" => {
+                        if let Some(next_offset) = this.up_visual_offset(this.cursor_offset) {
+                            this.set_selection(next_offset..next_offset, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }
+                    "down" | "arrowdown" => {
+                        if let Some(next_offset) = this.down_visual_offset(this.cursor_offset) {
+                            this.set_selection(next_offset..next_offset, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }
+                    _ => {}
+                }
+            }))
             .when(self.is_hovering_link, |this| {
                 this.cursor(CursorStyle::PointingHand)
             })
@@ -590,17 +624,23 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                         this.selection_anchor = Some(byte_offset);
                         this.cursor_offset = byte_offset;
 
+                        this.suppressing_events = true;
                         this.input_state.update(cx, |input, input_cx| {
+                            // Collapse selection to a single point on click
                             input.set_selected_range(byte_offset..byte_offset, input_cx);
                             let new_pos = input.text().offset_to_position(byte_offset);
                             input.set_cursor_position(new_pos, window, input_cx);
                         });
+                        this.suppressing_events = false;
                         this.notify_cursor_moved(cx);
                     } else {
+                        // Clear selection if clicking on empty space
                         this.selection_anchor = None;
+                        this.suppressing_events = true;
                         this.input_state.update(cx, |input, input_cx| {
                             input.set_selected_range(0..0, input_cx);
                         });
+                        this.suppressing_events = false;
                         this.notify_cursor_moved(cx);
                         cx.notify();
                     }
@@ -611,7 +651,7 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                     cx.stop_propagation();
                 }),
             )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 let mut over_link = false;
                 for link in &this.last_hit_map.links {
                     if link.bounds.contains(&event.position) {
@@ -630,11 +670,16 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                         this.cursor_offset = byte_offset;
 
                         if let Some(anchor) = this.selection_anchor {
+                            this.suppressing_events = true;
                             this.input_state.update(cx, |input, input_cx| {
                                 let normalized_range =
                                     anchor.min(byte_offset)..anchor.max(byte_offset);
+                                // This sets both selection bounds AND updates the cursor without collapsing!
                                 input.set_selected_range(normalized_range, input_cx);
+                                let new_pos = input.text().offset_to_position(byte_offset);
+                                input.set_cursor_position(new_pos, window, input_cx);
                             });
+                            this.suppressing_events = false;
                         }
                         this.notify_cursor_moved(cx);
                         cx.notify();
@@ -651,7 +696,6 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                     .absolute()
                     // --- FIX 3: Ensure the input "exists" for the focus system ---
                     .size_1()
-                    // .opacity(0.0) // Invisible but technically in the tree
                     .child(
                         Input::new(&self.input_state)
                             .absolute() // Allow us to position it precisely
@@ -786,3 +830,148 @@ impl<W: TypstGpuiWorld> Focusable for PreviewPanel<W> {
 
 pub struct GpuiRegisteredFonts(pub std::collections::HashSet<u64>);
 impl gpui::Global for GpuiRegisteredFonts {}
+
+impl<W: TypstGpuiWorld> PreviewPanel<W> {
+    pub fn next_visual_offset(&self, current: usize) -> Option<usize> {
+        let mut glyphs = self.last_hit_map.glyphs.clone();
+        if glyphs.is_empty() {
+            return None;
+        }
+        glyphs.sort_by_key(|g| g.byte_offset);
+
+        for glyph in &glyphs {
+            if glyph.byte_offset > current {
+                return Some(glyph.byte_offset);
+            }
+        }
+
+        // Fallback: If at the last visual glyph, place caret at its boundary end
+        if let Some(last) = glyphs.last() {
+            if current < last.byte_offset + last.byte_len {
+                return Some(last.byte_offset + last.byte_len);
+            }
+        }
+        None
+    }
+
+    pub fn prev_visual_offset(&self, current: usize) -> Option<usize> {
+        let mut glyphs = self.last_hit_map.glyphs.clone();
+        if glyphs.is_empty() {
+            return None;
+        }
+        glyphs.sort_by_key(|g| g.byte_offset);
+
+        for glyph in glyphs.iter().rev() {
+            if glyph.byte_offset < current {
+                return Some(glyph.byte_offset);
+            }
+        }
+        None
+    }
+
+    pub fn cursor_point_pixels(&self) -> Option<Point<Pixels>> {
+        let glyphs = &self.last_hit_map.glyphs;
+        if glyphs.is_empty() {
+            return None;
+        }
+
+        for g in glyphs {
+            if self.cursor_offset >= g.byte_offset
+                && self.cursor_offset < g.byte_offset + g.byte_len
+            {
+                return Some(g.bounds.origin);
+            }
+        }
+
+        // Fallback: End of document
+        if let Some(last) = glyphs.last() {
+            if self.cursor_offset >= last.byte_offset + last.byte_len {
+                return Some(last.bounds.top_right());
+            }
+        }
+
+        None
+    }
+
+    pub fn down_visual_offset(&self, _current: usize) -> Option<usize> {
+        let glyphs = &self.last_hit_map.glyphs;
+        if glyphs.is_empty() {
+            return None;
+        }
+
+        let cursor_pt = self.cursor_point_pixels()?;
+        let mut closest_below_top: Option<Pixels> = None;
+
+        // Find the next unique visual line vertical coordinate below current caret Y
+        for g in glyphs {
+            let top = g.bounds.top();
+            if top > cursor_pt.y + Pixels::from(2.0) {
+                if let Some(best) = closest_below_top {
+                    if top < best {
+                        closest_below_top = Some(top);
+                    }
+                } else {
+                    closest_below_top = Some(top);
+                }
+            }
+        }
+
+        let row_top = closest_below_top?;
+        let mut row_glyphs = Vec::new();
+        for g in glyphs {
+            if (g.bounds.top() - row_top).abs() < Pixels::from(5.0) {
+                row_glyphs.push(g);
+            }
+        }
+
+        // Find the glyph horizontally closest to our X column
+        let closest_g = row_glyphs.into_iter().min_by_key(|g| {
+            let center_x = g.bounds.left() + g.bounds.size.width / 2.0;
+            let dist = (center_x - cursor_pt.x).abs();
+            (dist.as_f32() * 1000.0) as i32
+        })?;
+
+        Some(closest_g.byte_offset)
+    }
+
+    pub fn up_visual_offset(&self, _current: usize) -> Option<usize> {
+        let glyphs = &self.last_hit_map.glyphs;
+        if glyphs.is_empty() {
+            return None;
+        }
+
+        let cursor_pt = self.cursor_point_pixels()?;
+        let mut closest_above_bottom: Option<Pixels> = None;
+
+        // Find the next unique visual line vertical coordinate above current caret Y
+        for g in glyphs {
+            let bottom = g.bounds.bottom();
+            if bottom < cursor_pt.y - Pixels::from(2.0) {
+                if let Some(best) = closest_above_bottom {
+                    if bottom > best {
+                        closest_above_bottom = Some(bottom);
+                    }
+                } else {
+                    closest_above_bottom = Some(bottom);
+                }
+            }
+        }
+
+        let row_bottom = closest_above_bottom?;
+        let mut row_glyphs = Vec::new();
+        for g in glyphs {
+            if (g.bounds.bottom() - row_bottom).abs() < Pixels::from(5.0) {
+                row_glyphs.push(g);
+            }
+        }
+
+        // Find the glyph horizontally closest to our X column
+        let closest_g = row_glyphs.into_iter().min_by_key(|g| {
+            let center_x = g.bounds.left() + g.bounds.size.width / 2.0;
+            let dist = (center_x - cursor_pt.x).abs();
+            (dist.as_f32() * 1000.0) as i32
+        })?;
+
+        Some(closest_g.byte_offset)
+    }
+}
