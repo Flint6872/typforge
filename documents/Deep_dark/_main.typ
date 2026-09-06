@@ -1,5 +1,12 @@
 #set page(width: 5.5in, height: 8.5in)
 
+#set text(
+  font: "Times New Roman",
+  size: 11pt,
+  fill: rgb("#111111"),
+  lang: "en",
+)
+
 // --- Table of Contents ---
 #outline(indent: auto)
 #pagebreak()

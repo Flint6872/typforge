@@ -1,12 +1,20 @@
+#set text(
+  font: "Times New Roman",
+  size: 11pt,
+  fill: rgb("#111111"),
+  lang: "en",
+)
+
+
 = Chapter 1: The Sparks of Luminos-Vara
 \
 The deep underground did not know the sun, but it was far from dark.
 
-High above the cobblestone streets, massive arches of polished deepslate held up the ceiling of the world. Hanging from those arches were hundreds of iron lanterns, each burning with a brilliant, dancing blue flame. This was soul fire, and its gentle cerulean glow touched everything in the grand city of Luminos-Vara.
+High above the #text(size: 36pt)[*#text(font: "Amiri Quran")[cobblestone]*] streets,te #text(size: 9pt)[massive] arches of polished deepslate held up the ceiling of the world. Hanging from those arches were hundreds of iron lanterns, each burning with a brilliant, dancing blue flame. This was soul fire, and its gentle cerulean glow touched everything in the grand city of Luminos-Vara.
 
 Down on the walkways, the city was alive with the sound of footsteps and bright conversation. A tall citizen with a heavy brow and a dark coat—an artisan—waved politely to a neighbor in a simple brown robe who was carrying a stack of leather-bound books toward the grand library. Here, there were no divides. There were no factions. They were simply the people of the blue light, and their city was a paradise for the greatest minds in the Overworld.
 
-Through the crowd rushed Valen.
+#text()[Through the crowd rushed Valen. ]
 
 Valen was a young apprentice, barely old enough to carry his own heavy toolbox, but his eyes were always wide with curiosity. His fingers were permanently stained with dark ink and charcoal from drawing blueprints, and his leather apron jingled with loose redstone dust, iron springs, and bits of flint.
 

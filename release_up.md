@@ -102,3 +102,13 @@ Introduce feature flags for `intel` and `format` components to allow
 lightweight usage. Implement `detect_properties_at_offset` for real-time
 styling state tracking and refine completion structures for better
 editor integration.
+
+Implement keyboard navigation and improve selection logic
+
+- Add support for arrow key navigation in the preview panel using visual
+  glyph positioning.
+- Refine mouse interaction to ensure proper cursor and selection state
+  synchronization.
+- Clean up function name parsing in the AST detection logic.
+
+Improve text selection and glyph bounding box alignment

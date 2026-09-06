@@ -621,17 +621,52 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                     }
 
                     if let Some(byte_offset) = this.offset_for_point(event.position) {
-                        this.selection_anchor = Some(byte_offset);
-                        this.cursor_offset = byte_offset;
+                        let text = this.input_state.read(cx).text().to_string();
 
-                        this.suppressing_events = true;
-                        this.input_state.update(cx, |input, input_cx| {
-                            // Collapse selection to a single point on click
-                            input.set_selected_range(byte_offset..byte_offset, input_cx);
-                            let new_pos = input.text().offset_to_position(byte_offset);
-                            input.set_cursor_position(new_pos, window, input_cx);
-                        });
-                        this.suppressing_events = false;
+                        match event.click_count {
+                            1 => {
+                                // Single-click: standard cursor placement
+                                this.selection_anchor = Some(byte_offset);
+                                this.cursor_offset = byte_offset;
+
+                                this.suppressing_events = true;
+                                this.input_state.update(cx, |input, input_cx| {
+                                    input.set_selected_range(byte_offset..byte_offset, input_cx);
+                                    let new_pos = input.text().offset_to_position(byte_offset);
+                                    input.set_cursor_position(new_pos, window, input_cx);
+                                });
+                                this.suppressing_events = false;
+                            }
+                            2 => {
+                                // Double-click: select word
+                                let range = find_word_boundaries(&text, byte_offset);
+                                this.selection_anchor = Some(range.start);
+                                this.cursor_offset = range.end;
+
+                                this.suppressing_events = true;
+                                this.input_state.update(cx, |input, input_cx| {
+                                    input.set_selected_range(range.clone(), input_cx);
+                                    let new_pos = input.text().offset_to_position(range.end);
+                                    input.set_cursor_position(new_pos, window, input_cx);
+                                });
+                                this.suppressing_events = false;
+                            }
+                            3 => {
+                                // Triple-click: select paragraph
+                                let range = find_paragraph_boundaries(&text, byte_offset);
+                                this.selection_anchor = Some(range.start);
+                                this.cursor_offset = range.end;
+
+                                this.suppressing_events = true;
+                                this.input_state.update(cx, |input, input_cx| {
+                                    input.set_selected_range(range.clone(), input_cx);
+                                    let new_pos = input.text().offset_to_position(range.end);
+                                    input.set_cursor_position(new_pos, window, input_cx);
+                                });
+                                this.suppressing_events = false;
+                            }
+                            _ => {}
+                        }
                         this.notify_cursor_moved(cx);
                     } else {
                         // Clear selection if clicking on empty space
@@ -974,4 +1009,78 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
 
         Some(closest_g.byte_offset)
     }
+}
+
+// Helper to find the byte boundaries of the word under a given offset
+fn find_word_boundaries(text: &str, offset: usize) -> std::ops::Range<usize> {
+    if text.is_empty() {
+        return 0..0;
+    }
+    let clamped = offset.min(text.len());
+
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    if chars.is_empty() {
+        return 0..0;
+    }
+
+    // Find the index of the character at our offset
+    let mut char_idx = chars.len();
+    for (i, (idx, _)) in chars.iter().enumerate() {
+        if *idx >= clamped {
+            char_idx = i;
+            break;
+        }
+    }
+    if char_idx > 0 && char_idx == chars.len() {
+        char_idx = chars.len() - 1;
+    }
+
+    let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
+
+    // Scan backward
+    let mut start_idx = char_idx;
+    while start_idx > 0 && is_word_char(chars[start_idx - 1].1) {
+        start_idx -= 1;
+    }
+
+    // Scan forward
+    let mut end_idx = char_idx;
+    while end_idx < chars.len() && is_word_char(chars[end_idx].1) {
+        end_idx += 1;
+    }
+
+    let start_byte = chars.get(start_idx).map(|(idx, _)| *idx).unwrap_or(0);
+    let end_byte = chars
+        .get(end_idx)
+        .map(|(idx, _)| *idx)
+        .unwrap_or(text.len());
+
+    start_byte..end_byte
+}
+
+// Helper to find the byte boundaries of the paragraph under a given offset
+fn find_paragraph_boundaries(text: &str, offset: usize) -> std::ops::Range<usize> {
+    if text.is_empty() {
+        return 0..0;
+    }
+    let clamped = offset.min(text.len());
+
+    // A paragraph is bounded by double newlines or file boundaries
+    let mut start = 0;
+    let before = &text[..clamped];
+    if let Some(pos) = before.rfind("\n\n") {
+        start = pos + 2;
+    } else if let Some(pos) = before.rfind("\r\n\r\n") {
+        start = pos + 4;
+    }
+
+    let mut end = text.len();
+    let after = &text[clamped..];
+    if let Some(pos) = after.find("\n\n") {
+        end = clamped + pos;
+    } else if let Some(pos) = after.find("\r\n\r\n") {
+        end = clamped + pos;
+    }
+
+    start..end
 }

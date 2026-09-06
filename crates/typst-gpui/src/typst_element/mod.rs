@@ -314,8 +314,7 @@ impl Element for TypstElement {
                     let glyph_end = glyph_info.byte_offset + glyph_info.byte_len;
                     // Check for any overlap between selection and glyph
                     if glyph_end > sel_start && glyph_info.byte_offset < sel_end {
-                        let mut highlight_bounds = glyph_info.bounds;
-                        highlight_bounds.origin.y -= highlight_bounds.size.height * 0.8;
+                        let highlight_bounds = glyph_info.bounds; // Direct aligned bounds!
                         window.paint_quad(gpui::fill(highlight_bounds, highlight_color));
                     }
                 }
@@ -350,14 +349,11 @@ impl Element for TypstElement {
                 }
             }
 
-            if let Some(mut point_px) = cursor_visual_position_px {
+            if let Some(point_px) = cursor_visual_position_px {
                 let cursor_height = cursor_line_height_px.unwrap_or(gpui::px(16.0));
 
-                // Shift up to baseline
-                point_px.y -= cursor_height * 0.8;
-
                 let cursor_rect = gpui::Bounds {
-                    origin: point_px, // USE point_px DIRECTLY (No bounds.origin addition!)
+                    origin: point_px, // Already shifted to the top-left of the glyph
                     size: gpui::Size {
                         width: gpui::px(1.5),
                         height: cursor_height,
