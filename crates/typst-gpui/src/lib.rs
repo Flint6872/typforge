@@ -67,7 +67,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             InputState::new(window, input_cx)
                 .code_editor("typst") // CORRECTED: Call code_editor FIRST
                 .multi_line(true) // Then multi_line (CodeEditor implies multi_line too, but explicit is fine)
-                .soft_wrap(true)
+                .soft_wrap(false)
                 .line_number(false) // Now line_number can be called, as mode is CodeEditor
         });
 
@@ -280,10 +280,15 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                     .await;
 
                 // Perform heavy CPU-bound compile on background executor
+                let start_compile = std::time::Instant::now();
                 let compiled_result = {
                     let world_guard = world.lock();
                     typst::compile(&*world_guard)
                 };
+                println!(
+                    "BENCHMARK: typst::compile took {:?}",
+                    start_compile.elapsed()
+                );
 
                 // Jump back to the main thread to update the UI
                 let _ = handle.update(&mut async_cx, |panel, cx| {
@@ -295,7 +300,12 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                             panel.world.lock().set_document(doc.clone());
 
                             // Sync fonts
+                            let start_fonts = std::time::Instant::now();
                             panel.sync_fonts_to_gpui(&doc, cx);
+                            println!(
+                                "BENCHMARK: sync_fonts_to_gpui took {:?}",
+                                start_fonts.elapsed()
+                            );
 
                             panel.document = Some(doc);
                             panel.diagnostics.clear();
@@ -536,14 +546,42 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                     typst::model::Destination::Location(loc) => {
                         self.scroll_to_location(*loc, cx);
                     }
-                    typst::model::Destination::Position(_pos) => {
-                        //Position Logic
+                    typst::model::Destination::Position(pos) => {
+                        self.scroll_to_page_position(*pos, cx);
                     }
                 }
                 return true;
             }
         }
         false
+    }
+
+    fn scroll_to_page_position(
+        &mut self,
+        pos: typst::introspection::PagedPosition,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(doc) = &self.document {
+            let scale_factor = (96.0 / 72.0) * self.zoom;
+            let page_margin_px = gpui::px(20.0 * self.zoom);
+            let mut target_y = Pixels::ZERO;
+
+            let target_page_idx = pos.page.get().saturating_sub(1);
+            for (i, page) in doc.pages().iter().enumerate() {
+                if i == target_page_idx {
+                    target_y += Pixels::from(pos.point.y.to_pt() as f32 * scale_factor);
+                    break;
+                }
+                let page_h = Pixels::from(page.frame.height().to_pt() as f32 * scale_factor);
+                target_y += page_h + page_margin_px;
+            }
+
+            let padding = Pixels::from(20.0 * self.zoom);
+            let scroll_offset = -(target_y - padding).max(Pixels::ZERO);
+            self.scroll_handle
+                .set_offset(Point::new(Pixels::ZERO, scroll_offset));
+            cx.notify();
+        }
     }
 
     fn scroll_to_location(&mut self, loc: typst::introspection::Location, cx: &mut Context<Self>) {
