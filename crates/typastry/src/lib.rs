@@ -1,4 +1,5 @@
 pub mod edit;
+pub mod wysiwyg;
 
 #[cfg(feature = "format")]
 pub mod format;

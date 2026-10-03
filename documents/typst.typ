@@ -43,12 +43,12 @@ $
 
 = Hello, Typst!
 
-This is your first *GPUI-Typst* document.
-It combines the power of #link("https://typst.app")[Typst] for typesetting
-with the low-latency UI of #link("https://github.com/zed-industries/gpui")[GPUI].
+#text()[This is your first *GPUI-Typst* document.
+  It combines the power of #link("https://typst.app")[Typst] for typesetting
+  with the low-latency UI of #link("https://github.com/zed-industries/gpui")[GPUI].
 
-This is a gradient on text, but with a #rainbow[twist]!
-
+  This is a gradient on text, but with a #rainbow[twist]!
+]
 #grid(
   columns: 2,
   rows: 2,

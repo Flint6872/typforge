@@ -1,5 +1,6 @@
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
+    StyleSized, StyledExt,
     input::{Input, InputEvent, InputState, RopeExt},
     scroll::ScrollableElement,
 };
@@ -56,6 +57,11 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     is_hovering_link: bool,
     _blink_task: Option<Task<()>>,
     compile_task: Option<Task<()>>,
+
+    // --- NEW WYSIWYG STATE FIELDS ---
+    pub pending_transaction: Option<typastry::wysiwyg::MutationTransaction>,
+    pub visual_edit_error: Option<String>,
+    pub inspected_element: Option<typastry::wysiwyg::ElementProperties>,
 }
 
 impl<W: TypstGpuiWorld> PreviewPanel<W> {
@@ -190,6 +196,10 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             is_hovering_link: false,
             _blink_task: Some(blink_task), // Store the task
             compile_task: None,
+
+            pending_transaction: None,
+            visual_edit_error: None,
+            inspected_element: None,
         }
     }
 
@@ -310,11 +320,40 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                             panel.document = Some(doc);
                             panel.diagnostics.clear();
                             cx.emit(PreviewPanelEvent::DiagnosticsChanged(Vec::new()));
+
+                            // --- TRANSACTION SUCCEEDED: COMMIT ---
+                            panel.pending_transaction = None;
                         }
                         Err(errors) => {
                             let diags: Vec<_> = errors.into_iter().collect();
                             panel.diagnostics = diags.clone();
                             cx.emit(PreviewPanelEvent::DiagnosticsChanged(diags));
+
+                            // --- TRANSACTION FAILED: GRACEFUL ROLLBACK ---
+                            if let Some(tx) = panel.pending_transaction.take() {
+                                let error_msg = panel
+                                    .diagnostics
+                                    .first()
+                                    .map(|d| d.message.to_string())
+                                    .unwrap_or_else(|| {
+                                        "Source edit resulted in compile error.".to_string()
+                                    });
+
+                                panel.visual_edit_error =
+                                    Some(format!("Edit Reverted: {}", error_msg));
+
+                                // Restore original states in shared World & selection
+                                let original_text = tx.original_text;
+                                panel.world.lock().set_source(original_text.clone());
+                                panel.cursor_offset = tx.original_cursor;
+                                panel.selection_anchor = tx.original_selection.map(|s| s.start);
+
+                                // Synchronize restored source back across editor and preview views
+                                cx.emit(PreviewPanelEvent::SourceChanged(original_text));
+
+                                // Recompile restored stable state
+                                panel.compile(cx);
+                            }
                         }
                     }
                     cx.notify();
@@ -617,17 +656,28 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.to_lowercase();
                 match key.as_str() {
+                    // ==========================================
+                    // PILLAR 2: SYNTAX-AWARE CURSOR NAVIGATION
+                    // ==========================================
                     "left" | "arrowleft" => {
-                        if let Some(next_offset) = this.prev_visual_offset(this.cursor_offset) {
-                            this.set_selection(next_offset..next_offset, window, cx);
-                            cx.stop_propagation();
-                        }
+                        let text = this.input_state.read(cx).text().to_string();
+                        let next_offset = typastry::wysiwyg::CursorNavigator::move_cursor(
+                            &text,
+                            this.cursor_offset,
+                            typastry::wysiwyg::CursorDirection::Left,
+                        );
+                        this.set_selection(next_offset..next_offset, window, cx);
+                        cx.stop_propagation();
                     }
                     "right" | "arrowright" => {
-                        if let Some(next_offset) = this.next_visual_offset(this.cursor_offset) {
-                            this.set_selection(next_offset..next_offset, window, cx);
-                            cx.stop_propagation();
-                        }
+                        let text = this.input_state.read(cx).text().to_string();
+                        let next_offset = typastry::wysiwyg::CursorNavigator::move_cursor(
+                            &text,
+                            this.cursor_offset,
+                            typastry::wysiwyg::CursorDirection::Right,
+                        );
+                        this.set_selection(next_offset..next_offset, window, cx);
+                        cx.stop_propagation();
                     }
                     "up" | "arrowup" => {
                         if let Some(next_offset) = this.up_visual_offset(this.cursor_offset) {
@@ -721,6 +771,26 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                     let input_focus_handle = this.input_state.read(cx).focus_handle(cx);
                     window.focus(&input_focus_handle, cx);
                     cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
+            // ==========================================
+            // PILLAR 3: RIGHT CLICK INTROSPECTION TRIGGER
+            // ==========================================
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                    if let Some(byte_offset) = this.offset_for_point(event.position) {
+                        let text = this.input_state.read(cx).text().to_string();
+                        let source = typst_syntax::Source::detached(&text);
+                        let root = typst_syntax::LinkedNode::new(source.root());
+
+                        if let Some(leaf) = root.leaf_at(byte_offset, typst_syntax::Side::Before) {
+                            if let Some(props) = typastry::wysiwyg::inspect_element(leaf) {
+                                this.show_wysiwyg_context_menu(props, event.position, cx);
+                            }
+                        }
+                    }
                     cx.stop_propagation();
                 }),
             )
@@ -873,6 +943,180 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                                 .text_color(rgb(0xff4444))
                                 .child(format!("Error: {}", diag.message))
                         })),
+                )
+            } else {
+                None
+            })
+            // ==========================================
+            // PILLAR 1: VISUAL EDITING ROLLBACK NOTIFIER
+            // ==========================================
+            .children(if let Some(ref err) = self.visual_edit_error {
+                Some(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .w_full()
+                        .bg(rgb(0x7a2222))
+                        .text_color(rgb(0xffffff))
+                        .p_2()
+                        .flex()
+                        .justify_between()
+                        .items_center()
+                        .child(format!("⚠️ {}", err))
+                        .child(
+                            div()
+                                .id("close-visual-edit-error")
+                                .cursor(CursorStyle::PointingHand)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.visual_edit_error = None;
+                                    cx.notify();
+                                }))
+                                .child("✕"),
+                        ),
+                )
+            } else {
+                None
+            })
+            // ==========================================
+            // PILLAR 3: INTROSPECTED CONTEXT MENU OVERLAY
+            // ==========================================
+            .children(if let Some(ref props) = self.inspected_element {
+                let element_type_title = props.element_type.to_uppercase();
+                Some(
+                    div()
+                        .id("wysiwyg-context-menu")
+                        .absolute()
+                        .top(px(20.0))
+                        .right(px(20.0))
+                        .w(px(280.0))
+                        .bg(rgb(0x2d2d2d))
+                        .border_1()
+                        .border_color(rgb(0x444444))
+                        .shadow_md()
+                        .rounded_md()
+                        .p_3()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex()
+                                .justify_between()
+                                .items_center()
+                                .border_b_1()
+                                .border_color(rgb(0x444444))
+                                .pb_1()
+                                .child(
+                                    div()
+                                        .text_color(rgb(0xffffff))
+                                        .font_semibold()
+                                        .child(format!("{} Component", element_type_title)),
+                                )
+                                .child(
+                                    div()
+                                        .id("close-context-menu")
+                                        .cursor(CursorStyle::PointingHand)
+                                        .text_color(rgb(0x888888))
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.inspected_element = None;
+                                            cx.notify();
+                                        }))
+                                        .child("✕"),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_color(rgb(0xaaaaaa))
+                                .text_size(px(11.0))
+                                .child("Active Properties:"),
+                        )
+                        .children(
+                            props
+                                .active_args
+                                .iter()
+                                .enumerate()
+                                .map(|(idx, (name, val))| {
+                                    let name_clone = name.clone();
+                                    let val_clone = val.clone();
+                                    div()
+                                        .id(ElementId::from(format!("active-arg-{}", idx)))
+                                        .flex()
+                                        .justify_between()
+                                        .items_center()
+                                        .text_color(rgb(0xdddddd))
+                                        .text_size(px(12.0))
+                                        .child(format!("{}:", name))
+                                        .child(
+                                            div()
+                                                .id(ElementId::from(format!("toggle-arg-{}", idx)))
+                                                .bg(rgb(0x3d3d3d))
+                                                .rounded_sm()
+                                                .px_2()
+                                                .py_0p5()
+                                                .cursor(CursorStyle::PointingHand)
+                                                .text_color(rgb(0x4a90e2))
+                                                .on_click(cx.listener(
+                                                    move |this, _, window, cx| {
+                                                        let next_val = match val_clone.as_str() {
+                                                            "red" => "blue",
+                                                            "blue" => "green",
+                                                            "green" => "red",
+                                                            "10pt" => "12pt",
+                                                            "12pt" => "14pt",
+                                                            "14pt" => "10pt",
+                                                            _ => "red",
+                                                        };
+                                                        this.apply_visual_edit(
+                                                            &name_clone,
+                                                            next_val,
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    },
+                                                ))
+                                                .child(val.clone()),
+                                        )
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_color(rgb(0xaaaaaa))
+                                .text_size(px(11.0))
+                                .child("Add Properties (Schema):"),
+                        )
+                        .children(props.available_properties.iter().enumerate().map(
+                            |(idx, prop)| {
+                                let prop_clone = prop.clone();
+                                div()
+                                    .id(ElementId::from(format!("add-prop-{}", idx)))
+                                    .cursor(CursorStyle::PointingHand)
+                                    .bg(rgb(0x3a3a3a))
+                                    .hover(|style| style.bg(rgb(0x4a4a4a)))
+                                    .rounded_sm()
+                                    .px_2()
+                                    .py_1()
+                                    .text_color(rgb(0xdddddd))
+                                    .text_size(px(12.0))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        let default_val = match prop_clone.as_str() {
+                                            "fill" => "red",
+                                            "stroke" => "1pt",
+                                            "width" => "50pt",
+                                            "height" => "50pt",
+                                            "radius" => "4pt",
+                                            "size" => "11pt",
+                                            _ => "10pt",
+                                        };
+                                        this.apply_visual_edit(
+                                            &prop_clone,
+                                            default_val,
+                                            window,
+                                            cx,
+                                        );
+                                    }))
+                                    .child(format!("+ {}", prop))
+                            },
+                        )),
                 )
             } else {
                 None
@@ -1046,6 +1290,63 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         })?;
 
         Some(closest_g.byte_offset)
+    }
+
+    pub fn apply_visual_edit(
+        &mut self,
+        property_name: &str,
+        property_value: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = self.input_state.read(cx).text().to_string();
+
+        // Step 1: Save the original state for defensive rollbacks
+        let tx = typastry::wysiwyg::MutationTransaction {
+            original_text: text.clone(),
+            original_cursor: self.cursor_offset,
+            original_selection: self.selection_range(),
+        };
+        self.pending_transaction = Some(tx);
+        self.visual_edit_error = None;
+
+        // Step 2: Attempt AST Mutation
+        if let Some((mutated_text, new_range)) = typastry::wysiwyg::apply_named_argument_edit(
+            &text,
+            self.cursor_offset,
+            property_name,
+            property_value,
+        ) {
+            // Apply the visual edit text replacement
+            self.set_source(mutated_text, window, cx);
+
+            // Highlight the edited AST property visual range
+            self.set_selection(new_range, window, cx);
+
+            // Update the context menu preview state if it's currently open
+            if let Some(ref mut props) = self.inspected_element {
+                props
+                    .active_args
+                    .insert(property_name.to_string(), property_value.to_string());
+                props.available_properties.retain(|p| p != property_name);
+            }
+        } else {
+            self.visual_edit_error =
+                Some("Could not locate a customizable parent block in AST.".to_string());
+            self.pending_transaction = None;
+            cx.notify();
+        }
+    }
+
+    /// Triggers the word-processor context menu on right-click over a component.
+    pub fn show_wysiwyg_context_menu(
+        &mut self,
+        props: typastry::wysiwyg::ElementProperties,
+        _point: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.inspected_element = Some(props);
+        cx.notify();
     }
 }
 

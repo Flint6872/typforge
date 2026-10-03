@@ -3,7 +3,11 @@
   "font_size": 16.0,
   "last_folder_open": "./documents",
   "recent_files": [
-    "./documents\\colors.typ"
+    "./documents\\Deep_dark\\chapter-1.typ",
+    "./documents\\typst.typ",
+    "./documents\\page_layout.typ",
+    "./documents\\colors.typ",
+    "./documents\\animated_gif.typ"
   ],
   "recent_files_limit": 5
 }

@@ -8088,10 +8088,12 @@ dependencies = [
  "parking_lot",
  "png 0.18.1",
  "ttf-parser",
+ "typastry",
  "typsdocx",
  "typst",
  "typst-layout",
  "typst-pdf",
+ "typst-syntax",
 ]
 
 [[package]]
