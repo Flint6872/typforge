@@ -260,7 +260,7 @@ impl CursorNavigator {
 }
 
 fn step_char_forward(s: &str, offset: usize) -> usize {
-    let mut indices = s.char_indices().map(|(idx, _)| idx);
+    let indices = s.char_indices().map(|(idx, _)| idx);
     for idx in indices {
         if idx > offset {
             return idx;

@@ -131,6 +131,28 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         });
     }
 
+    pub fn undo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(active_path) = &self.active_file_path {
+            if let Some(file) = self.open_files.iter_mut().find(|f| f.path == *active_path) {
+                file.editor_state.update(cx, |state, cx| {
+                    state.focus(window, cx);
+                });
+                window.dispatch_action(Box::new(gpui_component::input::Undo), cx);
+            }
+        }
+    }
+
+    pub fn redo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(active_path) = &self.active_file_path {
+            if let Some(file) = self.open_files.iter_mut().find(|f| f.path == *active_path) {
+                file.editor_state.update(cx, |state, cx| {
+                    state.focus(window, cx);
+                });
+                window.dispatch_action(Box::new(gpui_component::input::Redo), cx);
+            }
+        }
+    }
+
     fn subscribe_to_editor_changes(
         _this: &mut Self,
         path: PathBuf,

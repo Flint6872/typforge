@@ -291,6 +291,30 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                             });
                         }
                     }
+                    PreviewPanelEvent::UndoRequested => {
+                        let editor_panel_handle = this_note_view.editor_panel.clone();
+                        let window_handle = this_note_view.window_handle.clone();
+
+                        let _ = window_handle
+                            .update(cx_for_note_view, |_, window, app_cx| {
+                                editor_panel_handle.update(app_cx, |editor, editor_cx| {
+                                    editor.undo(window, editor_cx);
+                                });
+                            })
+                            .log_err();
+                    }
+                    PreviewPanelEvent::RedoRequested => {
+                        let editor_panel_handle = this_note_view.editor_panel.clone();
+                        let window_handle = this_note_view.window_handle.clone();
+
+                        let _ = window_handle
+                            .update(cx_for_note_view, |_, window, app_cx| {
+                                editor_panel_handle.update(app_cx, |editor, editor_cx| {
+                                    editor.redo(window, editor_cx);
+                                });
+                            })
+                            .log_err();
+                    }
                 }
             },
         )

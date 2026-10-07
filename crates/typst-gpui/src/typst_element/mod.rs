@@ -16,10 +16,7 @@ use parking_lot::Mutex;
 use std::{
     collections::HashMap,
     fmt::Debug,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, atomic::AtomicBool},
     time::Instant,
 };
 
@@ -343,25 +340,36 @@ impl Element for TypstElement {
             let mut cursor_line_height_px: Option<Pixels> = None;
 
             for glyph_info in &generated_hit_map.glyphs {
-                // Find glyph containing the cursor
-                if cursor_offset >= glyph_info.byte_offset
-                    && cursor_offset < glyph_info.byte_offset + glyph_info.byte_len
-                {
+                let glyph_start = glyph_info.byte_offset;
+                let glyph_end = glyph_info.byte_offset + glyph_info.byte_len;
+
+                // 1. Caret is inside or at the start of this glyph
+                if cursor_offset >= glyph_start && cursor_offset < glyph_end {
                     cursor_visual_position_px = Some(glyph_info.bounds.origin);
                     cursor_line_height_px = Some(glyph_info.bounds.size.height);
                     break;
                 }
+                // 2. Caret is at the trailing boundary of this glyph (e.g. right before markup ']')
+                else if cursor_offset == glyph_end {
+                    cursor_visual_position_px = Some(gpui::point(
+                        glyph_info.bounds.top_right().x,
+                        glyph_info.bounds.origin.y,
+                    ));
+                    cursor_line_height_px = Some(glyph_info.bounds.size.height);
+                    // Keep scanning in case the next glyph starts at the same offset
+                }
             }
 
-            // End of document/line handling
+            // Fallback for end of document or trailing whitespace
             if cursor_visual_position_px.is_none() && !generated_hit_map.glyphs.is_empty() {
-                let last_glyph = generated_hit_map.glyphs.last().unwrap();
-                if cursor_offset >= last_glyph.byte_offset + last_glyph.byte_len {
-                    cursor_visual_position_px = Some(gpui::point(
-                        last_glyph.bounds.top_right().x,
-                        last_glyph.bounds.origin.y,
-                    ));
-                    cursor_line_height_px = Some(last_glyph.bounds.size.height);
+                if let Some(last_glyph) = generated_hit_map.glyphs.last() {
+                    if cursor_offset >= last_glyph.byte_offset + last_glyph.byte_len {
+                        cursor_visual_position_px = Some(gpui::point(
+                            last_glyph.bounds.top_right().x,
+                            last_glyph.bounds.origin.y,
+                        ));
+                        cursor_line_height_px = Some(last_glyph.bounds.size.height);
+                    }
                 }
             }
 
@@ -369,7 +377,7 @@ impl Element for TypstElement {
                 let cursor_height = cursor_line_height_px.unwrap_or(gpui::px(16.0));
 
                 let cursor_rect = gpui::Bounds {
-                    origin: point_px, // Already shifted to the top-left of the glyph
+                    origin: point_px,
                     size: gpui::Size {
                         width: gpui::px(1.5),
                         height: cursor_height,
