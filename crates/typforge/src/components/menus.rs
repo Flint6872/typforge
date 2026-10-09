@@ -129,7 +129,7 @@ pub fn setup_menus(cx: &mut App) {
                 MenuItem::action("Save As...", actions::FileSaveAs).disabled(!has_file),
                 MenuItem::action("Close File", actions::FileClose).disabled(!has_file),
                 MenuItem::separator(),
-                MenuItem::action("Package Manager", actions::PackageManager).disabled(true),
+                MenuItem::action("Package Manager", actions::PackageManager),
                 MenuItem::submenu(Menu {
                     name: "Export To".into(),
                     items: vec![

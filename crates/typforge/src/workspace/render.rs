@@ -125,6 +125,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld + 'static> Render for Ty
                         .update(cx, |ribbon, cx| ribbon.handle_toggle_underline(action, cx));
                 }),
             )
+            .on_action(cx.listener(Self::handle_package_manager))
             .when_some(self.menu_bar.clone(), |this, menu_bar| {
                 this.child(div().border_b_1().child(menu_bar))
             })

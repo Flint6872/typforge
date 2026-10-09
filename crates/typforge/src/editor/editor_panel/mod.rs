@@ -3,7 +3,7 @@ mod handlers;
 mod render;
 
 use crate::editor::{CodeEditor, FileContentUpdated, OpenedFile};
-
+use crate::package_manager::{PackageManagerStore, PackageManagerView};
 use gpui::*;
 use gpui_component::{RopeExt, dock::Panel as DockPanel, input::InputState};
 use parking_lot::Mutex;
@@ -11,7 +11,6 @@ use std::rc::Rc;
 use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
 use typastry::format::format_document;
-
 use typastry::intel::{Tooltip, get_hover_info};
 
 impl<W: typst::World + typastry::IdeWorld + 'static> EventEmitter<FileContentUpdated>
@@ -42,6 +41,7 @@ pub struct EditorPanel<W: typst::World + typastry::IdeWorld + 'static> {
     pub current_hover_content: Option<Tooltip>,
     pub current_hover_position: Option<Point<Pixels>>,
     pub last_hover_request_time: Option<Instant>,
+    pub package_manager_view: Option<Entity<PackageManagerView>>,
 }
 
 impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Clone
@@ -57,6 +57,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
             current_hover_content: self.current_hover_content.clone(),
             current_hover_position: self.current_hover_position.clone(),
             last_hover_request_time: self.last_hover_request_time,
+            package_manager_view: self.package_manager_view.clone(),
         }
     }
 }
@@ -72,6 +73,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
             current_hover_content: None,
             current_hover_position: None,
             last_hover_request_time: None,
+            package_manager_view: None,
         }
     }
 
@@ -207,6 +209,47 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
             this_view.update_ribbon_selection(&content, cursor, cx);
         })
         .detach();
+    }
+
+    pub fn open_package_manager(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pkg_path = PathBuf::from("typforge://package-manager");
+
+        // If already open in open_files, just switch to it
+        if self.open_files.iter().any(|f| f.path == pkg_path) {
+            self.active_file_path = Some(pkg_path);
+            cx.notify();
+            return;
+        }
+
+        // Lazy-init the package manager view on first open
+        if self.package_manager_view.is_none() {
+            let store = Arc::new(std::sync::Mutex::new(PackageManagerStore::new()));
+            let view = cx.new(|cx| PackageManagerView::new(store, window, cx));
+            self.package_manager_view = Some(view);
+        }
+
+        let editor_state = cx.new(|cx| {
+            InputState::new(window, cx)
+                .code_editor("text")
+                .default_value("")
+        });
+        let code_editor_entity =
+            cx.new(|_cx| CodeEditor::new(editor_state.clone(), "text".to_string(), Vec::new()));
+
+        let tab_file = OpenedFile {
+            path: pkg_path.clone(),
+            editor_state,
+            language: "pkg".to_string(),
+            has_unsaved_changes: false,
+            lsp_version: 0,
+            diagnostics: Vec::new(),
+            code_editor_entity,
+            is_untitled: false,
+        };
+
+        self.open_files.push(tab_file);
+        self.active_file_path = Some(pkg_path);
+        cx.notify();
     }
 }
 

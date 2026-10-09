@@ -92,6 +92,10 @@ impl OpenedFile {
 
     /// Returns a display name for the tab (e.g., "main.rs").
     pub fn tab_name(&self) -> String {
+        if self.path == Path::new("typforge://package-manager") {
+            return "Package Manager".to_string();
+        }
+
         self.path
             .file_name()
             .and_then(|name| name.to_str())
