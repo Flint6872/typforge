@@ -1,10 +1,11 @@
+#import "@preview/cetz:0.5.2"
 
-#title[Title]  
+#title[Title]
 = \<h1>
-== \<h2> 
+== \<h2>
 === \<h3> Hello from an included text file
 
-\ regular text 
+\ regular text
 
 $ 5+5 / 6 $
 

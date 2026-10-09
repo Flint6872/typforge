@@ -57,7 +57,7 @@ impl PackageManagerView {
             downloading_packages: HashSet::new(),
             expanded_packages: HashSet::new(),
             last_query: String::new(),
-            last_filter: TabFilter::Installed,
+            last_filter: TabFilter::Registry,
             filtered_installed,
             filtered_registry,
             list_state,
@@ -90,17 +90,17 @@ impl PackageManagerView {
         self.last_query = query.clone();
         self.last_filter = self.current_filter;
 
+        self.filtered_installed = local_packages
+            .into_iter()
+            .filter(|pkg| {
+                query.is_empty()
+                    || pkg.name.to_lowercase().starts_with(&query)
+                    || pkg.namespace.to_lowercase().starts_with(&query)
+            })
+            .collect();
+
         match self.current_filter {
             TabFilter::Installed => {
-                self.filtered_installed = local_packages
-                    .into_iter()
-                    .filter(|pkg| {
-                        query.is_empty()
-                            || pkg.name.to_lowercase().starts_with(&query)
-                            || pkg.namespace.to_lowercase().starts_with(&query)
-                    })
-                    .collect();
-
                 if query_changed || filter_changed {
                     self.list_state.reset(self.filtered_installed.len());
                 } else {
@@ -726,6 +726,7 @@ fn render_registry_card(
                             .child(div().text_xs().child(comp.clone()))
                     }))
                     .children(item.repository.as_ref().map(|repo| {
+                        let repo_url = repo.clone();
                         h_flex()
                             .gap_2()
                             .child(
@@ -735,7 +736,17 @@ fn render_registry_card(
                                     .text_color(cx.theme().muted_foreground)
                                     .child("Repository:"),
                             )
-                            .child(div().text_xs().child(repo.clone()))
+                            .child(
+                                div()
+                                    .id(("repo-link", ix)) // FIX: Add ID to enable on_click
+                                    .text_xs()
+                                    .text_color(cx.theme().foreground)
+                                    .cursor_pointer()
+                                    .child(repo.clone())
+                                    .on_click(move |_, _window, cx| {
+                                        cx.open_url(&repo_url);
+                                    }),
+                            )
                     }))
                     .children(item.categories.as_ref().map(|cats| {
                         h_flex()
