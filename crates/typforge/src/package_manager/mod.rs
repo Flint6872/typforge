@@ -293,3 +293,190 @@ impl PackageManagerStore {
             .unwrap_or(false)
     }
 }
+
+// ==========================================
+// Phase 1: Package Import Resolution Engine
+// ==========================================
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageSpec {
+    pub namespace: String,
+    pub name: String,
+    pub version: String,
+}
+
+impl std::str::FromStr for PackageSpec {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Expected format: "@namespace/name:version"
+        if !s.starts_with('@') {
+            return Err("Package specifier must start with '@'".to_string());
+        }
+        let stripped = &s[1..];
+
+        let slash_idx = stripped.find('/').ok_or_else(|| {
+            "Package specifier must contain namespace slash (e.g. @preview/pkg:1.0.0)".to_string()
+        })?;
+        let namespace = stripped[..slash_idx].to_string();
+        let remaining = &stripped[slash_idx + 1..];
+
+        let colon_idx = remaining.find(':').ok_or_else(|| {
+            "Package specifier must contain a version colon (e.g. @preview/pkg:1.0.0)".to_string()
+        })?;
+        let name = remaining[..colon_idx].to_string();
+        let version = remaining[colon_idx + 1..].to_string();
+
+        if namespace.is_empty() || name.is_empty() || version.is_empty() {
+            return Err("Namespace, name, and version must all be non-empty".to_string());
+        }
+
+        Ok(PackageSpec {
+            namespace,
+            name,
+            version,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackageResolutionError {
+    InvalidSpec(String),
+    MissingEnvironment(String),
+    NotFound {
+        spec: PackageSpec,
+        data_path: PathBuf,
+        cache_path: PathBuf,
+    },
+}
+
+impl std::fmt::Display for PackageResolutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidSpec(msg) => write!(f, "Invalid package specification: {msg}"),
+            Self::MissingEnvironment(msg) => write!(f, "Missing system environment: {msg}"),
+            Self::NotFound {
+                spec,
+                data_path,
+                cache_path,
+            } => {
+                write!(
+                    f,
+                    "Package @{}/{}:{} not found.\nSearched local data path: {:?}\nSearched cache path: {:?}",
+                    spec.namespace, spec.name, spec.version, data_path, cache_path
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for PackageResolutionError {}
+
+/// Cross-platform user home folder resolution helper
+fn get_home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
+/// Resolves {data-dir} based on specs and environment variables
+fn get_data_dir() -> Option<PathBuf> {
+    if let Some(val) = std::env::var_os("XDG_DATA_HOME") {
+        return Some(PathBuf::from(val));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        get_home_dir().map(|h| h.join("Library/Application Support"))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        get_home_dir().map(|h| h.join(".local/share"))
+    }
+}
+
+/// Resolves {cache-dir} based on specs and environment variables
+fn get_cache_dir() -> Option<PathBuf> {
+    if let Some(val) = std::env::var_os("XDG_CACHE_HOME") {
+        return Some(PathBuf::from(val));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        get_home_dir().map(|h| h.join("Library/Caches"))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        get_home_dir().map(|h| h.join(".cache"))
+    }
+}
+
+/// Core function to resolve a parsed package directly to a local directory.
+/// Strictly enforces directory precedence rules (local data path checks before cache path).
+pub fn resolve_package(
+    namespace: &str,
+    name: &str,
+    version: &str,
+) -> Result<PathBuf, PackageResolutionError> {
+    let data_dir = get_data_dir().ok_or_else(|| {
+        PackageResolutionError::MissingEnvironment(
+            "Could not determine user data directory".to_string(),
+        )
+    })?;
+
+    let cache_dir = get_cache_dir().ok_or_else(|| {
+        PackageResolutionError::MissingEnvironment(
+            "Could not determine user cache directory".to_string(),
+        )
+    })?;
+
+    // 1. Compute Local Data Path (e.g. {data-dir}/typst/packages/{namespace}/{name}/{version})
+    let local_path = data_dir
+        .join("typst")
+        .join("packages")
+        .join(namespace)
+        .join(name)
+        .join(version);
+
+    if local_path.exists() {
+        return Ok(local_path);
+    }
+
+    // 2. Compute Cache Path (e.g. {cache-dir}/typst/packages/{namespace}/{name}/{version})
+    let cache_path = cache_dir
+        .join("typst")
+        .join("packages")
+        .join(namespace)
+        .join(name)
+        .join(version);
+
+    if cache_path.exists() {
+        return Ok(cache_path);
+    }
+
+    // 3. Neither found: return the formatted error listing all paths searched
+    Err(PackageResolutionError::NotFound {
+        spec: PackageSpec {
+            namespace: namespace.to_string(),
+            name: name.to_string(),
+            version: version.to_string(),
+        },
+        data_path: local_path,
+        cache_path,
+    })
+}
+
+/// Helper function to resolve a package string path directly to a local folder directory.
+pub fn resolve_package_import(import_path: &str) -> Result<PathBuf, PackageResolutionError> {
+    let spec: PackageSpec = import_path
+        .parse()
+        .map_err(PackageResolutionError::InvalidSpec)?;
+
+    resolve_package(&spec.namespace, &spec.name, &spec.version)
+}

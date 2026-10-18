@@ -32,11 +32,26 @@ impl<W: typst::World + typastry::IdeWorld + 'static> TypstCompletionProvider<W> 
             let enhanced_completions = get_enhanced_completions(&*world, None, &source, cursor);
 
             let rope_str = rope.to_string();
-            let (trigger_offset, is_hash_command) = get_trigger_info(&rope_str, cursor);
-            let start_pos = offset_to_lsp_position(rope, trigger_offset);
-            let end_pos = offset_to_lsp_position(rope, cursor);
+            let package_query = typastry::intel::detect_package_import_context(&rope_str, cursor);
 
-            // 2. Map clean, portable suggestions to editor-specific LSP types
+            // 2. Compute exact text replacement range
+            let (start_pos, end_pos, is_hash_command) = if let Some(ref query) = package_query {
+                let start_offset = cursor.saturating_sub(query.len());
+                (
+                    offset_to_lsp_position(rope, start_offset),
+                    offset_to_lsp_position(rope, cursor),
+                    false,
+                )
+            } else {
+                let (trigger_offset, is_hash) = get_trigger_info(&rope_str, cursor);
+                (
+                    offset_to_lsp_position(rope, trigger_offset),
+                    offset_to_lsp_position(rope, cursor),
+                    is_hash,
+                )
+            };
+
+            // 3. Map clean suggestions to LSP completion items
             let list: Vec<CompletionItem> = enhanced_completions
                 .into_iter()
                 .map(|c| {
@@ -47,10 +62,18 @@ impl<W: typst::World + typastry::IdeWorld + 'static> TypstCompletionProvider<W> 
                         CompletionKind::Constant => CompletionItemKind::CONSTANT,
                         CompletionKind::Symbol => CompletionItemKind::VALUE,
                         CompletionKind::Unit => CompletionItemKind::UNIT,
+                        CompletionKind::Package => CompletionItemKind::MODULE,
                         CompletionKind::Text => CompletionItemKind::TEXT,
                     };
 
-                    let replacement_text = if is_hash_command && c.kind != CompletionKind::Unit {
+                    let replacement_text = if package_query.is_some() {
+                        let has_closing_quote = rope_str.as_bytes().get(cursor) == Some(&b'"');
+                        if has_closing_quote {
+                            c.apply.clone()
+                        } else {
+                            format!("{}\"", c.apply)
+                        }
+                    } else if is_hash_command && c.kind != CompletionKind::Unit {
                         format!("#{}", c.apply)
                     } else {
                         c.apply

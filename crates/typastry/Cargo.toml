@@ -17,5 +17,6 @@ serde.workspace = true
 
 # Optional dependencies mapped to features
 typst-ide = { version = "0.15", optional = true }
+typst-kit = { version="0.15", features=["system-packages"]}
 typst-layout = { version = "0.15", optional = true }
 typstyle-core = { version = "0.15", optional = true }

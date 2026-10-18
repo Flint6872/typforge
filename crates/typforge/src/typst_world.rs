@@ -114,12 +114,39 @@ impl GpuiWorld {
 
     /// Helper to resolve a Typst FileId to a physical path on disk.
     fn resolve(&self, id: FileId) -> FileResult<PathBuf> {
-        if let VirtualRoot::Package(_) = id.root() {
-            return Err(FileError::NotFound(PathBuf::from(
-                id.vpath().get_with_slash(),
-            )));
+        match id.root() {
+            VirtualRoot::Project => Ok(self.root.join(id.vpath().get_without_slash())),
+            VirtualRoot::Package(spec) => {
+                let rel = format!(
+                    "{}/{}/{}/{}",
+                    spec.namespace.as_str(),
+                    spec.name.as_str(),
+                    spec.version,
+                    id.vpath().get_without_slash().to_string()
+                );
+
+                // 1. Data directory (%APPDATA%/typst/packages or $XDG_DATA_HOME/typst/packages)
+                if let Some(data_pkgs) = typst_kit::packages::FsPackages::system_data() {
+                    let path = data_pkgs.path().join(&rel);
+                    if path.exists() {
+                        return Ok(path);
+                    }
+                }
+
+                // 2. Cache directory (%LOCALAPPDATA%/typst/packages or $XDG_CACHE_HOME/typst/packages)
+                if let Some(cache_pkgs) = typst_kit::packages::FsPackages::system_cache() {
+                    let path = cache_pkgs.path().join(&rel);
+                    if path.exists() {
+                        return Ok(path);
+                    }
+                }
+
+                // 3. Not installed locally
+                Err(FileError::Package(typst::diag::PackageError::NotFound(
+                    spec.clone(),
+                )))
+            }
         }
-        Ok(self.root.join(id.vpath().get_without_slash()))
     }
 }
 
