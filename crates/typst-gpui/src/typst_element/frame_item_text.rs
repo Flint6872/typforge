@@ -168,6 +168,12 @@ pub fn frame_item_text(
             Pixels::from(glyph_instance.x_advance.at(text_item.size).to_pt() as f32 * scale_factor);
         let glyph_height = font_size;
 
+        // Shift the bounding box's Y origin up so it sits over the visual letter rather than below the baseline
+        let visual_origin = Point::new(
+            final_glyph_origin.x,
+            final_glyph_origin.y - glyph_height * 0.8,
+        );
+
         let (span, index) = glyph_instance.span;
         let glyph_range = glyph_instance.range();
 
@@ -178,7 +184,7 @@ pub fn frame_item_text(
         };
 
         hit_map_collector.push_glyph(GlyphInfo {
-            bounds: Bounds::new(final_glyph_origin, size(glyph_width, glyph_height)),
+            bounds: Bounds::new(visual_origin, size(glyph_width, glyph_height)),
             byte_offset,
             byte_len: glyph_range.len(),
             span,

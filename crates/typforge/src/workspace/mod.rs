@@ -14,16 +14,15 @@ use crate::{
 
 use gpui_component::{
     dock::{DockArea, DockItem},
-    list::{List, ListItem, ListState},
     menu::AppMenuBar,
 };
 use gpui_util::ResultExt;
 use parking_lot::Mutex;
 
-use typforge_core::edit::apply_edit_action;
+use typastry::edit::apply_edit_action;
 use typst_gpui::{PreviewPanel, PreviewPanelEvent};
 
-pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> {
+pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> {
     pub dock_area: Entity<DockArea>,
     pub menu_bar: Option<Entity<AppMenuBar>>,
     pub ribbon_panel: Entity<RibbonPanel>,
@@ -34,9 +33,10 @@ pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld
     pub show_recent_files_picker: bool,
     pub recent_picker_selected_index: Option<usize>,
     pub recent_picker_focus_handle: FocusHandle,
+    pub active_selection: Option<std::ops::Range<usize>>,
 }
 
-impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
+impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
     // A constructor for your view.
     pub fn new(
         window: &mut Window,
@@ -245,6 +245,75 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
                                 cx.notify();
                             });
                     }
+                    PreviewPanelEvent::CursorMoved { offset, selection } => {
+                        // 1. Store the active selection on TypstNoteView
+                        this_note_view.active_selection = selection.clone();
+
+                        // 2. Get active document text
+                        let content = this_note_view
+                            .editor_panel
+                            .read(cx_for_note_view)
+                            .active_file_path
+                            .as_ref()
+                            .and_then(|path| {
+                                this_note_view
+                                    .editor_panel
+                                    .read(cx_for_note_view)
+                                    .open_files
+                                    .iter()
+                                    .find(|f| &f.path == path)
+                                    .map(|f| {
+                                        f.editor_state.read(cx_for_note_view).text().to_string()
+                                    })
+                            });
+
+                        if let Some(source_code) = content {
+                            // Use selection start/end or cursor offset to detect properties
+                            let target_offset =
+                                selection.as_ref().map(|r| r.start).unwrap_or(*offset);
+                            let active_props = typastry::edit::detect_properties_at_offset(
+                                &source_code,
+                                target_offset,
+                            );
+
+                            let window_handle = this_note_view.window_handle.clone();
+                            let ribbon_panel_handle = this_note_view.ribbon_panel.clone();
+
+                            let _ = window_handle.update(cx_for_note_view, |_, window, app_cx| {
+                                ribbon_panel_handle.update(app_cx, |ribbon, ribbon_cx| {
+                                    ribbon.update_active_properties(
+                                        &active_props,
+                                        window,
+                                        ribbon_cx,
+                                    );
+                                });
+                            });
+                        }
+                    }
+                    PreviewPanelEvent::UndoRequested => {
+                        let editor_panel_handle = this_note_view.editor_panel.clone();
+                        let window_handle = this_note_view.window_handle.clone();
+
+                        let _ = window_handle
+                            .update(cx_for_note_view, |_, window, app_cx| {
+                                editor_panel_handle.update(app_cx, |editor, editor_cx| {
+                                    editor.undo(window, editor_cx);
+                                });
+                            })
+                            .log_err();
+                    }
+                    PreviewPanelEvent::RedoRequested => {
+                        let editor_panel_handle = this_note_view.editor_panel.clone();
+                        let window_handle = this_note_view.window_handle.clone();
+
+                        let _ = window_handle
+                            .update(cx_for_note_view, |_, window, app_cx| {
+                                editor_panel_handle.update(app_cx, |editor, editor_cx| {
+                                    editor.redo(window, editor_cx);
+                                });
+                            })
+                            .log_err();
+                    }
                 }
             },
         )
@@ -347,6 +416,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
             show_recent_files_picker: false,
             recent_picker_selected_index: None,
             recent_picker_focus_handle: cx.focus_handle(),
+            active_selection: None,
         }
     }
 
@@ -355,20 +425,10 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
         let editor_panel = self.editor_panel.clone();
         let preview_panel = self.preview_panel.clone();
         let window_handle = self.window_handle.clone();
+        let active_selection = self.active_selection.clone();
 
         let _ = window_handle
             .update(cx, |_, window, app_cx| {
-                let is_preview_focused = preview_panel
-                    .read(app_cx)
-                    .focus_handle(app_cx)
-                    .contains_focused(window, app_cx);
-
-                let preview_selection = if is_preview_focused {
-                    preview_panel.read(app_cx).selection_range()
-                } else {
-                    None
-                };
-
                 editor_panel.update(app_cx, |editor, editor_cx| {
                     if let Some(active_path) = &editor.active_file_path {
                         if let Some(file) = editor
@@ -378,18 +438,14 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
                         {
                             let mut final_new_selection = None;
 
-                            // 1. Mutate editor text buffer
+                            // 1. Mutate editor text buffer using saved active_selection or current editor selection
                             file.editor_state.update(editor_cx, |state, input_cx| {
                                 let content = state.text().to_string();
-                                let selection = preview_selection
+                                let selection = active_selection
                                     .clone()
                                     .unwrap_or_else(|| state.selected_range());
 
-                                let edit = apply_edit_action(
-                                    &content,
-                                    selection,
-                                    &action.into(), // Make sure you have a From/Into for your RibbonAction to core EditAction
-                                );
+                                let edit = apply_edit_action(&content, selection, &action.into());
 
                                 state.replace_range_with_history(
                                     edit.range,
@@ -400,24 +456,18 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
 
                                 state.set_selected_range(edit.new_selection.clone(), input_cx);
                                 final_new_selection = Some(edit.new_selection);
-
-                                if !is_preview_focused {
-                                    state.focus(window, input_cx);
-                                }
                             });
 
                             file.has_unsaved_changes = true;
 
-                            // 2. Sync visual highlights in the Preview Panel BEFORE triggering recompilation
-                            if is_preview_focused {
-                                if let Some(ref new_sel) = final_new_selection {
-                                    preview_panel.update(editor_cx, |preview, preview_cx| {
-                                        preview.set_selection(new_sel.clone(), window, preview_cx);
-                                    });
-                                }
+                            // 2. Sync visual highlights & refocus Preview Panel so selection is preserved!
+                            if let Some(ref new_sel) = final_new_selection {
+                                preview_panel.update(editor_cx, |preview, preview_cx| {
+                                    preview.set_selection(new_sel.clone(), window, preview_cx);
+                                });
                             }
 
-                            // 3. Immediately compile and push updated content to Preview
+                            // 3. Trigger recompilation
                             let content = file.editor_state.read(editor_cx).text().to_string();
                             editor_cx.emit(FileContentUpdated {
                                 path: Some(active_path.clone()),
@@ -428,5 +478,23 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
                 });
             })
             .log_err();
+
+        // 4. Update stored active_selection to the newly adjusted selection
+        if let Some(ref sel) = self
+            .editor_panel
+            .read(cx)
+            .active_file_path
+            .as_ref()
+            .and_then(|p| {
+                self.editor_panel
+                    .read(cx)
+                    .open_files
+                    .iter()
+                    .find(|f| &f.path == p)
+                    .map(|f| f.editor_state.read(cx).selected_range())
+            })
+        {
+            self.active_selection = Some(sel.clone());
+        }
     }
 }

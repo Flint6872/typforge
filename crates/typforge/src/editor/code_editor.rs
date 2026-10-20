@@ -243,7 +243,7 @@ impl Render for CodeEditor {
                     .child("Language:")
                     .child(div().child(self.language.clone())),
             )
-            .child(div().flex_grow().child(input))
+            .child(div().flex_grow().child(input_container.child(input)))
     }
 }
 

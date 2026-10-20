@@ -20,6 +20,7 @@ mod actions;
 mod components;
 pub mod editor;
 mod key_bindings;
+pub mod package_manager;
 mod panels;
 mod ribbon;
 mod settings;

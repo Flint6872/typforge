@@ -3,7 +3,19 @@ use crate::editor::editor_panel::EditorPanel; // Import necessary panel types
 use crate::workspace::TypstNoteView;
 use gpui::*;
 
-impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld> TypstNoteView<W> {
+impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
+    pub(crate) fn handle_package_manager(
+        &mut self,
+        _action: &actions::PackageManager,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        println!("Action: PackageManager triggered!");
+        self.editor_panel.update(cx, |editor, editor_cx| {
+            editor.open_package_manager(window, editor_cx);
+        });
+    }
+
     pub(crate) fn handle_file_new(
         &mut self,
         _action: &actions::FileNew,

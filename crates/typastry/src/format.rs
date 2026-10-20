@@ -1,5 +1,4 @@
-// typforge-core/src/format.rs
-
+#![cfg(feature = "format")]
 use typstyle_core::{Config, Typstyle};
 
 /// Formats the given Typst document source content using `typstyle`.

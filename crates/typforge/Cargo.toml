@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-chrono = "0.4.44"
+chrono.workspace = true
 
 gpui.workspace = true
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
@@ -22,7 +22,8 @@ gpui-component.workspace = true
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
 
 typst-gpui = { path = "../typst-gpui" }
-typforge-core = { path = "../typforge-core" }
+typastry = { path = "../typastry" }
+
 
 parking_lot.workspace = true
 ropey = "2.0.0-beta.1"
@@ -34,7 +35,11 @@ anyhow = "1.0" # Added for consistent error handling in main
 
 typst.workspace = true
 typst-layout.workspace = true
-typst-kit = { version = "0.15.0", features = ["scan-fonts", "embedded-fonts"] }
+typst-kit = { version = "0.15", features = ["scan-fonts", "embedded-fonts", "universe-packages", "system-packages", "system-downloader"] }
+ureq = { version = "3.4", features = [ "json" ] } #added for typst-kit downloader
+tar = "0.4.46"
+flate2 = { version = "1", features = ["zlib-rs"] }
+
 
 lsp-types = "0.97.0"
 embed-resource = "3.0.11"

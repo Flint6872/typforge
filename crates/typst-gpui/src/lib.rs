@@ -1,12 +1,11 @@
 use gpui::{prelude::FluentBuilder, *};
-use gpui_component::{
-    input::{Input, InputEvent, InputState, RopeExt},
-    scroll::ScrollableElement,
-};
+use gpui_component::{StyledExt, scroll::ScrollableElement};
 use parking_lot::Mutex;
 use std::{sync::Arc, time::Duration};
 use typst_layout::PagedDocument;
 
+pub mod canvas_input;
+pub mod caret_geometry;
 pub mod typst_element;
 use crate::typst_element::{HitMap, TypstElement, TypstRenderState};
 
@@ -27,6 +26,12 @@ pub enum PreviewPanelEvent {
     // This will evolve in later phases for more complex edits (deletion, insertion at cursor, etc.).
     SourceChanged(String),
     DiagnosticsChanged(Vec<typst::diag::SourceDiagnostic>),
+    CursorMoved {
+        offset: usize,
+        selection: Option<std::ops::Range<usize>>,
+    },
+    UndoRequested,
+    RedoRequested,
 }
 
 /// The PreviewPanel is a GPUI View that renders a Typst document.
@@ -37,8 +42,8 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     diagnostics: Vec<typst::diag::SourceDiagnostic>,
     focus_handle: FocusHandle,
     zoom: f32, // Add zoom field
-    input_state: Entity<InputState>,
-    _input_state_subscription: Option<Subscription>,
+    pub source: String,
+
     pub suppressing_events: bool, // NEW: Flag to control event emission
     pub last_text_len: usize,
     last_hit_map: HitMap,
@@ -52,55 +57,19 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     is_hovering_link: bool,
     _blink_task: Option<Task<()>>,
     compile_task: Option<Task<()>>,
+
+    // --- NEW WYSIWYG STATE FIELDS Visual editing & context menu---
+    pub pending_transaction: Option<typastry::wysiwyg::MutationTransaction>,
+    pub visual_edit_error: Option<String>,
+    pub inspected_element: Option<typastry::wysiwyg::ElementProperties>,
 }
 
 impl<W: TypstGpuiWorld> PreviewPanel<W> {
     /// Initialize the panel with a pre-configured World.
-    pub fn new(world: Arc<Mutex<W>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(world: Arc<Mutex<W>>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
 
-        let input_state = cx.new(|input_cx| {
-            InputState::new(window, input_cx)
-                .code_editor("typst") // CORRECTED: Call code_editor FIRST
-                .multi_line(true) // Then multi_line (CodeEditor implies multi_line too, but explicit is fine)
-                .soft_wrap(true)
-                .line_number(false) // Now line_number can be called, as mode is CodeEditor
-        });
-
-        // Use cx.subscribe to listen for InputState events
-        let subscription = cx.subscribe(
-            &input_state,
-            move |this_panel_ref: &mut PreviewPanel<W>,
-                  emitting_input_state_entity: Entity<InputState>,
-                  event: &InputEvent,
-                  cx_for_panel: &mut Context<PreviewPanel<W>>| {
-                if let InputEvent::Change = event {
-                    let new_text = this_panel_ref
-                        .input_state
-                        .read(&cx_for_panel)
-                        .text()
-                        .to_string();
-                    let new_len = new_text.len();
-
-                    if !this_panel_ref.suppressing_events {
-                        this_panel_ref.world.lock().set_source(new_text.clone());
-                        this_panel_ref.compile(cx_for_panel);
-                        cx_for_panel.emit(PreviewPanelEvent::SourceChanged(new_text));
-                    }
-
-                    this_panel_ref.last_text_len = new_len;
-
-                    let current_cursor_offset =
-                        emitting_input_state_entity.read(cx_for_panel).cursor();
-                    this_panel_ref.cursor_offset = current_cursor_offset;
-
-                    cx_for_panel.notify();
-                }
-            },
-        );
-
         let preview_panel_entity_for_callback = cx.entity().clone();
-
         let on_hit_map_updated_callback_arc =
             Arc::new(Mutex::new(move |hit_map_data: HitMap, app_cx: &mut App| {
                 let entity_for_update = preview_panel_entity_for_callback.clone();
@@ -118,7 +87,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                 async move {
                     loop {
                         cx.background_executor()
-                            .timer(Duration::from_millis(350))
+                            .timer(Duration::from_millis(450))
                             .await;
 
                         let result = view.update(&mut cx, |this, cx| {
@@ -134,39 +103,14 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             },
         );
 
-        // --- SINGLE SMART OBSERVER ---
-        cx.observe(&input_state, |this, handle, cx| {
-            let state = handle.read(cx);
-            let new_cursor_offset = state.cursor();
-            let sel = state.selected_range();
-
-            this.cursor_offset = new_cursor_offset;
-
-            if sel.is_empty() {
-                // Preserve the anchor on a fresh mouse down click (where cursor == anchor)
-                if this.selection_anchor != Some(new_cursor_offset) {
-                    this.selection_anchor = None;
-                }
-            } else {
-                this.selection_anchor = if new_cursor_offset == sel.start {
-                    Some(sel.end)
-                } else {
-                    Some(sel.start)
-                };
-            }
-            cx.notify();
-        })
-        .detach();
-
         Self {
             world,
             document: None,
             render_state: Arc::new(TypstRenderState::default()),
             diagnostics: Vec::new(),
-            focus_handle: focus_handle.clone(),
+            focus_handle,
             zoom: 1.0,
-            input_state,
-            _input_state_subscription: Some(subscription),
+            source: String::new(),
             suppressing_events: false,
             last_text_len: 0,
             last_hit_map: crate::typst_element::HitMap::default(),
@@ -176,9 +120,19 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             on_hit_map_updated_callback: Some(on_hit_map_updated_callback_arc),
             cursor_visible: true,
             is_hovering_link: false,
-            _blink_task: Some(blink_task), // Store the task
+            _blink_task: Some(blink_task),
             compile_task: None,
+            pending_transaction: None,
+            visual_edit_error: None,
+            inspected_element: None,
         }
+    }
+
+    pub fn notify_cursor_moved(&self, cx: &mut Context<Self>) {
+        cx.emit(PreviewPanelEvent::CursorMoved {
+            offset: self.cursor_offset,
+            selection: self.selection_range(),
+        });
     }
 
     pub fn set_zoom(&mut self, zoom: f32, cx: &mut gpui::Context<Self>) {
@@ -202,39 +156,25 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
 
     /// Update the Typst source code and trigger a re-render.
 
-    pub fn set_source(&mut self, source: String, window: &mut Window, cx: &mut Context<Self>) {
-        let source_for_input_state = source.clone();
+    pub fn set_source(&mut self, source: String, _window: &mut Window, cx: &mut Context<Self>) {
+        self.source = source.clone();
+        self.last_text_len = source.len();
         self.world.lock().set_source(source);
-
-        self.suppressing_events = true;
-
-        let preview_panel_entity = cx.entity().clone();
-        let original_tab_stop_state = self.focus_handle.tab_stop;
-        self.focus_handle.tab_stop = false;
-
-        // 1. Read and preserve the current selection range before updating input value
-        let current_selection = self.selection_range();
-
-        self.input_state.update(cx, |input, input_cx| {
-            input.set_value(source_for_input_state, window, input_cx);
-
-            // 2. Restore the selection range on the input state so it is not cleared by set_value
-            if let Some(ref sel) = current_selection {
-                input.set_selected_range(sel.clone(), input_cx);
-                let new_pos = input.text().offset_to_position(sel.end);
-                input.set_cursor_position(new_pos, window, input_cx);
-            }
-        });
-
-        cx.defer(move |app_cx| {
-            app_cx.update_entity(&preview_panel_entity, |this_panel, cx_for_panel| {
-                this_panel.suppressing_events = false;
-                this_panel.focus_handle.tab_stop = original_tab_stop_state;
-                cx_for_panel.notify();
-            });
-        });
-
         self.compile(cx);
+        cx.notify();
+    }
+
+    pub fn set_selection(
+        &mut self,
+        range: std::ops::Range<usize>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.selection_anchor = Some(range.start);
+        self.cursor_offset = range.end;
+
+        self.notify_cursor_moved(cx);
+        cx.notify();
     }
 
     /// Asynchronous compilation logic running on background thread.
@@ -255,10 +195,15 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                     .await;
 
                 // Perform heavy CPU-bound compile on background executor
+                let start_compile = std::time::Instant::now();
                 let compiled_result = {
                     let world_guard = world.lock();
                     typst::compile(&*world_guard)
                 };
+                println!(
+                    "BENCHMARK: typst::compile took {:?}",
+                    start_compile.elapsed()
+                );
 
                 // Jump back to the main thread to update the UI
                 let _ = handle.update(&mut async_cx, |panel, cx| {
@@ -270,16 +215,50 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                             panel.world.lock().set_document(doc.clone());
 
                             // Sync fonts
+                            let start_fonts = std::time::Instant::now();
                             panel.sync_fonts_to_gpui(&doc, cx);
+                            println!(
+                                "BENCHMARK: sync_fonts_to_gpui took {:?}",
+                                start_fonts.elapsed()
+                            );
 
                             panel.document = Some(doc);
                             panel.diagnostics.clear();
                             cx.emit(PreviewPanelEvent::DiagnosticsChanged(Vec::new()));
+
+                            // --- TRANSACTION SUCCEEDED: COMMIT ---
+                            panel.pending_transaction = None;
                         }
                         Err(errors) => {
                             let diags: Vec<_> = errors.into_iter().collect();
                             panel.diagnostics = diags.clone();
                             cx.emit(PreviewPanelEvent::DiagnosticsChanged(diags));
+
+                            // --- TRANSACTION FAILED: GRACEFUL ROLLBACK ---
+                            if let Some(tx) = panel.pending_transaction.take() {
+                                let error_msg = panel
+                                    .diagnostics
+                                    .first()
+                                    .map(|d| d.message.to_string())
+                                    .unwrap_or_else(|| {
+                                        "Source edit resulted in compile error.".to_string()
+                                    });
+
+                                panel.visual_edit_error =
+                                    Some(format!("Edit Reverted: {}", error_msg));
+
+                                // Restore original states in shared World & selection
+                                let original_text = tx.original_text;
+                                panel.world.lock().set_source(original_text.clone());
+                                panel.cursor_offset = tx.original_cursor;
+                                panel.selection_anchor = tx.original_selection.map(|s| s.start);
+
+                                // Synchronize restored source back across editor and preview views
+                                cx.emit(PreviewPanelEvent::SourceChanged(original_text));
+
+                                // Recompile restored stable state
+                                panel.compile(cx);
+                            }
                         }
                     }
                     cx.notify();
@@ -480,22 +459,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
     }
 
     /// Explicitly updates the selection anchor and cursor position, syncing the underlying InputState.
-    pub fn set_selection(
-        &mut self,
-        range: std::ops::Range<usize>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.selection_anchor = Some(range.start);
-        self.cursor_offset = range.end;
-
-        self.input_state.update(cx, |input, input_cx| {
-            // FIX: Explicitly set the selected range so InputState keeps the focus highlighted!
-            input.set_selected_range(range.clone(), input_cx);
-            let new_pos = input.text().offset_to_position(range.end);
-            input.set_cursor_position(new_pos, window, input_cx);
-        });
-    }
 
     fn handle_link_click(&mut self, point: Point<Pixels>, cx: &mut Context<Self>) -> bool {
         for link in &self.last_hit_map.links {
@@ -507,14 +470,42 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                     typst::model::Destination::Location(loc) => {
                         self.scroll_to_location(*loc, cx);
                     }
-                    typst::model::Destination::Position(_pos) => {
-                        //Position Logic
+                    typst::model::Destination::Position(pos) => {
+                        self.scroll_to_page_position(*pos, cx);
                     }
                 }
                 return true;
             }
         }
         false
+    }
+
+    fn scroll_to_page_position(
+        &mut self,
+        pos: typst::introspection::PagedPosition,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(doc) = &self.document {
+            let scale_factor = (96.0 / 72.0) * self.zoom;
+            let page_margin_px = gpui::px(20.0 * self.zoom);
+            let mut target_y = Pixels::ZERO;
+
+            let target_page_idx = pos.page.get().saturating_sub(1);
+            for (i, page) in doc.pages().iter().enumerate() {
+                if i == target_page_idx {
+                    target_y += Pixels::from(pos.point.y.to_pt() as f32 * scale_factor);
+                    break;
+                }
+                let page_h = Pixels::from(page.frame.height().to_pt() as f32 * scale_factor);
+                target_y += page_h + page_margin_px;
+            }
+
+            let padding = Pixels::from(20.0 * self.zoom);
+            let scroll_offset = -(target_y - padding).max(Pixels::ZERO);
+            self.scroll_handle
+                .set_offset(Point::new(Pixels::ZERO, scroll_offset));
+            cx.notify();
+        }
     }
 
     fn scroll_to_location(&mut self, loc: typst::introspection::Location, cx: &mut Context<Self>) {
@@ -547,6 +538,48 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
             .size_full()
             .bg(rgb(0x1a1a1a))
             .track_focus(&self.focus_handle)
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let current_text = this.source.clone();
+                let current_sel = this.selection_range();
+
+                let res = crate::canvas_input::CanvasInputHandler::handle_key_down(
+                    event,
+                    &current_text,
+                    this.cursor_offset,
+                    current_sel,
+                    &this.last_hit_map,
+                    cx,
+                );
+
+                if res.handled {
+                    match res.action {
+                        crate::canvas_input::CanvasAction::Undo => {
+                            cx.emit(PreviewPanelEvent::UndoRequested);
+                        }
+                        crate::canvas_input::CanvasAction::Redo => {
+                            cx.emit(PreviewPanelEvent::RedoRequested);
+                        }
+                        crate::canvas_input::CanvasAction::None => {
+                            if let Some(ref new_text) = res.new_source {
+                                this.set_source(new_text.clone(), window, cx);
+                                cx.emit(PreviewPanelEvent::SourceChanged(new_text.to_string()));
+                            }
+                        }
+                    }
+                    if let Some(ref new_text) = res.new_source {
+                        this.set_source(new_text.clone(), window, cx);
+                        cx.emit(PreviewPanelEvent::SourceChanged(new_text.to_string()));
+                    }
+
+                    if let Some(new_sel) = res.new_selection {
+                        this.set_selection(new_sel, window, cx);
+                    } else {
+                        this.set_selection(res.new_cursor..res.new_cursor, window, cx);
+                    }
+
+                    cx.stop_propagation();
+                }
+            }))
             .when(self.is_hovering_link, |this| {
                 this.cursor(CursorStyle::PointingHand)
             })
@@ -562,27 +595,54 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                     }
 
                     if let Some(byte_offset) = this.offset_for_point(event.position) {
-                        this.selection_anchor = Some(byte_offset);
-                        this.cursor_offset = byte_offset;
+                        let text = this.source.clone();
 
-                        this.input_state.update(cx, |input, input_cx| {
-                            // Collapse selection to a single point on click
-                            input.set_selected_range(byte_offset..byte_offset, input_cx);
-                            let new_pos = input.text().offset_to_position(byte_offset);
-                            input.set_cursor_position(new_pos, window, input_cx);
-                        });
+                        match event.click_count {
+                            1 => {
+                                this.selection_anchor = Some(byte_offset);
+                                this.cursor_offset = byte_offset;
+                            }
+                            2 => {
+                                let range = find_word_boundaries(&text, byte_offset);
+                                this.selection_anchor = Some(range.start);
+                                this.cursor_offset = range.end;
+                            }
+                            3 => {
+                                let range = find_paragraph_boundaries(&text, byte_offset);
+                                this.selection_anchor = Some(range.start);
+                                this.cursor_offset = range.end;
+                            }
+                            _ => {}
+                        }
+                        this.notify_cursor_moved(cx);
                     } else {
-                        // Clear selection if clicking on empty space
                         this.selection_anchor = None;
-                        this.input_state.update(cx, |input, input_cx| {
-                            input.set_selected_range(0..0, input_cx);
-                        });
+                        this.notify_cursor_moved(cx);
                         cx.notify();
                     }
 
-                    let input_focus_handle = this.input_state.read(cx).focus_handle(cx);
-                    window.focus(&input_focus_handle, cx);
+                    window.focus(&this.focus_handle, cx);
                     cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
+            // ==========================================
+            // PILLAR 3: RIGHT CLICK INTROSPECTION TRIGGER
+            // ==========================================
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                    if let Some(byte_offset) = this.offset_for_point(event.position) {
+                        let text = this.source.clone();
+                        let source = typst_syntax::Source::detached(&text);
+                        let root = typst_syntax::LinkedNode::new(source.root());
+
+                        if let Some(leaf) = root.leaf_at(byte_offset, typst_syntax::Side::Before) {
+                            if let Some(props) = typastry::wysiwyg::inspect_element(leaf) {
+                                this.show_wysiwyg_context_menu(props, event.position, cx);
+                            }
+                        }
+                    }
                     cx.stop_propagation();
                 }),
             )
@@ -603,15 +663,7 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                 if event.pressed_button == Some(MouseButton::Left) {
                     if let Some(byte_offset) = this.offset_for_point(event.position) {
                         this.cursor_offset = byte_offset;
-
-                        if let Some(anchor) = this.selection_anchor {
-                            this.input_state.update(cx, |input, input_cx| {
-                                let normalized_range =
-                                    anchor.min(byte_offset)..anchor.max(byte_offset);
-                                // This sets both selection bounds AND updates the cursor without collapsing!
-                                input.set_selected_range(normalized_range, input_cx);
-                            });
-                        }
+                        this.notify_cursor_moved(cx);
                         cx.notify();
                     }
                 }
@@ -621,25 +673,6 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                 cx.listener(|_, _, _, cx| cx.stop_propagation()),
             )
             .on_click(|_, _, cx| cx.stop_propagation())
-            .child(
-                div()
-                    .absolute()
-                    // --- FIX 3: Ensure the input "exists" for the focus system ---
-                    .size_1()
-                    // .opacity(0.0) // Invisible but technically in the tree
-                    .child(
-                        Input::new(&self.input_state)
-                            .absolute() // Allow us to position it precisely
-                            .top_0() // Start at top-left of the wrapper div
-                            .left_0()
-                            .w_full() // Take full width/height for layout calculations, but we'll override visual.
-                            .h_full()
-                            .text_color(transparent_black()) // Make the actual input text transparent
-                            .bg(transparent_black())
-                            .border_color(transparent_black()) // Make the input's border transparent
-                            .tab_index(-1),
-                    ),
-            )
             .on_scroll_wheel(
                 cx.listener(|this, event: &gpui::ScrollWheelEvent, _win, cx| {
                     if event.modifiers.control || event.modifiers.platform {
@@ -735,6 +768,180 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
             } else {
                 None
             })
+            // ==========================================
+            // PILLAR 1: VISUAL EDITING ROLLBACK NOTIFIER
+            // ==========================================
+            .children(if let Some(ref err) = self.visual_edit_error {
+                Some(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .w_full()
+                        .bg(rgb(0x7a2222))
+                        .text_color(rgb(0xffffff))
+                        .p_2()
+                        .flex()
+                        .justify_between()
+                        .items_center()
+                        .child(format!("⚠️ {}", err))
+                        .child(
+                            div()
+                                .id("close-visual-edit-error")
+                                .cursor(CursorStyle::PointingHand)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.visual_edit_error = None;
+                                    cx.notify();
+                                }))
+                                .child("✕"),
+                        ),
+                )
+            } else {
+                None
+            })
+            // ==========================================
+            // PILLAR 3: INTROSPECTED CONTEXT MENU OVERLAY
+            // ==========================================
+            .children(if let Some(ref props) = self.inspected_element {
+                let element_type_title = props.element_type.to_uppercase();
+                Some(
+                    div()
+                        .id("wysiwyg-context-menu")
+                        .absolute()
+                        .top(px(20.0))
+                        .right(px(20.0))
+                        .w(px(280.0))
+                        .bg(rgb(0x2d2d2d))
+                        .border_1()
+                        .border_color(rgb(0x444444))
+                        .shadow_md()
+                        .rounded_md()
+                        .p_3()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex()
+                                .justify_between()
+                                .items_center()
+                                .border_b_1()
+                                .border_color(rgb(0x444444))
+                                .pb_1()
+                                .child(
+                                    div()
+                                        .text_color(rgb(0xffffff))
+                                        .font_semibold()
+                                        .child(format!("{} Component", element_type_title)),
+                                )
+                                .child(
+                                    div()
+                                        .id("close-context-menu")
+                                        .cursor(CursorStyle::PointingHand)
+                                        .text_color(rgb(0x888888))
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.inspected_element = None;
+                                            cx.notify();
+                                        }))
+                                        .child("✕"),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_color(rgb(0xaaaaaa))
+                                .text_size(px(11.0))
+                                .child("Active Properties:"),
+                        )
+                        .children(
+                            props
+                                .active_args
+                                .iter()
+                                .enumerate()
+                                .map(|(idx, (name, val))| {
+                                    let name_clone = name.clone();
+                                    let val_clone = val.clone();
+                                    div()
+                                        .id(ElementId::from(format!("active-arg-{}", idx)))
+                                        .flex()
+                                        .justify_between()
+                                        .items_center()
+                                        .text_color(rgb(0xdddddd))
+                                        .text_size(px(12.0))
+                                        .child(format!("{}:", name))
+                                        .child(
+                                            div()
+                                                .id(ElementId::from(format!("toggle-arg-{}", idx)))
+                                                .bg(rgb(0x3d3d3d))
+                                                .rounded_sm()
+                                                .px_2()
+                                                .py_0p5()
+                                                .cursor(CursorStyle::PointingHand)
+                                                .text_color(rgb(0x4a90e2))
+                                                .on_click(cx.listener(
+                                                    move |this, _, window, cx| {
+                                                        let next_val = match val_clone.as_str() {
+                                                            "red" => "blue",
+                                                            "blue" => "green",
+                                                            "green" => "red",
+                                                            "10pt" => "12pt",
+                                                            "12pt" => "14pt",
+                                                            "14pt" => "10pt",
+                                                            _ => "red",
+                                                        };
+                                                        this.apply_visual_edit(
+                                                            &name_clone,
+                                                            next_val,
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    },
+                                                ))
+                                                .child(val.clone()),
+                                        )
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_color(rgb(0xaaaaaa))
+                                .text_size(px(11.0))
+                                .child("Add Properties (Schema):"),
+                        )
+                        .children(props.available_properties.iter().enumerate().map(
+                            |(idx, prop)| {
+                                let prop_clone = prop.clone();
+                                div()
+                                    .id(ElementId::from(format!("add-prop-{}", idx)))
+                                    .cursor(CursorStyle::PointingHand)
+                                    .bg(rgb(0x3a3a3a))
+                                    .hover(|style| style.bg(rgb(0x4a4a4a)))
+                                    .rounded_sm()
+                                    .px_2()
+                                    .py_1()
+                                    .text_color(rgb(0xdddddd))
+                                    .text_size(px(12.0))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        let default_val = match prop_clone.as_str() {
+                                            "fill" => "red",
+                                            "stroke" => "1pt",
+                                            "width" => "50pt",
+                                            "height" => "50pt",
+                                            "radius" => "4pt",
+                                            "size" => "11pt",
+                                            _ => "10pt",
+                                        };
+                                        this.apply_visual_edit(
+                                            &prop_clone,
+                                            default_val,
+                                            window,
+                                            cx,
+                                        );
+                                    }))
+                                    .child(format!("+ {}", prop))
+                            },
+                        )),
+                )
+            } else {
+                None
+            })
     }
 }
 
@@ -761,3 +968,274 @@ impl<W: TypstGpuiWorld> Focusable for PreviewPanel<W> {
 
 pub struct GpuiRegisteredFonts(pub std::collections::HashSet<u64>);
 impl gpui::Global for GpuiRegisteredFonts {}
+
+impl<W: TypstGpuiWorld> PreviewPanel<W> {
+    pub fn next_visual_offset(&self, current: usize) -> Option<usize> {
+        let mut glyphs = self.last_hit_map.glyphs.clone();
+        if glyphs.is_empty() {
+            return None;
+        }
+        glyphs.sort_by_key(|g| g.byte_offset);
+
+        for glyph in &glyphs {
+            if glyph.byte_offset > current {
+                return Some(glyph.byte_offset);
+            }
+        }
+
+        // Fallback: If at the last visual glyph, place caret at its boundary end
+        if let Some(last) = glyphs.last() {
+            if current < last.byte_offset + last.byte_len {
+                return Some(last.byte_offset + last.byte_len);
+            }
+        }
+        None
+    }
+
+    pub fn prev_visual_offset(&self, current: usize) -> Option<usize> {
+        let mut glyphs = self.last_hit_map.glyphs.clone();
+        if glyphs.is_empty() {
+            return None;
+        }
+        glyphs.sort_by_key(|g| g.byte_offset);
+
+        for glyph in glyphs.iter().rev() {
+            if glyph.byte_offset < current {
+                return Some(glyph.byte_offset);
+            }
+        }
+        None
+    }
+
+    pub fn cursor_point_pixels(&self) -> Option<Point<Pixels>> {
+        let glyphs = &self.last_hit_map.glyphs;
+        if glyphs.is_empty() {
+            return None;
+        }
+
+        for g in glyphs {
+            if self.cursor_offset >= g.byte_offset
+                && self.cursor_offset < g.byte_offset + g.byte_len
+            {
+                return Some(g.bounds.origin);
+            }
+        }
+
+        // Fallback: End of document
+        if let Some(last) = glyphs.last() {
+            if self.cursor_offset >= last.byte_offset + last.byte_len {
+                return Some(last.bounds.top_right());
+            }
+        }
+
+        None
+    }
+
+    pub fn down_visual_offset(&self, _current: usize) -> Option<usize> {
+        let glyphs = &self.last_hit_map.glyphs;
+        if glyphs.is_empty() {
+            return None;
+        }
+
+        let cursor_pt = self.cursor_point_pixels()?;
+        let mut closest_below_top: Option<Pixels> = None;
+
+        // Find the next unique visual line vertical coordinate below current caret Y
+        for g in glyphs {
+            let top = g.bounds.top();
+            if top > cursor_pt.y + Pixels::from(2.0) {
+                if let Some(best) = closest_below_top {
+                    if top < best {
+                        closest_below_top = Some(top);
+                    }
+                } else {
+                    closest_below_top = Some(top);
+                }
+            }
+        }
+
+        let row_top = closest_below_top?;
+        let mut row_glyphs = Vec::new();
+        for g in glyphs {
+            if (g.bounds.top() - row_top).abs() < Pixels::from(5.0) {
+                row_glyphs.push(g);
+            }
+        }
+
+        // Find the glyph horizontally closest to our X column
+        let closest_g = row_glyphs.into_iter().min_by_key(|g| {
+            let center_x = g.bounds.left() + g.bounds.size.width / 2.0;
+            let dist = (center_x - cursor_pt.x).abs();
+            (dist.as_f32() * 1000.0) as i32
+        })?;
+
+        Some(closest_g.byte_offset)
+    }
+
+    pub fn up_visual_offset(&self, _current: usize) -> Option<usize> {
+        let glyphs = &self.last_hit_map.glyphs;
+        if glyphs.is_empty() {
+            return None;
+        }
+
+        let cursor_pt = self.cursor_point_pixels()?;
+        let mut closest_above_bottom: Option<Pixels> = None;
+
+        // Find the next unique visual line vertical coordinate above current caret Y
+        for g in glyphs {
+            let bottom = g.bounds.bottom();
+            if bottom < cursor_pt.y - Pixels::from(2.0) {
+                if let Some(best) = closest_above_bottom {
+                    if bottom > best {
+                        closest_above_bottom = Some(bottom);
+                    }
+                } else {
+                    closest_above_bottom = Some(bottom);
+                }
+            }
+        }
+
+        let row_bottom = closest_above_bottom?;
+        let mut row_glyphs = Vec::new();
+        for g in glyphs {
+            if (g.bounds.bottom() - row_bottom).abs() < Pixels::from(5.0) {
+                row_glyphs.push(g);
+            }
+        }
+
+        // Find the glyph horizontally closest to our X column
+        let closest_g = row_glyphs.into_iter().min_by_key(|g| {
+            let center_x = g.bounds.left() + g.bounds.size.width / 2.0;
+            let dist = (center_x - cursor_pt.x).abs();
+            (dist.as_f32() * 1000.0) as i32
+        })?;
+
+        Some(closest_g.byte_offset)
+    }
+
+    pub fn apply_visual_edit(
+        &mut self,
+        property_name: &str,
+        property_value: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = self.source.clone();
+
+        let tx = typastry::wysiwyg::MutationTransaction {
+            original_text: text.clone(),
+            original_cursor: self.cursor_offset,
+            original_selection: self.selection_range(),
+        };
+        self.pending_transaction = Some(tx);
+        self.visual_edit_error = None;
+
+        if let Some((mutated_text, new_range)) = typastry::wysiwyg::apply_named_argument_edit(
+            &text,
+            self.cursor_offset,
+            property_name,
+            property_value,
+        ) {
+            self.set_source(mutated_text.clone(), window, cx);
+            cx.emit(PreviewPanelEvent::SourceChanged(mutated_text));
+            self.set_selection(new_range, window, cx);
+
+            if let Some(ref mut props) = self.inspected_element {
+                props
+                    .active_args
+                    .insert(property_name.to_string(), property_value.to_string());
+                props.available_properties.retain(|p| p != property_name);
+            }
+        } else {
+            self.visual_edit_error =
+                Some("Could not locate a customizable parent block in AST.".to_string());
+            self.pending_transaction = None;
+            cx.notify();
+        }
+    }
+
+    /// Triggers the word-processor context menu on right-click over a component.
+    pub fn show_wysiwyg_context_menu(
+        &mut self,
+        props: typastry::wysiwyg::ElementProperties,
+        _point: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.inspected_element = Some(props);
+        cx.notify();
+    }
+}
+
+// Helper to find the byte boundaries of the word under a given offset
+fn find_word_boundaries(text: &str, offset: usize) -> std::ops::Range<usize> {
+    if text.is_empty() {
+        return 0..0;
+    }
+    let clamped = offset.min(text.len());
+
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    if chars.is_empty() {
+        return 0..0;
+    }
+
+    // Find the index of the character at our offset
+    let mut char_idx = chars.len();
+    for (i, (idx, _)) in chars.iter().enumerate() {
+        if *idx >= clamped {
+            char_idx = i;
+            break;
+        }
+    }
+    if char_idx > 0 && char_idx == chars.len() {
+        char_idx = chars.len() - 1;
+    }
+
+    let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
+
+    // Scan backward
+    let mut start_idx = char_idx;
+    while start_idx > 0 && is_word_char(chars[start_idx - 1].1) {
+        start_idx -= 1;
+    }
+
+    // Scan forward
+    let mut end_idx = char_idx;
+    while end_idx < chars.len() && is_word_char(chars[end_idx].1) {
+        end_idx += 1;
+    }
+
+    let start_byte = chars.get(start_idx).map(|(idx, _)| *idx).unwrap_or(0);
+    let end_byte = chars
+        .get(end_idx)
+        .map(|(idx, _)| *idx)
+        .unwrap_or(text.len());
+
+    start_byte..end_byte
+}
+
+// Helper to find the byte boundaries of the paragraph under a given offset
+fn find_paragraph_boundaries(text: &str, offset: usize) -> std::ops::Range<usize> {
+    if text.is_empty() {
+        return 0..0;
+    }
+    let clamped = offset.min(text.len());
+
+    // A paragraph is bounded by double newlines or file boundaries
+    let mut start = 0;
+    let before = &text[..clamped];
+    if let Some(pos) = before.rfind("\n\n") {
+        start = pos + 2;
+    } else if let Some(pos) = before.rfind("\r\n\r\n") {
+        start = pos + 4;
+    }
+
+    let mut end = text.len();
+    let after = &text[clamped..];
+    if let Some(pos) = after.find("\n\n") {
+        end = clamped + pos;
+    } else if let Some(pos) = after.find("\r\n\r\n") {
+        end = clamped + pos;
+    }
+
+    start..end
+}

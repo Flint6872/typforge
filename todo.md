@@ -1,7 +1,7 @@
 
 ## To-Do List
 
-*  [ ] fix having to double click on a file with #include to show in preview
+*  [X] fix having to double click on a file with #include to show in preview
 
 ### `typsdocx` (Export to Word *.docx file)
 Post TypForge 0.1.0
@@ -10,19 +10,16 @@ Post TypForge 0.1.0
 ### `typst-gpui` (Preview Panel)
 * [X] export to pdf using typst-pdf.
 * [ ] setup package manager using typst-kit (questionable to have here or main crate)
+* [ ] **Fix visual caret navigation through markup**
+    - Currently, arrow key navigation in the Preview Panel steps through raw Typst source characters (including `#`, `*`, `_`, `[`, `]`) rather than visual words or glyphs. We need to finalize the spatial 2D navigation (Up/Down) and visual word-stepping (Left/Right) by exclusively using the `HitMap` coordinate data as the source of truth, effectively ignoring the underlying hidden `InputState` caret during navigation.
+    - A quick suggestion for when you return to this:
+    When you pick this back up, I recommend looking at **"The Interceptor Pattern"**. Instead of trying to "fix" the existing hidden `Input` navigation, we could set the `InputState` to be completely detached from the keyboard focus for arrow keys and *only* use it to collect characters for typing.
+    
+    By fully routing navigation through the `capture_key_down` logic we built, and simply "teleporting" the hidden `Input` cursor to the new `HitMap` coordinate after every jump, you'll bypass the raw-code stepping entirely.
 
-#### elements
-* [ ] #text (Not Rotating)
-* [ ] #rect
-* [ ] #block
-* [ ] #circle 
-* [ ] #curve
-* [ ] #ellipse - showing as pill shape 
-* [ ] #line
-* [ ] #polygon
-* [ ] #square
 
 Issues color.map not working on non-square objects
+  - * [X] converted images to png files show properly
 To get true multi-stop radial gradients or rainbow circles in GPUI, we would eventually need to implement a **Triangle Fan Tessellator** or a **Custom Shader**, which are much deeper tasks. This fix gets your basic visualization looking correct and consistent.
 
 - `typst features` 
@@ -32,19 +29,21 @@ To get true multi-stop radial gradients or rainbow circles in GPUI, we would eve
 
 ### `typforge` (Main Application)
 *   [X] Lazily load folders in the files panel to improve performance and responsiveness, especially for large projects.
+*  [X] impliment a simple AST rather than a LSP
+*  [X] fix when saving a new file to be save file as
+*  [X] inactiveate menu itmes when not available (example.. Export when no file open)
+  - [X] Should work on macOS and Linux
+  - [ ] issues with Windows as Windows behaves differently. In the Win32 API, if you modify, enable, disable, or replace an HMENU after it has already been attached to a window and rendered, you must explicitly tell the OS to redraw the menu bar. If you don't, the internal state updates, but the UI remains stale until something else forces a window repaint (like resizing the window).
+      
+      Currently, GPUI's Windows platform backend—which is still catching up to the macOS baseline—doesn't automatically trigger this redraw when you call cx.set_menus() dynamically.
 
-*   [ ] figure out how to add Typst lsp for pub fn _set_language().
-*  [ ] fix when saving a new file to be save file as
-*  [ ] inactiveate menu itmes when not available (example.. Export when no file open)
-*   [ ] figure out Distribution Strategy Use cargo-dist in your CI/CD. It can - - - 
+*   figure out Distribution Strategy Use cargo-dist in your CI/CD. It can - - - 
   - automatically generate:
-    - Windows installers (.msi).
-    - macOS bundles (.dmg).
-    - Shell script installers (curl | sh) for Linux/macOS
+    - [X] using Github actions I'm able to compile to different formats
     
 
 *  [ ] build out FilePanel to mirror Zed's ability for right click and drag and drop
-*  [ ] Menu -> View: build out ablity to show/hide/pop panels
+*  [ ] Menu -> View: build out ablity to show/hide/pop dock panels
 
 * [ ] ablitiy to save to Git for version history. (possibly using [https://github.com/gitoxidelabs/gitoxide])
 

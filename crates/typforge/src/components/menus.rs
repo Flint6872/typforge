@@ -1,9 +1,6 @@
 use std::{collections::HashMap, eprintln};
 
-use crate::{
-    actions::{self, ChangeTheme},
-    editor::editor_panel,
-};
+use crate::actions::{self, ChangeTheme};
 use gpui::{App, Global, Menu, MenuItem};
 use gpui_component::{ThemeRegistry, ThemeSet};
 
@@ -129,7 +126,7 @@ pub fn setup_menus(cx: &mut App) {
                 MenuItem::action("Save As...", actions::FileSaveAs).disabled(!has_file),
                 MenuItem::action("Close File", actions::FileClose).disabled(!has_file),
                 MenuItem::separator(),
-                MenuItem::action("Package Manager", actions::PackageManager).disabled(true),
+                MenuItem::action("Package Manager", actions::PackageManager),
                 MenuItem::submenu(Menu {
                     name: "Export To".into(),
                     items: vec![

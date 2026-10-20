@@ -78,3 +78,37 @@ Optimize editor performance and compilation logic
 
 - Replace linear scan with nested binary search in `screen_to_byte_offset`
 - Implement debounced, asynchronous background compilation in `PreviewPanel`
+
+
+
+0.0.4 update
+
+Rename typforge-core to typastry
+
+Refactor the core logic crate to `typastry` and update all workspace
+references. Additionally, remove the unused Linux setup script.
+
+
+Refactor autocompletion logic to typastry
+
+Move editor-agnostic logic for trigger detection and dimension context
+validation from `typforge` to `typastry`. Export `get_arg_value` to the
+`typastry` crate to unify argument parsing utilities.
+
+
+Add feature flags and modularize typastry
+
+Introduce feature flags for `intel` and `format` components to allow
+lightweight usage. Implement `detect_properties_at_offset` for real-time
+styling state tracking and refine completion structures for better
+editor integration.
+
+Implement keyboard navigation and improve selection logic
+
+- Add support for arrow key navigation in the preview panel using visual
+  glyph positioning.
+- Refine mouse interaction to ensure proper cursor and selection state
+  synchronization.
+- Clean up function name parsing in the AST detection logic.
+
+Improve text selection and glyph bounding box alignment

@@ -6,16 +6,12 @@ use gpui::Focusable;
 use gpui::InteractiveElement;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Context, Element, IntoElement, MouseButton, ParentElement, Render, StatefulInteractiveElement,
-    Styled, Window, deferred, div, px, rgb,
+    Context, IntoElement, MouseButton, ParentElement, Render, StatefulInteractiveElement, Styled,
+    Window, deferred, div, px, rgb,
 };
 use gpui_component::ActiveTheme;
-use gpui_component::scroll::ScrollableElement;
-//use gpui_component::dock::PanelView;
 
-impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
-    for TypstNoteView<W>
-{
+impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld + 'static> Render for TypstNoteView<W> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 1. Root Container (Vertical Flex)
         let mut root = div()
@@ -127,6 +123,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
                         .update(cx, |ribbon, cx| ribbon.handle_toggle_underline(action, cx));
                 }),
             )
+            .on_action(cx.listener(Self::handle_package_manager))
             .when_some(self.menu_bar.clone(), |this, menu_bar| {
                 this.child(div().border_b_1().child(menu_bar))
             })
@@ -167,9 +164,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static> Render
 }
 
 /// Renders the modal picker UI for recent files.
-pub fn render_recent_files_picker<
-    W: typst_gpui::TypstGpuiWorld + typforge_core::IdeWorld + 'static,
->(
+pub fn render_recent_files_picker<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld + 'static>(
     this: &mut TypstNoteView<W>,
     _window: &mut Window,
     cx: &mut Context<TypstNoteView<W>>,

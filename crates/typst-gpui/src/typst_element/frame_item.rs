@@ -15,16 +15,16 @@ use typst::{
 // --- Helper Functions for SVG Masks & CPU Rasterization ---
 
 // Helper to convert Typst Color to an SVG RGBA string
-fn svg_color(color: &typst::visualize::Color) -> String {
-    let rgb = color.to_rgb();
-    format!(
-        "rgba({}, {}, {}, {})",
-        (rgb.red * 255.0).round() as u8,
-        (rgb.green * 255.0).round() as u8,
-        (rgb.blue * 255.0).round() as u8,
-        rgb.alpha
-    )
-}
+// fn svg_color(color: &typst::visualize::Color) -> String {
+//     let rgb = color.to_rgb();
+//     format!(
+//         "rgba({}, {}, {}, {})",
+//         (rgb.red * 255.0).round() as u8,
+//         (rgb.green * 255.0).round() as u8,
+//         (rgb.blue * 255.0).round() as u8,
+//         rgb.alpha
+//     )
+// }
 
 // Helper to generate a monochrome SVG mask of a shape geometry with stroke padding
 fn render_shape_mask_as_svg(
@@ -425,7 +425,7 @@ pub fn frame_item_shape(
                 let h = Pixels::from(size.y.to_pt() as f32 * scale_factor);
                 gpui::Bounds::new(item_absolute_origin_gpui, gpui::size(w, h))
             }
-            typst::visualize::Geometry::Curve(curve) if curve.is_closed() => {
+            typst::visualize::Geometry::Curve(curve) => {
                 let typst_bbox_size = curve.bbox(None).size();
                 let w = Pixels::from(typst_bbox_size.x.to_pt() as f32 * scale_factor);
                 let h = Pixels::from(typst_bbox_size.y.to_pt() as f32 * scale_factor);
@@ -445,10 +445,6 @@ pub fn frame_item_shape(
                     scale_factor,
                 )
             }
-            _ => gpui::Bounds::new(
-                item_absolute_origin_gpui,
-                gpui::size(Pixels::ZERO, Pixels::ZERO),
-            ),
         };
 
         if bbox.size.width > Pixels::ZERO && bbox.size.height > Pixels::ZERO {
@@ -520,10 +516,6 @@ pub fn frame_item_shape(
                 scale_factor,
             )
         }
-        _ => gpui::Bounds::new(
-            item_absolute_origin_gpui,
-            gpui::size(Pixels::ZERO, Pixels::ZERO),
-        ),
     };
 
     if bbox.size.width <= Pixels::ZERO || bbox.size.height <= Pixels::ZERO {
@@ -619,20 +611,30 @@ pub fn frame_item_shape(
                             let is_start_cap = p1 == 0.0;
                             let is_end_cap = p2 == 1.0;
                             if let typst::visualize::LineCap::Round = stroke.cap {
-                                if is_start_cap || is_end_cap {
-                                    let cap_start = if is_start_cap { sub_start } else { sub_end };
-                                    let cap_end = if is_end_cap { sub_end } else { sub_start };
-                                    // Use native quad circle round cap
-                                    let r = line_thickness_px / 2.0;
+                                let r = line_thickness_px / 2.0;
+
+                                if is_start_cap {
                                     window.paint_quad(gpui::quad(
                                         gpui::Bounds::new(
-                                            cap_start - gpui::point(r, r),
+                                            sub_start - gpui::point(r, r),
                                             gpui::size(line_thickness_px, line_thickness_px),
                                         ),
                                         gpui::Corners::all(r),
-                                        gpui::solid_background(typst_color_to_gpui_hsla(
-                                            if is_start_cap { c1 } else { c2 },
-                                        )),
+                                        gpui::solid_background(typst_color_to_gpui_hsla(c1)),
+                                        gpui::Edges::all(Pixels::ZERO),
+                                        gpui::transparent_black(),
+                                        gpui::BorderStyle::default(),
+                                    ));
+                                }
+
+                                if is_end_cap {
+                                    window.paint_quad(gpui::quad(
+                                        gpui::Bounds::new(
+                                            sub_end - gpui::point(r, r),
+                                            gpui::size(line_thickness_px, line_thickness_px),
+                                        ),
+                                        gpui::Corners::all(r),
+                                        gpui::solid_background(typst_color_to_gpui_hsla(c2)),
                                         gpui::Edges::all(Pixels::ZERO),
                                         gpui::transparent_black(),
                                         gpui::BorderStyle::default(),

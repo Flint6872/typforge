@@ -5,11 +5,12 @@ use gpui::*;
 use gpui_component::StyledExt;
 use gpui_component::{ActiveTheme, h_flex};
 
+use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
-use typforge_core::intel::Tooltip;
+use typastry::intel::Tooltip;
 
-impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Render
+impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Render
     for EditorPanel<W>
 {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -128,8 +129,13 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                 )
                 .into_any_element()
         } else if let Some(ref active_path) = active_file_path {
-            // <--- THEN, if files are open, check for an active path
-            if let Some(file) = self.open_files.iter().find(|f| f.path == *active_path) {
+            if active_path == &PathBuf::from("typforge://package-manager") {
+                if let Some(pkg_view) = &self.package_manager_view {
+                    pkg_view.clone().into_any_element()
+                } else {
+                    div().child("Loading Package Manager...").into_any_element()
+                }
+            } else if let Some(file) = self.open_files.iter().find(|f| f.path == *active_path) {
                 let active_path = active_path.clone();
 
                 CodeEditor::new(file.editor_state.clone(), file.language.clone(), Vec::new())
@@ -168,15 +174,10 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
                     }))
                     .into_any_element()
             } else {
-                // This case handles if active_file_path is Some, but the file is somehow not in open_files.
-                // It should ideally not happen if state is consistent, but a fallback to blank div is okay.
                 div().into_any_element()
             }
         } else {
             // This case covers when open_files is NOT empty, but active_file_path IS None.
-            // This indicates a state where files are open, but none are currently selected.
-            // You might want a different message here, or simply default to the first open file.
-            // For now, it will render a blank div.
             div().into_any_element()
         };
 
@@ -220,7 +221,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
             .flex_col()
             .child(
                 // Scrollable Tab Bar Container
-                div().w_full().bg(cx.theme().foreground).child(
+                div().w_full().bg(cx.theme().tab_bar).child(
                     h_flex().flex_nowrap().items_baseline().children(
                         if self.open_files.is_empty() {
                             vec![

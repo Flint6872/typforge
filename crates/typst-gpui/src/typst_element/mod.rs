@@ -16,10 +16,7 @@ use parking_lot::Mutex;
 use std::{
     collections::HashMap,
     fmt::Debug,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, atomic::AtomicBool},
     time::Instant,
 };
 
@@ -242,43 +239,59 @@ impl Element for TypstElement {
         let mut current_page_screen_y = bounds.origin.y; // For actual painting
         let mut y_offset_from_top = Pixels::ZERO; // For STABLE hit-mapping
 
+        let viewport = window.content_mask().bounds;
+        let view_top = viewport.origin.y - gpui::px(500.0);
+        let view_bottom = viewport.origin.y + viewport.size.height + gpui::px(500.0);
+
         for (i, page) in self.document.pages().iter().enumerate() {
             let page_height = Pixels::from(page.frame.height().to_pt() as f32 * scale_factor);
-            let frame_origin_in_gpui = gpui::point(bounds.origin.x, current_page_screen_y);
+            let page_bottom_screen_y = current_page_screen_y + page_height;
 
-            let page_width = Pixels::from(page.frame.width().to_pt() as f32 * scale_factor);
-
-            let page_size_gpui = gpui::Size {
-                width: page_width,
-                height: page_height,
-            };
-            // Draw Background
-            window.paint_quad(gpui::quad(
-                gpui::Bounds::new(frame_origin_in_gpui, page_size_gpui),
-                gpui::Corners::default(),
-                gpui::rgb(0xFFFFFF),
-                gpui::Edges::default(),
-                gpui::black(),
-                gpui::BorderStyle::default(),
-            ));
-
-            self.render_state
-                .has_active_animations
-                .store(false, Ordering::Relaxed);
-            // Paint items (Passing page.frame directly - NO CLONE)
-            self.paint_frame_items(
-                frame_origin_in_gpui,
-                y_offset_from_top, // <--- New stable argument
-                scale_factor,
+            self.collect_anchors_recursive(
                 &page.frame,
-                window,
-                cx,
-                1,
-                gpui::TransformationMatrix::unit(),
+                y_offset_from_top,
+                scale_factor,
                 &mut generated_hit_map,
             );
 
-            // Advance both counters by exactly the same amount
+            // 2. CHECK INTERSECTION: Is this page inside the visible screen area?
+            let is_visible =
+                page_bottom_screen_y >= view_top && current_page_screen_y <= view_bottom;
+
+            if is_visible {
+                let page_width = Pixels::from(page.frame.width().to_pt() as f32 * scale_factor);
+                let frame_origin_in_gpui = gpui::point(bounds.origin.x, current_page_screen_y);
+
+                let page_size_gpui = gpui::Size {
+                    width: page_width,
+                    height: page_height,
+                };
+
+                // Draw Background Quad
+                window.paint_quad(gpui::quad(
+                    gpui::Bounds::new(frame_origin_in_gpui, page_size_gpui),
+                    gpui::Corners::default(),
+                    gpui::rgb(0xFFFFFF),
+                    gpui::Edges::default(),
+                    gpui::black(),
+                    gpui::BorderStyle::default(),
+                ));
+
+                // Paint items ONLY for visible pages
+                self.paint_frame_items(
+                    frame_origin_in_gpui,
+                    y_offset_from_top,
+                    scale_factor,
+                    &page.frame,
+                    window,
+                    cx,
+                    1,
+                    gpui::TransformationMatrix::unit(),
+                    &mut generated_hit_map,
+                );
+            }
+
+            // 3. Always advance the Y tracking counters so the next page starts at the right coordinate
             let advance = page_height
                 + if i < self.document.pages().len() - 1 {
                     page_margin_px
@@ -314,8 +327,7 @@ impl Element for TypstElement {
                     let glyph_end = glyph_info.byte_offset + glyph_info.byte_len;
                     // Check for any overlap between selection and glyph
                     if glyph_end > sel_start && glyph_info.byte_offset < sel_end {
-                        let mut highlight_bounds = glyph_info.bounds;
-                        highlight_bounds.origin.y -= highlight_bounds.size.height * 0.8;
+                        let highlight_bounds = glyph_info.bounds; // Direct aligned bounds!
                         window.paint_quad(gpui::fill(highlight_bounds, highlight_color));
                     }
                 }
@@ -328,36 +340,44 @@ impl Element for TypstElement {
             let mut cursor_line_height_px: Option<Pixels> = None;
 
             for glyph_info in &generated_hit_map.glyphs {
-                // Find glyph containing the cursor
-                if cursor_offset >= glyph_info.byte_offset
-                    && cursor_offset < glyph_info.byte_offset + glyph_info.byte_len
-                {
+                let glyph_start = glyph_info.byte_offset;
+                let glyph_end = glyph_info.byte_offset + glyph_info.byte_len;
+
+                // 1. Caret is inside or at the start of this glyph
+                if cursor_offset >= glyph_start && cursor_offset < glyph_end {
                     cursor_visual_position_px = Some(glyph_info.bounds.origin);
                     cursor_line_height_px = Some(glyph_info.bounds.size.height);
                     break;
                 }
-            }
-
-            // End of document/line handling
-            if cursor_visual_position_px.is_none() && !generated_hit_map.glyphs.is_empty() {
-                let last_glyph = generated_hit_map.glyphs.last().unwrap();
-                if cursor_offset >= last_glyph.byte_offset + last_glyph.byte_len {
+                // 2. Caret is at the trailing boundary of this glyph (e.g. right before markup ']')
+                else if cursor_offset == glyph_end {
                     cursor_visual_position_px = Some(gpui::point(
-                        last_glyph.bounds.top_right().x,
-                        last_glyph.bounds.origin.y,
+                        glyph_info.bounds.top_right().x,
+                        glyph_info.bounds.origin.y,
                     ));
-                    cursor_line_height_px = Some(last_glyph.bounds.size.height);
+                    cursor_line_height_px = Some(glyph_info.bounds.size.height);
+                    // Keep scanning in case the next glyph starts at the same offset
                 }
             }
 
-            if let Some(mut point_px) = cursor_visual_position_px {
+            // Fallback for end of document or trailing whitespace
+            if cursor_visual_position_px.is_none() && !generated_hit_map.glyphs.is_empty() {
+                if let Some(last_glyph) = generated_hit_map.glyphs.last() {
+                    if cursor_offset >= last_glyph.byte_offset + last_glyph.byte_len {
+                        cursor_visual_position_px = Some(gpui::point(
+                            last_glyph.bounds.top_right().x,
+                            last_glyph.bounds.origin.y,
+                        ));
+                        cursor_line_height_px = Some(last_glyph.bounds.size.height);
+                    }
+                }
+            }
+
+            if let Some(point_px) = cursor_visual_position_px {
                 let cursor_height = cursor_line_height_px.unwrap_or(gpui::px(16.0));
 
-                // Shift up to baseline
-                point_px.y -= cursor_height * 0.8;
-
                 let cursor_rect = gpui::Bounds {
-                    origin: point_px, // USE point_px DIRECTLY (No bounds.origin addition!)
+                    origin: point_px,
                     size: gpui::Size {
                         width: gpui::px(1.5),
                         height: cursor_height,
@@ -571,6 +591,27 @@ impl TypstElement {
                         },
                     );
                 }
+            }
+        }
+    }
+
+    fn collect_anchors_recursive(
+        &self,
+        frame: &Frame,
+        y_offset_from_top: Pixels,
+        scale_factor: f32,
+        hit_map: &mut HitMap,
+    ) {
+        for (pos, item) in frame.items() {
+            let item_y = y_offset_from_top + pos.to_gpui_pixels(scale_factor).y;
+            match item {
+                FrameItem::Tag(tag) => {
+                    hit_map.push_anchor(tag.location(), Point::new(Pixels::ZERO, item_y));
+                }
+                FrameItem::Group(group) => {
+                    self.collect_anchors_recursive(&group.frame, item_y, scale_factor, hit_map);
+                }
+                _ => {}
             }
         }
     }

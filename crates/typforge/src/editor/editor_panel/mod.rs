@@ -3,18 +3,17 @@ mod handlers;
 mod render;
 
 use crate::editor::{CodeEditor, FileContentUpdated, OpenedFile};
-
+use crate::package_manager::{PackageManagerStore, PackageManagerView};
 use gpui::*;
 use gpui_component::{RopeExt, dock::Panel as DockPanel, input::InputState};
 use parking_lot::Mutex;
 use std::rc::Rc;
 use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
-use typforge_core::format::format_document;
+use typastry::format::format_document;
+use typastry::intel::{Tooltip, get_hover_info};
 
-use typforge_core::intel::{Tooltip, get_hover_info};
-
-impl<W: typst::World + typforge_core::IdeWorld + 'static> EventEmitter<FileContentUpdated>
+impl<W: typst::World + typastry::IdeWorld + 'static> EventEmitter<FileContentUpdated>
     for EditorPanel<W>
 {
 }
@@ -27,12 +26,12 @@ pub struct EditorSelectionChanged {
     pub color: Option<String>,
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + 'static> EventEmitter<EditorSelectionChanged>
+impl<W: typst::World + typastry::IdeWorld + 'static> EventEmitter<EditorSelectionChanged>
     for EditorPanel<W>
 {
 }
 
-pub struct EditorPanel<W: typst::World + typforge_core::IdeWorld + 'static> {
+pub struct EditorPanel<W: typst::World + typastry::IdeWorld + 'static> {
     pub open_files: Vec<OpenedFile>,
     pub active_file_path: Option<PathBuf>,
     focus_handle: FocusHandle,
@@ -42,9 +41,10 @@ pub struct EditorPanel<W: typst::World + typforge_core::IdeWorld + 'static> {
     pub current_hover_content: Option<Tooltip>,
     pub current_hover_position: Option<Point<Pixels>>,
     pub last_hover_request_time: Option<Instant>,
+    pub package_manager_view: Option<Entity<PackageManagerView>>,
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Clone
+impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Clone
     for EditorPanel<W>
 {
     fn clone(&self) -> Self {
@@ -57,13 +57,12 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
             current_hover_content: self.current_hover_content.clone(),
             current_hover_position: self.current_hover_position.clone(),
             last_hover_request_time: self.last_hover_request_time,
+            package_manager_view: self.package_manager_view.clone(),
         }
     }
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static>
-    EditorPanel<W>
-{
+impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> EditorPanel<W> {
     pub fn new(shared_world: Arc<Mutex<W>>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             open_files: Vec::new(),
@@ -74,6 +73,7 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
             current_hover_content: None,
             current_hover_position: None,
             last_hover_request_time: None,
+            package_manager_view: None,
         }
     }
 
@@ -122,7 +122,8 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
         cursor: usize,
         cx: &mut Context<Self>,
     ) {
-        let props = crate::ribbon::injector::detect_properties_at_offset(content, cursor);
+        // Query the active cursor styling state directly from typastry's pure AST engine
+        let props = typastry::edit::detect_properties_at_offset(content, cursor);
         cx.emit(EditorSelectionChanged {
             is_bold: props.is_bold,
             is_italic: props.is_italic,
@@ -130,6 +131,28 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
             font: props.font,
             color: props.color,
         });
+    }
+
+    pub fn undo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(active_path) = &self.active_file_path {
+            if let Some(file) = self.open_files.iter_mut().find(|f| f.path == *active_path) {
+                file.editor_state.update(cx, |state, cx| {
+                    state.focus(window, cx);
+                });
+                window.dispatch_action(Box::new(gpui_component::input::Undo), cx);
+            }
+        }
+    }
+
+    pub fn redo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(active_path) = &self.active_file_path {
+            if let Some(file) = self.open_files.iter_mut().find(|f| f.path == *active_path) {
+                file.editor_state.update(cx, |state, cx| {
+                    state.focus(window, cx);
+                });
+                window.dispatch_action(Box::new(gpui_component::input::Redo), cx);
+            }
+        }
     }
 
     fn subscribe_to_editor_changes(
@@ -187,11 +210,50 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
         })
         .detach();
     }
+
+    pub fn open_package_manager(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pkg_path = PathBuf::from("typforge://package-manager");
+
+        // If already open in open_files, just switch to it
+        if self.open_files.iter().any(|f| f.path == pkg_path) {
+            self.active_file_path = Some(pkg_path);
+            cx.notify();
+            return;
+        }
+
+        // Lazy-init the package manager view on first open
+        if self.package_manager_view.is_none() {
+            let store = Arc::new(std::sync::Mutex::new(PackageManagerStore::new()));
+            let view = cx.new(|cx| PackageManagerView::new(store, window, cx));
+            self.package_manager_view = Some(view);
+        }
+
+        let editor_state = cx.new(|cx| {
+            InputState::new(window, cx)
+                .code_editor("text")
+                .default_value("")
+        });
+        let code_editor_entity =
+            cx.new(|_cx| CodeEditor::new(editor_state.clone(), "text".to_string(), Vec::new()));
+
+        let tab_file = OpenedFile {
+            path: pkg_path.clone(),
+            editor_state,
+            language: "pkg".to_string(),
+            has_unsaved_changes: false,
+            lsp_version: 0,
+            diagnostics: Vec::new(),
+            code_editor_entity,
+            is_untitled: false,
+        };
+
+        self.open_files.push(tab_file);
+        self.active_file_path = Some(pkg_path);
+        cx.notify();
+    }
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static>
-    EditorPanel<W>
-{
+impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> EditorPanel<W> {
     pub fn set_zoom(&mut self, zoom: f32, cx: &mut gpui::Context<Self>) {
         self.zoom_level = zoom.clamp(0.25, 5.0);
         cx.notify();
@@ -484,18 +546,18 @@ impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 's
     }
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + 'static> Focusable for EditorPanel<W> {
+impl<W: typst::World + typastry::IdeWorld + 'static> Focusable for EditorPanel<W> {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + 'static>
-    EventEmitter<gpui_component::dock::PanelEvent> for EditorPanel<W>
+impl<W: typst::World + typastry::IdeWorld + 'static> EventEmitter<gpui_component::dock::PanelEvent>
+    for EditorPanel<W>
 {
 }
 
-impl<W: typst::World + typforge_core::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> DockPanel
+impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> DockPanel
     for EditorPanel<W>
 {
     fn panel_name(&self) -> &'static str {

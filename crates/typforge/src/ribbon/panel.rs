@@ -6,6 +6,7 @@ use gpui_component::{
     ActiveTheme, ThemeColor,
     color_picker::{ColorPickerEvent, ColorPickerState},
 };
+use typastry::edit::ActiveProperties;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum RibbonTab {
@@ -194,4 +195,106 @@ impl RibbonPanel {
             .on_mouse_down(MouseButton::Left, on_click)
             .child(label)
     }
+}
+
+impl RibbonPanel {
+    pub fn update_active_properties(
+        &mut self,
+        props: &ActiveProperties,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut changed = false;
+
+        if self.is_bold != props.is_bold {
+            self.is_bold = props.is_bold;
+            changed = true
+        }
+
+        if self.is_italic != props.is_italic {
+            self.is_italic = props.is_italic;
+            changed = true;
+        }
+
+        if self.is_underline != props.is_underline {
+            self.is_underline = props.is_underline;
+            changed = true;
+        }
+
+        if let Some(ref font) = props.font {
+            if &self.selected_font != font {
+                self.selected_font = font.clone();
+                changed = true;
+            }
+        }
+
+        if let Some(size) = props.size {
+            if (self.font_size - size).abs() > 0.01 {
+                self.font_size = size;
+                changed = true;
+            }
+        }
+
+        if let Some(ref color_str) = props.color {
+            if let Some(hsla) = parse_typst_color_to_hsla(color_str) {
+                let picker = self.text_color_picker.clone();
+                picker.update(cx, |state, picker_cx| {
+                    state.set_value(hsla, _window, picker_cx);
+                });
+            }
+        }
+
+        if changed {
+            cx.notify();
+        }
+    }
+}
+
+fn parse_typst_color_to_hsla(s: &str) -> Option<Hsla> {
+    let trimmed = s.trim().trim_matches('"');
+
+    match trimmed.to_lowercase().as_str() {
+        "black" => return Some(black()),
+        "white" => return Some(white()),
+        "red" => return Some(rgb(0xff0000).into()),
+        "green" => return Some(rgb(0x00ff00).into()),
+        "blue" => return Some(rgb(0x0000ff).into()),
+        "yellow" => return Some(rgb(0xffff00).into()),
+        "cyan" => return Some(rgb(0x00ffff).into()),
+        "magenta" => return Some(rgb(0xff00ff).into()),
+        "gray" | "grey" => return Some(rgb(0x808080).into()),
+        _ => {}
+    }
+
+    let hex_candidate = if let Some(inner) = trimmed
+        .strip_prefix("rgb(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        inner.trim().trim_matches('"').trim_matches('\'')
+    } else {
+        trimmed
+    };
+
+    if let Some(hex) = hex_candidate.strip_prefix('#') {
+        if hex.len() == 6 {
+            if let Ok(val) = u32::from_str_radix(hex, 16) {
+                return Some(rgb(val).into());
+            }
+        } else if hex.len() == 3 {
+            let r = u8::from_str_radix(&hex[0..1], 16).ok()? * 17;
+            let g = u8::from_str_radix(&hex[1..2], 16).ok()? * 17;
+            let b = u8::from_str_radix(&hex[2..3], 16).ok()? * 17;
+            return Some(
+                Rgba {
+                    r: r as f32 / 255.0,
+                    g: g as f32 / 255.0,
+                    b: b as f32 / 255.0,
+                    a: 1.0,
+                }
+                .into(),
+            );
+        }
+    }
+
+    None
 }
