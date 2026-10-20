@@ -14,7 +14,6 @@ use crate::{
 
 use gpui_component::{
     dock::{DockArea, DockItem},
-    list::{List, ListItem, ListState},
     menu::AppMenuBar,
 };
 use gpui_util::ResultExt;

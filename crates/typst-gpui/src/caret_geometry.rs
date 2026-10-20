@@ -328,7 +328,6 @@ impl CaretGeometryEngine {
         match direction {
             HorizontalDirection::Right => {
                 let mut idx = caret.glyph_index;
-                let mut passed_word = false;
 
                 // 1. Consume current word characters
                 while idx + 1 < glyphs.len() {
@@ -336,7 +335,6 @@ impl CaretGeometryEngine {
                     if let Some(g) = glyphs.get(next_idx) {
                         if let Some(c) = char_at_offset(g.byte_offset) {
                             if is_word_char(c) {
-                                passed_word = true;
                                 idx = next_idx;
                             } else {
                                 break;

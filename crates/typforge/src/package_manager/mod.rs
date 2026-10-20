@@ -90,9 +90,9 @@ impl PackageManagerStore {
     pub fn scan_local_packages(&mut self) {
         let mut found = Vec::new();
 
-        let scan_targets = [(&self.cache_dir, "preview"), (&self.data_dir, "local")];
+        let scan_targets = [&self.cache_dir, &self.data_dir];
 
-        for (dir_opt, default_ns) in scan_targets {
+        for dir_opt in scan_targets {
             if let Some(dir_path) = dir_opt {
                 if !dir_path.exists() {
                     continue;
@@ -373,6 +373,7 @@ impl std::fmt::Display for PackageResolutionError {
 impl std::error::Error for PackageResolutionError {}
 
 /// Cross-platform user home folder resolution helper
+#[cfg(not(target_os = "windows"))]
 fn get_home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))

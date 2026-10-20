@@ -1,17 +1,17 @@
 use gpui::Pixels;
 
 pub trait TypstCurveExt {
-    fn is_closed(&self) -> bool;
+    //fn is_closed(&self) -> bool;
     fn is_ellipse(&self) -> bool;
     fn is_circle(&self, width: Pixels, height: Pixels) -> bool;
 }
 
 impl TypstCurveExt for typst::visualize::Curve {
-    fn is_closed(&self) -> bool {
-        self.0
-            .iter()
-            .any(|item| matches!(item, typst::visualize::CurveItem::Close))
-    }
+    // fn is_closed(&self) -> bool {
+    //     self.0
+    //         .iter()
+    //         .any(|item| matches!(item, typst::visualize::CurveItem::Close))
+    // }
 
     fn is_ellipse(&self) -> bool {
         let mut cubic_count = 0;

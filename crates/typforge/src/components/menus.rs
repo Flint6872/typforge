@@ -1,9 +1,6 @@
 use std::{collections::HashMap, eprintln};
 
-use crate::{
-    actions::{self, ChangeTheme},
-    editor::editor_panel,
-};
+use crate::actions::{self, ChangeTheme};
 use gpui::{App, Global, Menu, MenuItem};
 use gpui_component::{ThemeRegistry, ThemeSet};
 

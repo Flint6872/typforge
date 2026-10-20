@@ -6,12 +6,10 @@ use gpui::Focusable;
 use gpui::InteractiveElement;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Context, Element, IntoElement, MouseButton, ParentElement, Render, StatefulInteractiveElement,
-    Styled, Window, deferred, div, px, rgb,
+    Context, IntoElement, MouseButton, ParentElement, Render, StatefulInteractiveElement, Styled,
+    Window, deferred, div, px, rgb,
 };
 use gpui_component::ActiveTheme;
-use gpui_component::scroll::ScrollableElement;
-//use gpui_component::dock::PanelView;
 
 impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld + 'static> Render for TypstNoteView<W> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

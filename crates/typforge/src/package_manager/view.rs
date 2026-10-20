@@ -1,5 +1,4 @@
 use gpui::*;
-use gpui_component::scroll::ScrollableElement;
 use gpui_component::{
     ActiveTheme, StyledExt, h_flex,
     input::{Input, InputState},
@@ -77,10 +76,10 @@ impl PackageManagerView {
 
     /// Recalculates the list of elements matching the filter & search query and updates ListState
     pub fn update_filtered_items(&mut self, cx: &mut Context<Self>) {
-        let store = self.store.lock().unwrap();
-        let local_packages = store.local_packages.clone();
-        let remote_index = store.remote_index.clone();
-        drop(store);
+        let (local_packages, remote_index) = match self.store.lock() {
+            Ok(store) => (store.local_packages.clone(), store.remote_index.clone()),
+            Err(_) => return,
+        };
 
         let query = self.search_input.read(cx).text().to_string().to_lowercase();
 
@@ -101,8 +100,9 @@ impl PackageManagerView {
 
         match self.current_filter {
             TabFilter::Installed => {
-                if query_changed || filter_changed {
-                    self.list_state.reset(self.filtered_installed.len());
+                let target_len = self.filtered_installed.len();
+                if query_changed || filter_changed || self.list_state.item_count() != target_len {
+                    self.list_state.reset(target_len);
                 } else {
                     self.list_state.remeasure();
                 }
@@ -122,8 +122,9 @@ impl PackageManagerView {
                     self.filtered_registry = Vec::new();
                 }
 
-                if query_changed || filter_changed {
-                    self.list_state.reset(self.filtered_registry.len());
+                let target_len = self.filtered_registry.len();
+                if query_changed || filter_changed || self.list_state.item_count() != target_len {
+                    self.list_state.reset(target_len);
                 } else {
                     self.list_state.remeasure();
                 }
@@ -164,8 +165,10 @@ impl PackageManagerView {
                     let result = async_cx
                         .background_executor()
                         .spawn(async move {
-                            let mut lock = store.lock().unwrap();
-                            lock.fetch_remote_index()
+                            match store.lock() {
+                                Ok(mut lock) => lock.fetch_remote_index(),
+                                Err(_) => Err("Failed to acquire store lock".to_string()),
+                            }
                         })
                         .await;
 
@@ -201,8 +204,10 @@ impl PackageManagerView {
                     let _result = async_cx
                         .background_executor()
                         .spawn(async move {
-                            let mut lock = store.lock().unwrap();
-                            lock.download_package(&pkg_name, &pkg_ver)
+                            match store.lock() {
+                                Ok(mut lock) => lock.download_package(&pkg_name, &pkg_ver),
+                                Err(_) => Err("Failed to acquire store lock".to_string()),
+                            }
                         })
                         .await;
 
@@ -234,7 +239,9 @@ impl PackageManagerView {
     pub fn render_list_item(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
         match self.current_filter {
             TabFilter::Installed => {
-                let pkg = &self.filtered_installed[ix];
+                let Some(pkg) = self.filtered_installed.get(ix) else {
+                    return div().into_any_element();
+                };
                 let is_local = pkg.namespace == "local";
                 let badge_bg: Hsla = if is_local {
                     cx.theme().primary
@@ -331,7 +338,9 @@ impl PackageManagerView {
                     .into_any_element()
             }
             TabFilter::Registry => {
-                let item = &self.filtered_registry[ix];
+                let Some(item) = self.filtered_registry.get(ix) else {
+                    return div().into_any_element();
+                };
                 let is_cached = self.filtered_installed.iter().any(|lp| {
                     lp.namespace == "preview" && lp.name == item.name && lp.version == item.version
                 });
@@ -348,10 +357,13 @@ impl PackageManagerView {
 
 impl Render for PackageManagerView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let store = self.store.lock().unwrap();
-        let remote_index = store.remote_index.clone();
-        let last_error = store.last_error.clone();
-        drop(store);
+        let (remote_index, last_error) = match self.store.lock() {
+            Ok(store) => (store.remote_index.clone(), store.last_error.clone()),
+            Err(poisoned) => {
+                let store = poisoned.into_inner();
+                (store.remote_index.clone(), store.last_error.clone())
+            }
+        };
 
         let is_synced = remote_index.is_some();
         let total_registry_count = remote_index.as_ref().map(|v| v.len()).unwrap_or(0);

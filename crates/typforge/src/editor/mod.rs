@@ -13,8 +13,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use typastry::intel::Tooltip;
-
 #[derive(Clone, Debug)]
 pub struct FileContentUpdated {
     pub path: Option<std::path::PathBuf>,
@@ -128,29 +126,4 @@ pub enum InputEvent {
     PressEnter { secondary: bool },
     Focus,
     Blur,
-}
-
-// Helper to render the hover popup using our new Tooltip enum
-fn render_hover_popup<W: typst::World + typastry::IdeWorld + 'static>(
-    tooltip: &Tooltip,
-    screen_pos: Point<Pixels>,
-    _cx: &mut Context<EditorPanel<W>>,
-) -> impl IntoElement {
-    let content = match tooltip {
-        Tooltip::Text(text) => text.to_string(),
-        Tooltip::Code(code) => format!("```typst\n{}\n```", code),
-    };
-
-    div()
-        .bg(rgb(0x282C34)) // Dark background
-        .text_color(rgb(0xABB2BF)) // Light text
-        .p_2()
-        .rounded_md()
-        .border_1()
-        .border_color(rgb(0x3E4452))
-        .absolute()
-        .left(screen_pos.x)
-        .top(screen_pos.y + px(20.0)) // Offset slightly below mouse
-        .w(px(400.0)) // Max width
-        .child(content)
 }

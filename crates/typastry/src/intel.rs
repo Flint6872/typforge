@@ -1,6 +1,5 @@
 #![cfg(feature = "intel")]
 use std::fs;
-use std::path::{Path, PathBuf};
 use typst::syntax::Side;
 use typst::syntax::Source;
 pub use typst_ide::{Completion, IdeWorld, Tooltip, autocomplete, tooltip};
