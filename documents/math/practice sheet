@@ -1,0 +1,157 @@
+// --- CONFIGURATION ---
+#let seed = 42                 // Change this number to generate a completely new set of problems
+#let show-answers = false        // Set to true to show answers, false to hide them
+#let total-problems = 15       // Number of problems to generate
+
+// 1. STYLE SETTING: Use "vertical" for traditional stacked math, or "horizontal" for linear equations
+#let layout-style = "vertical" 
+
+// 2. OPERATOR SETTING: Choose which operators to include. 
+// Examples: ("+",), or ("+", "-"), or ("+", "-", "*", "/")
+#let active-operators = ("+", "*",)
+
+// 3. DIFFICULTY SETTINGS (Adjust min and max ranges for First and Second numbers)
+#let range-add-1 = (min: 10, max: 99)   // Addition: First number range
+#let range-add-2 = (min: 10, max: 99)   // Addition: Second number range
+
+#let range-sub-1 = (min: 10, max: 99)   // Subtraction: First number range
+#let range-sub-2 = (min: 10, max: 99)   // Subtraction: Second number range
+
+#let range-mul-1 = (min: 2, max: 12)    // Multiplication: First number range
+#let range-mul-2 = (min: 2, max: 12)    // Multiplication: Second number range
+
+#let range-div-target = (min: 2, max: 12) // Division: Intended target quotient range
+#let range-div-divisor = (min: 2, max: 10) // Division: Second number (divisor) range
+
+// --- LINEAR CONGRUENTIAL GENERATOR (LCG) FOR REPEATABLE RANDOMNESS ---
+#let lcg(state) = {
+  let a = 1664525
+  let c = 1013904223
+  let m = calc.pow(2, 32)
+  return calc.rem(state * a + c, m)
+}
+
+// Helper to scale the raw LCG state into a target range [min, max]
+#let get-value(state, bounds) = {
+  let range = bounds.max - bounds.min + 1
+  return bounds.min + calc.rem(state, range)
+}
+
+// --- DOCUMENT SETUP ---
+#set page(
+  paper: "us-letter",
+  margin: (x: 2cm, top: 2.5cm, bottom: 2.5cm),
+  header: align(right)[
+    #text(size: 9pt, fill: gray)[Seed: #seed | Style: #layout-style]
+  ],
+
+)
+#set text(font: "Liberation Serif", size: 12pt)
+
+// --- TITLE & SCORE TRACKING BOX ---
+#grid(
+  columns: (1fr, auto),
+  gutter: 1em,
+  align: (left + horizon, right + horizon),
+  [
+    #text(size: 20pt, weight: "bold")[Arithmetic Practice Worksheet] \
+    #v(2pt)
+    #text(size: 11pt, style: "italic", fill: gray)[
+      #if show-answers { "(Answer Key)" } else { "Name: ________________________  Date: _____________" }
+    ]
+  ],
+  // Score tracking box component
+  if not show-answers [
+    #rect(stroke: 1pt, inset: 10pt, radius: 4pt)[
+      #text(size: 13pt, weight: "bold")[Score: \_\_\_ / #total-problems]
+    ]
+  ]
+)
+#v(25pt)
+
+// --- PROBLEM GENERATION LOOP ---
+#let current-state = seed
+
+// Dynamically set columns: 4 columns for compact vertical blocks, 2 columns for horizontal equations
+#let num-columns = if layout-style == "vertical" { 4 } else { 2 }
+#let row-spacing = if layout-style == "vertical" { 3.5em } else { 2.5em }
+
+#grid(
+  columns: range(num-columns).map(_ => 1fr), 
+  row-gutter: row-spacing,
+  column-gutter: 2em,
+  
+  ..for i in range(1, total-problems + 1) {
+    // 1. Pick an operator randomly from the active choices
+    current-state = lcg(current-state)
+    let op-idx = calc.rem(current-state, active-operators.len())
+    let op-type = active-operators.at(op-idx)
+    
+    // 2. Generate Numbers based on chosen operation type and difficulty rules
+    current-state = lcg(current-state)
+    let num1 = 0
+    let num2 = 0
+    let op-symbol = ""
+    let answer = 0
+    
+    if op-type == "+" {
+      num1 = get-value(current-state, range-add-1)
+      current-state = lcg(current-state)
+      num2 = get-value(current-state, range-add-2)
+      op-symbol = "+"
+      answer = num1 + num2
+    } else if op-type == "-" {
+      let val1 = get-value(current-state, range-sub-1)
+      current-state = lcg(current-state)
+      let val2 = get-value(current-state, range-sub-2)
+      // Automatically ensures top number is larger to avoid negative outputs
+      num1 = calc.max(val1, val2)
+      num2 = calc.min(val1, val2)
+      op-symbol = "-"
+      answer = num1 - num2
+    } else if op-type == "*" {
+      num1 = get-value(current-state, range-mul-1)
+      current-state = lcg(current-state)
+      num2 = get-value(current-state, range-mul-2)
+      op-symbol = [#sym.times]
+      answer = num1 * num2
+    } else if op-type == "/" {
+      num2 = get-value(current-state, range-div-divisor)
+      current-state = lcg(current-state)
+      let multiplier = get-value(current-state, range-div-target)
+      num1 = num2 * multiplier
+      op-symbol = [#sym.div]
+      answer = multiplier
+    }
+    
+    // 3. Render based on layout style selection
+    (
+      if layout-style == "horizontal" [
+        #box(width: 2em, align(right)[#i)]) 
+        #num1 #op-symbol #num2 = 
+        #if show-answers [
+          #text(fill: blue.darken(20%), weight: "bold")[#answer]
+        ] else [
+          #box(width: 3em, stroke: (bottom: 0.5pt), inset: (bottom: -2pt))[]
+        ]
+      ] else [
+        // Traditional vertical layout box alignment
+        #stack(
+          dir: ltr,
+          spacing: 0.6em,
+          box(width: 1.5em, align(right + top)[#text(fill: gray.darken(20%))[#i)])]),
+          box(width: 3.5em, align(right)[
+            #num1 \
+            #op-symbol #num2 \
+            #v(-0.5em) #line(length: 100%, stroke: 0.7pt) #v(-0.2em)
+            #if show-answers [
+              #text(fill: blue.darken(20%), weight: "bold")[#answer]
+            ] else [
+              #v(1.5em) // Empty space for student handwriting
+            ]
+          ])
+        )
+      ],
+    )
+  }
+)
