@@ -112,3 +112,14 @@ Implement keyboard navigation and improve selection logic
 - Clean up function name parsing in the AST detection logic.
 
 Improve text selection and glyph bounding box alignment
+
+Implemented Introspection right click in preview window
+
+Implement viewport culling for visible pages and recursive anchor collection to improve rendering performance.
+
+Add canvas input handler and caret geometry engine Implemnted wysisyg editor in the preview pane
+
+Add package discovery and import resolution support updated ast with import completion
+
+
+0.0.5 update
