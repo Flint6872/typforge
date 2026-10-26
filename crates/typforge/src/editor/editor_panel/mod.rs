@@ -2,10 +2,10 @@ mod completions;
 mod handlers;
 mod render;
 
-use crate::editor::{CodeEditor, FileContentUpdated, OpenedFile};
+use crate::editor::{CodeEditor, EditorStateExt, FileContentUpdated, OpenedFile};
 use crate::package_manager::{PackageManagerStore, PackageManagerView};
-use gpui::*;
-use gpui_component::{RopeExt, dock::Panel as DockPanel, input::InputState};
+use gpui_kit::component::{RopeExt, dock::Panel as DockPanel, input::EditorState};
+use gpui_kit::*;
 use parking_lot::Mutex;
 use std::rc::Rc;
 use std::time::Instant;
@@ -139,7 +139,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                 file.editor_state.update(cx, |state, cx| {
                     state.focus(window, cx);
                 });
-                window.dispatch_action(Box::new(gpui_component::input::Undo), cx);
+                window.dispatch_action(Box::new(gpui_kit::component::input::Undo), cx);
             }
         }
     }
@@ -150,7 +150,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                 file.editor_state.update(cx, |state, cx| {
                     state.focus(window, cx);
                 });
-                window.dispatch_action(Box::new(gpui_component::input::Redo), cx);
+                window.dispatch_action(Box::new(gpui_kit::component::input::Redo), cx);
             }
         }
     }
@@ -158,14 +158,14 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
     fn subscribe_to_editor_changes(
         _this: &mut Self,
         path: PathBuf,
-        editor_state: &Entity<InputState>,
+        editor_state: &Entity<EditorState>,
         cx: &mut Context<Self>,
     ) {
         // 1. Subscribe to actual Change events to sync the workspace world and handle jumping
         cx.subscribe(
             editor_state,
-            move |this_view, editor_entity, event: &gpui_component::input::InputEvent, cx| {
-                if let gpui_component::input::InputEvent::Change = event {
+            move |this_view, editor_entity, event: &gpui_kit::component::input::InputEvent, cx| {
+                if let gpui_kit::component::input::InputEvent::Change = event {
                     if let Some(_file) = this_view.open_files.iter_mut().find(|f| f.path == path) {
                         let content = editor_entity.read(cx).text().to_string();
                         let cursor = editor_entity.read(cx).cursor();
@@ -229,8 +229,8 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         }
 
         let editor_state = cx.new(|cx| {
-            InputState::new(window, cx)
-                .code_editor("text")
+            EditorState::new(window, cx)
+                .language("text")
                 .default_value("")
         });
         let code_editor_entity =
@@ -297,7 +297,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                 let provider =
                     completions::TypstCompletionProvider::<W>::new(self.shared_world.clone());
                 new_file.editor_state.update(cx, |state, _| {
-                    state.lsp.completion_provider = Some(Rc::new(provider));
+                    state.lsp_mut().completion_provider = Some(Rc::new(provider));
                 });
 
                 let content = new_file.editor_state.read(cx).text().to_string();
@@ -463,20 +463,15 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         }
 
         let editor_state = cx.new(|cx| {
-            InputState::new(window, cx)
-                .code_editor("typst")
-                .multi_line(true)
-                .soft_wrap(false)
-                .line_number(true)
-                .searchable(true)
-                .folding(true)
+            EditorState::new(window, cx)
+                .language("typst")
                 .default_value("")
         });
 
         let provider = completions::TypstCompletionProvider::<W>::new(self.shared_world.clone());
 
         editor_state.update(cx, |state, _| {
-            state.lsp.completion_provider = Some(Rc::new(provider));
+            state.lsp_mut().completion_provider = Some(Rc::new(provider));
         });
 
         let code_editor_entity =
@@ -552,18 +547,22 @@ impl<W: typst::World + typastry::IdeWorld + 'static> Focusable for EditorPanel<W
     }
 }
 
-impl<W: typst::World + typastry::IdeWorld + 'static> EventEmitter<gpui_component::dock::PanelEvent>
-    for EditorPanel<W>
+impl<W: typst::World + typastry::IdeWorld + 'static>
+    EventEmitter<gpui_kit::component::dock::PanelEvent> for EditorPanel<W>
 {
+}
+
+impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static>
+    gpui_kit::base::dock::Panel for EditorPanel<W>
+{
+    fn panel_name(&self) -> &'static str {
+        "EditorPanel"
+    }
 }
 
 impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> DockPanel
     for EditorPanel<W>
 {
-    fn panel_name(&self) -> &'static str {
-        "EditorPanel"
-    }
-
     fn title(&mut self, _: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div().child("Editor")
     }

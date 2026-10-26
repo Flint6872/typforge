@@ -10,9 +10,9 @@ use crate::{
     typst_world::GpuiWorld,
 };
 
-use gpui::*;
-use gpui_component::Root;
-use gpui_component_assets::Assets;
+use gpui_kit::assets::Assets;
+use gpui_kit::component::Root;
+use gpui_kit::*;
 
 use parking_lot::Mutex;
 
@@ -54,7 +54,7 @@ fn main() -> Result<()> {
         }
     }
 
-    gpui_platform::application()
+    gpui_kit::application()
         .with_assets(Assets)
         .run(|cx: &mut App| {
             // The closure receives &mut AppContext
@@ -63,7 +63,7 @@ fn main() -> Result<()> {
             // cx.with_assets_directory(typforge::app::DEFAULT_ASSETS_DIRECTORY);
             // cx.run_migrations();
 
-            gpui_component::init(cx);
+            gpui_kit::component::init(cx);
             load_settings(cx);
             bind_keys(cx);
             theme::init(cx);
@@ -83,7 +83,7 @@ fn main() -> Result<()> {
 
             #[cfg(not(target_os = "macos"))]
             if let Some(menus) = cx.get_menus() {
-                gpui_component::global_state::GlobalState::global_mut(cx).set_app_menus(menus);
+                gpui_kit::component::global_state::GlobalState::global_mut(cx).set_app_menus(menus);
             }
 
             // Theme::change(ThemeMode::Dark, None, cx);
@@ -139,7 +139,7 @@ fn main() -> Result<()> {
                         )
                     });
 
-                    // Then, wrap it inside gpui_component::Root
+                    // Then, wrap it inside gpui_kit::component::Root
                     cx.new(|cx| Root::new(typst_note_view, window, cx))
                 },
             )

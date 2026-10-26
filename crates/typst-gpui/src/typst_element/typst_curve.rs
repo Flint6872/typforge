@@ -1,4 +1,4 @@
-use gpui::Pixels;
+use gpui_kit::Pixels;
 
 pub trait TypstCurveExt {
     //fn is_closed(&self) -> bool;

@@ -16,14 +16,16 @@ members = [
 
 
 [workspace.dependencies]
-gpui = { git = "https://github.com/zed-industries/zed" } # NEW: Use Zed's GPUI directly
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
-    "font-kit",
-    "x11",
-    "wayland",
-    "runtime_shaders",
-] } # NEW: gpui-component might also imply this
-gpui_macros = { git = "https://github.com/zed-industries/zed" } # NEW: If you use gpui_macros
+gpui-kit = "0.8"
+
+# gpui = { git = "https://github.com/zed-industries/zed" } # NEW: Use Zed's GPUI directly
+# gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
+#     "font-kit",
+#     "x11",
+#     "wayland",
+#     "runtime_shaders",
+# ] } # NEW: gpui-component might also imply this
+# gpui_macros = { git = "https://github.com/zed-industries/zed" } # NEW: If you use gpui_macros
 
 # gpui-component = { git = "https://github.com/longbridge/gpui-component", features = [
 #     "tree-sitter-languages",

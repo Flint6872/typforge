@@ -1,5 +1,5 @@
-use gpui::{Context, Task, Window};
-use gpui_component::input::{CompletionProvider, InputState};
+use gpui_kit::component::input::CompletionProvider;
+use gpui_kit::{Task, Window};
 use lsp_types::{
     CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit,
     InsertTextFormat, Position, Range, TextEdit,
@@ -114,7 +114,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         &self,
         _offset: usize,
         new_text: &str,
-        _cx: &mut Context<InputState>,
+        _cx: &mut gpui_kit::App,
     ) -> bool {
         new_text == "#"
             || new_text == "("
@@ -130,7 +130,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         offset: usize,
         _trigger: CompletionContext,
         _window: &mut Window,
-        _cx: &mut Context<InputState>,
+        _cx: &mut gpui_kit::App,
     ) -> Task<anyhow::Result<CompletionResponse>> {
         let world = self.shared_world.clone();
 

@@ -1,11 +1,11 @@
 // crates/typforge/src/ribbon/panel.rs
 
 use crate::actions::RibbonAction;
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, ThemeColor,
     color_picker::{ColorPickerEvent, ColorPickerState},
 };
+use gpui_kit::*;
 use typastry::edit::ActiveProperties;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

@@ -3,7 +3,7 @@ use crate::caret_geometry::{
     VerticalDirection, VisualCaret,
 };
 use crate::typst_element::HitMap;
-use gpui::{App, ClipboardItem, KeyDownEvent, Pixels, Point, point, px};
+use gpui_kit::{App, ClipboardItem, KeyDownEvent, Pixels, Point, point, px};
 
 pub enum CanvasAction {
     None,

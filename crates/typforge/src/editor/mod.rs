@@ -5,11 +5,13 @@ pub mod tabs;
 pub use code_editor::CodeEditor;
 pub use editor_panel::EditorPanel;
 
-use gpui::*;
-use gpui_component::{ActiveTheme, input::InputState};
-
+//use gpui_kit::base::input::EditorState;
+use gpui_kit::component::{ActiveTheme, input::EditorState};
+use gpui_kit::{Context, EntityInputHandler as _, Window, *};
+use ropey::Rope;
 use std::{
     fs,
+    ops::Range,
     path::{Path, PathBuf},
 };
 
@@ -39,10 +41,37 @@ impl Render for DraggedTab {
     }
 }
 
+pub trait EditorStateExt: Sized {
+    fn replace_range_with_history(
+        &mut self,
+        range: Range<usize>,
+        new_text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    );
+}
+
+impl EditorStateExt for EditorState {
+    fn replace_range_with_history(
+        &mut self,
+        range: Range<usize>,
+        new_text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = self.text();
+        let start_utf16 = text.byte_to_utf16_idx(range.start);
+        let end_utf16 = text.byte_to_utf16_idx(range.end);
+        let range_utf16 = start_utf16..end_utf16;
+
+        self.replace_text_in_range(Some(range_utf16), new_text, window, cx);
+    }
+}
+
 #[derive(Clone)]
 pub struct OpenedFile {
     pub path: PathBuf,
-    pub editor_state: Entity<InputState>,
+    pub editor_state: Entity<EditorState>,
     pub language: String,          // e.g., "rust", "markdown", "typst"
     pub has_unsaved_changes: bool, // Future: Track if content is modified
     pub lsp_version: i32,          // Track document version
@@ -58,9 +87,8 @@ impl OpenedFile {
         let language = get_language_from_path(&path);
 
         let editor_state = cx.new(|cx| {
-            InputState::new(window, cx)
-                .code_editor(language.clone())
-                .multi_line(true)
+            EditorState::new(window, cx)
+                .language(language.clone())
                 .soft_wrap(false)
                 .line_number(true)
                 .searchable(true)
@@ -118,7 +146,7 @@ fn get_language_from_path(path: &Path) -> String {
         .to_string()
 }
 
-impl EventEmitter<InputEvent> for InputState {}
+impl EventEmitter<InputEvent> for EditorState {}
 
 #[derive(Clone)]
 pub enum InputEvent {

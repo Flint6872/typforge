@@ -1,9 +1,9 @@
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, StyledExt, h_flex,
     input::{Input, InputState},
     v_flex,
 };
+use gpui_kit::*;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
@@ -474,7 +474,7 @@ impl Render for PackageManagerView {
                     .items_center()
                     .child(
                         div()
-                            .flex_grow()
+                            .flex_grow_0()
                             .p_1()
                             .rounded_md()
                             .border_1()
@@ -529,7 +529,7 @@ impl Render for PackageManagerView {
             // --- VIRTUALIZED SCROLL LIST ---
             .child(
                 v_flex()
-                    .flex_grow()
+                    .flex_grow_1()
                     .w_full()
                     .h_full()
                     .child(
@@ -570,7 +570,7 @@ impl Render for PackageManagerView {
                                     this_view.render_list_item(ix, cx)
                                 })
                             })
-                            .flex_grow()
+                            .flex_grow_1()
                             .w_full()
                             .h_full()
                             .into_any_element()

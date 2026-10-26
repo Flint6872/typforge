@@ -1,5 +1,5 @@
-use gpui::{App, SharedString};
-use gpui_component::{Theme, ThemeRegistry};
+use gpui_kit::component::{Theme, ThemeRegistry};
+use gpui_kit::{App, SharedString};
 
 use crate::actions::ChangeTheme;
 use crate::components::menus::setup_menus;

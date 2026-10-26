@@ -1,5 +1,5 @@
 use crate::actions;
-use gpui::{App, KeyBinding}; // Import your application actions
+use gpui_kit::{App, KeyBinding}; // Import your application actions
 
 pub fn bind_keys(cx: &mut App) {
     const GLOBAL_CONTEXT: Option<&str> = None; // Global context for menu actions

@@ -1,10 +1,13 @@
-use gpui::*;
-use gpui_component::{
-    IconName,
-    dock::Panel as DockPanel,
-    h_flex,
-    list::ListItem,
-    tree::{TreeItem, TreeState, tree},
+use gpui_kit::*;
+use gpui_kit::{
+    base::dock::Panel as BasePanel,
+    component::{
+        IconName,
+        dock::Panel as DockPanel,
+        h_flex,
+        list::ListItem,
+        tree::{TreeItem, TreeState, tree},
+    },
 };
 use std::{
     collections::HashSet,
@@ -295,13 +298,15 @@ impl Focusable for FilesPanel {
 impl EventEmitter<OpenFileEvent> for FilesPanel {}
 
 // Implement EventEmitter for PanelEvent if you need to emit events
-impl EventEmitter<gpui_component::dock::PanelEvent> for FilesPanel {}
+impl EventEmitter<gpui_kit::component::dock::PanelEvent> for FilesPanel {}
 
-impl DockPanel for FilesPanel {
+impl BasePanel for FilesPanel {
     fn panel_name(&self) -> &'static str {
         "FilesPanel" // Unique string identifier for this panel type
     }
+}
 
+impl DockPanel for FilesPanel {
     fn title(&mut self, _: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div().child("FilesPanel")
     }

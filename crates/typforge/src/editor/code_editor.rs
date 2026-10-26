@@ -1,15 +1,15 @@
-use gpui::{Point, Styled, *};
-use gpui_component::{
+use gpui_kit::component::{
     h_flex,
     highlighter::{Diagnostic, DiagnosticSeverity},
     input::*,
     v_flex,
 };
+use gpui_kit::{Point, Styled, *};
 use typst::diag::{Severity, SourceDiagnostic};
 
 pub struct CodeEditor {
     id: ElementId,
-    editor: Entity<InputState>,
+    editor: Entity<EditorState>,
     language: String,
     height: Option<DefiniteLength>,
     font_size: Option<Pixels>,
@@ -37,7 +37,7 @@ impl Clone for CodeEditor {
 
 impl CodeEditor {
     pub fn new(
-        editor_state: Entity<InputState>,
+        editor_state: Entity<EditorState>,
         language: String,
         _initial_diagnostics: Vec<typst::diag::SourceDiagnostic>,
     ) -> Self {
@@ -153,11 +153,11 @@ impl CodeEditor {
 
         while low_row <= high_row {
             let mid_row = (low_row + high_row) / 2;
-            let row_start = text.position_to_offset(&gpui_component::input::Position {
+            let row_start = text.position_to_offset(&gpui_kit::component::input::Position {
                 line: mid_row as u32,
                 character: 0,
             });
-            let next_row_start = text.position_to_offset(&gpui_component::input::Position {
+            let next_row_start = text.position_to_offset(&gpui_kit::component::input::Position {
                 line: (mid_row + 1) as u32,
                 character: 0,
             });
@@ -211,7 +211,7 @@ impl CodeEditor {
 
 impl Render for CodeEditor {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let mut input = Input::new(&self.editor)
+        let mut input = Editor::new(&self.editor)
             .bordered(true)
             .h_full()
             .appearance(false);
@@ -242,8 +242,8 @@ impl Render for CodeEditor {
                     .gap_2()
                     .child("Language:")
                     .child(div().child(self.language.clone())),
-            )
-            .child(div().flex_grow().child(input_container.child(input)))
+            ) //changed felx_grow to flex_grow_1 when moved to gpui_kit
+            .child(div().flex_grow_1().child(input_container.child(input)))
     }
 }
 
@@ -251,7 +251,7 @@ impl IntoElement for CodeEditor {
     type Element = AnyElement;
 
     fn into_element(self) -> Self::Element {
-        let mut input = Input::new(&self.editor).bordered(true).h_full();
+        let mut input = Editor::new(&self.editor).bordered(true).h_full();
 
         if let Some(size) = self.font_size {
             input = input.text_size(size);
@@ -270,7 +270,7 @@ impl IntoElement for CodeEditor {
                     .child("Language:")
                     .child(div().child(self.language.clone())),
             )
-            .child(div().flex_grow().child(input));
+            .child(div().flex_grow_1().child(input));
 
         if let Some(height) = self.height {
             root = root.h(height);

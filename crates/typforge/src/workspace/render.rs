@@ -2,14 +2,11 @@ use crate::{
     actions::{self},
     workspace::TypstNoteView,
 };
-use gpui::Focusable;
-use gpui::InteractiveElement;
-use gpui::prelude::FluentBuilder;
-use gpui::{
-    Context, IntoElement, MouseButton, ParentElement, Render, StatefulInteractiveElement, Styled,
-    Window, deferred, div, px, rgb,
+use gpui_kit::component::ActiveTheme;
+use gpui_kit::{
+    Context, Focusable, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
+    StatefulInteractiveElement, Styled, Window, deferred, div, prelude::FluentBuilder, px, rgb,
 };
-use gpui_component::ActiveTheme;
 
 impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld + 'static> Render for TypstNoteView<W> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -129,7 +126,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld + 'static> Render for Ty
             })
             // --- 3. Render Ribbon Panel ---
             .child(self.ribbon_panel.clone())
-            .child(div().flex_grow().h_5_6().child(self.dock_area.clone()))
+            .child(div().flex_grow(1.0).h_5_6().child(self.dock_area.clone()))
             .child(
                 div()
                     .w_full()
@@ -144,13 +141,13 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld + 'static> Render for Ty
                         div()
                             .flex()
                             .gap_2()
-                            .children(vec![gpui::div().child("Status: Ready")]),
+                            .children(vec![gpui_kit::div().child("Status: Ready")]),
                     )
                     .child(
                         div()
                             .flex()
                             .gap_2()
-                            .children(vec![gpui::div().child("Line: 1, Col: 1")]),
+                            .children(vec![gpui_kit::div().child("Line: 1, Col: 1")]),
                     ),
             );
 
@@ -183,7 +180,7 @@ pub fn render_recent_files_picker<W: typst_gpui::TypstGpuiWorld + typastry::IdeW
             .justify_center()
             // .items_center()
             // Semi-transparent black backdrop overlay using hex rgba (b0 is ~70% opacity)
-            .bg(gpui::Rgba {
+            .bg(gpui_kit::Rgba {
                 r: 0.0,
                 g: 0.0,
                 b: 0.0,

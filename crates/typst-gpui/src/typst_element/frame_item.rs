@@ -5,7 +5,7 @@ use crate::typst_element::{
         typst_paint_to_gpui_hsla_from_paint,
     },
 };
-use gpui::{App, Bounds, Pixels, Point, TransformationMatrix, Window};
+use gpui_kit::{App, Bounds, Pixels, Point, TransformationMatrix, Window};
 use std::{sync::Arc, time::Instant};
 use typst::{
     layout::Size,
@@ -256,7 +256,7 @@ fn calculate_line_bbox(
     target_rel_typst: typst::layout::Point,
     stroke_thickness_pt: f32,
     scale_factor: f32,
-) -> gpui::Bounds<Pixels> {
+) -> gpui_kit::Bounds<Pixels> {
     let target_gpui_rel = target_rel_typst.to_gpui_pixels(scale_factor);
     let end_p = origin_gpui + target_gpui_rel;
 
@@ -267,9 +267,9 @@ fn calculate_line_bbox(
 
     let half_stroke_px = Pixels::from(stroke_thickness_pt / 2.0 * scale_factor);
 
-    gpui::Bounds::new(
-        gpui::point(min_x - half_stroke_px, min_y - half_stroke_px),
-        gpui::size(
+    gpui_kit::Bounds::new(
+        gpui_kit::point(min_x - half_stroke_px, min_y - half_stroke_px),
+        gpui_kit::size(
             max_x - min_x + half_stroke_px * 2.0,
             max_y - min_y + half_stroke_px * 2.0,
         ),
@@ -289,7 +289,7 @@ pub fn frame_item_image(
 ) {
     let width_px = Pixels::from(typst_image_size.x.to_pt() as f32 * scale_factor);
     let height_px = Pixels::from(typst_image_size.y.to_pt() as f32 * scale_factor);
-    let image_bounds = gpui::Bounds::new(origin, gpui::size(width_px, height_px));
+    let image_bounds = gpui_kit::Bounds::new(origin, gpui_kit::size(width_px, height_px));
 
     let gpui_image_arc = {
         let mut cache = render_state.image_cache.lock();
@@ -297,23 +297,23 @@ pub fn frame_item_image(
             match image.kind() {
                 typst::visualize::ImageKind::Raster(raster_image) => {
                     let format = match raster_image.format() {
-                        typst::visualize::RasterFormat::Exchange(typst::visualize::ExchangeFormat::Png) => Some(gpui::ImageFormat::Png),
-                        typst::visualize::RasterFormat::Exchange(typst::visualize::ExchangeFormat::Jpg) => Some(gpui::ImageFormat::Jpeg),
-                        typst::visualize::RasterFormat::Exchange(typst::visualize::ExchangeFormat::Gif) => Some(gpui::ImageFormat::Gif),
-                        typst::visualize::RasterFormat::Exchange(typst::visualize::ExchangeFormat::Webp) => Some(gpui::ImageFormat::Webp),
+                        typst::visualize::RasterFormat::Exchange(typst::visualize::ExchangeFormat::Png) => Some(gpui_kit::ImageFormat::Png),
+                        typst::visualize::RasterFormat::Exchange(typst::visualize::ExchangeFormat::Jpg) => Some(gpui_kit::ImageFormat::Jpeg),
+                        typst::visualize::RasterFormat::Exchange(typst::visualize::ExchangeFormat::Gif) => Some(gpui_kit::ImageFormat::Gif),
+                        typst::visualize::RasterFormat::Exchange(typst::visualize::ExchangeFormat::Webp) => Some(gpui_kit::ImageFormat::Webp),
                         _ => None,
                     };
-                    format.map(|gpui_format| Arc::new(gpui::Image::from_bytes(gpui_format, raster_image.data().to_vec())))
+                    format.map(|gpui_format| Arc::new(gpui_kit::Image::from_bytes(gpui_format, raster_image.data().to_vec())))
                 }
                 typst::visualize::ImageKind::Svg(svg_image) => {
-                    Some(Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, svg_image.data().to_vec())))
+                    Some(Arc::new(gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Svg, svg_image.data().to_vec())))
                 }
                 typst::visualize::ImageKind::Pdf(_pdf_image) => {
                     eprintln!("Warning: PDF images are not directly rendered here. Rasterization required.");
                     None
                 }
             }
-            .unwrap_or_else(|| Arc::new(gpui::Image::empty()))
+            .unwrap_or_else(|| Arc::new(gpui_kit::Image::empty()))
         }).clone()
     };
 
@@ -354,20 +354,21 @@ pub fn frame_item_image(
         window
             .paint_image(
                 image_bounds,
-                gpui::Corners::default(),
+                image_bounds,
+                gpui_kit::Corners::default(),
                 render_image,
                 current_frame_index,
                 false,
             )
             .ok();
     } else {
-        window.paint_quad(gpui::quad(
+        window.paint_quad(gpui_kit::quad(
             image_bounds,
-            gpui::Corners::default(),
-            gpui::black().alpha(0.05),
-            gpui::Edges::all(Pixels::from(1.0)),
-            gpui::black().alpha(0.1),
-            gpui::BorderStyle::default(),
+            gpui_kit::Corners::default(),
+            gpui_kit::black().alpha(0.05),
+            gpui_kit::Edges::all(Pixels::from(1.0)),
+            gpui_kit::black().alpha(0.1),
+            gpui_kit::BorderStyle::default(),
         ));
     }
 }
@@ -385,7 +386,7 @@ pub fn frame_item_link(
 
     let transformed_origin = current_transform.apply(origin);
 
-    let bounds = Bounds::new(transformed_origin, gpui::size(width, height));
+    let bounds = Bounds::new(transformed_origin, gpui_kit::size(width, height));
     hit_map.push_link(bounds, destination.clone());
 }
 
@@ -412,7 +413,7 @@ pub fn frame_item_shape(
     let stroke = shape.stroke.as_ref();
     let stroke_color = stroke
         .map(|s| typst_paint_to_gpui_hsla_from_paint(&s.paint))
-        .unwrap_or(gpui::transparent_black());
+        .unwrap_or(gpui_kit::transparent_black());
     let thickness = stroke
         .map(|s| Pixels::from(s.thickness.to_pt() as f32 * scale_factor))
         .unwrap_or(Pixels::ZERO);
@@ -423,13 +424,13 @@ pub fn frame_item_shape(
             typst::visualize::Geometry::Rect(size) => {
                 let w = Pixels::from(size.x.to_pt() as f32 * scale_factor);
                 let h = Pixels::from(size.y.to_pt() as f32 * scale_factor);
-                gpui::Bounds::new(item_absolute_origin_gpui, gpui::size(w, h))
+                gpui_kit::Bounds::new(item_absolute_origin_gpui, gpui_kit::size(w, h))
             }
             typst::visualize::Geometry::Curve(curve) => {
                 let typst_bbox_size = curve.bbox(None).size();
                 let w = Pixels::from(typst_bbox_size.x.to_pt() as f32 * scale_factor);
                 let h = Pixels::from(typst_bbox_size.y.to_pt() as f32 * scale_factor);
-                gpui::Bounds::new(item_absolute_origin_gpui, gpui::size(w, h))
+                gpui_kit::Bounds::new(item_absolute_origin_gpui, gpui_kit::size(w, h))
             }
             typst::visualize::Geometry::Line(target) => {
                 let line_stroke_thickness_pt = shape
@@ -455,34 +456,34 @@ pub fn frame_item_shape(
                 bbox,
                 y_offset_from_top,
                 scale_factor,
-                gpui::TransformationMatrix::unit(),
+                gpui_kit::TransformationMatrix::unit(),
                 hit_map_collector,
             );
 
             if thickness > Pixels::ZERO {
                 let corner_radius = match &shape.geometry {
-                    typst::visualize::Geometry::Rect(_) => gpui::Corners::default(),
+                    typst::visualize::Geometry::Rect(_) => gpui_kit::Corners::default(),
                     typst::visualize::Geometry::Curve(curve) if curve.is_ellipse() => {
                         let w_bbox =
                             Pixels::from(curve.bbox(None).size().x.to_pt() as f32 * scale_factor);
                         let h_bbox =
                             Pixels::from(curve.bbox(None).size().y.to_pt() as f32 * scale_factor);
                         if curve.is_circle(w_bbox, h_bbox) {
-                            gpui::Corners::all(w_bbox / 2.0)
+                            gpui_kit::Corners::all(w_bbox / 2.0)
                         } else {
-                            gpui::Corners::all(w_bbox.min(h_bbox) / 2.0)
+                            gpui_kit::Corners::all(w_bbox.min(h_bbox) / 2.0)
                         }
                     }
-                    _ => gpui::Corners::default(),
+                    _ => gpui_kit::Corners::default(),
                 };
 
-                window.paint_quad(gpui::quad(
+                window.paint_quad(gpui_kit::quad(
                     bbox,
                     corner_radius,
-                    gpui::solid_background(gpui::transparent_black()),
-                    gpui::Edges::all(thickness),
+                    gpui_kit::solid_background(gpui_kit::transparent_black()),
+                    gpui_kit::Edges::all(thickness),
                     stroke_color,
-                    gpui::BorderStyle::default(),
+                    gpui_kit::BorderStyle::default(),
                 ));
             }
             return;
@@ -494,13 +495,13 @@ pub fn frame_item_shape(
         typst::visualize::Geometry::Rect(size) => {
             let w = Pixels::from(size.x.to_pt() as f32 * scale_factor);
             let h = Pixels::from(size.y.to_pt() as f32 * scale_factor);
-            gpui::Bounds::new(item_absolute_origin_gpui, gpui::size(w, h))
+            gpui_kit::Bounds::new(item_absolute_origin_gpui, gpui_kit::size(w, h))
         }
         typst::visualize::Geometry::Curve(curve) => {
             let typst_bbox_size = curve.bbox(None).size();
             let w = Pixels::from(typst_bbox_size.x.to_pt() as f32 * scale_factor);
             let h = Pixels::from(typst_bbox_size.y.to_pt() as f32 * scale_factor);
-            gpui::Bounds::new(item_absolute_origin_gpui, gpui::size(w, h))
+            gpui_kit::Bounds::new(item_absolute_origin_gpui, gpui_kit::size(w, h))
         }
         typst::visualize::Geometry::Line(target) => {
             let line_stroke_thickness_pt = shape
@@ -541,7 +542,10 @@ pub fn frame_item_shape(
                     .entry(cache_key)
                     .or_insert_with(|| {
                         let png_bytes = rasterize_gradient_to_png(grad, width_px, height_px);
-                        Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, png_bytes))
+                        Arc::new(gpui_kit::Image::from_bytes(
+                            gpui_kit::ImageFormat::Png,
+                            png_bytes,
+                        ))
                     })
                     .clone()
             };
@@ -551,29 +555,29 @@ pub fn frame_item_shape(
                     if let typst::visualize::Geometry::Curve(curve) = &shape.geometry {
                         if curve.is_ellipse() {
                             if curve.is_circle(bbox.size.width, bbox.size.height) {
-                                gpui::Corners::all(bbox.size.width / 2.0)
+                                gpui_kit::Corners::all(bbox.size.width / 2.0)
                             } else {
-                                gpui::Corners::all(bbox.size.width.min(bbox.size.height) / 2.0)
+                                gpui_kit::Corners::all(bbox.size.width.min(bbox.size.height) / 2.0)
                             }
                         } else {
-                            gpui::Corners::default()
+                            gpui_kit::Corners::default()
                         }
                     } else {
-                        gpui::Corners::default()
+                        gpui_kit::Corners::default()
                     };
 
                 window
-                    .paint_image(bbox, corner_radius, render_image, 0, false)
+                    .paint_image(bbox, bbox, corner_radius, render_image, 0, false)
                     .ok();
 
                 if thickness > Pixels::ZERO {
-                    window.paint_quad(gpui::quad(
+                    window.paint_quad(gpui_kit::quad(
                         bbox,
                         corner_radius,
-                        gpui::solid_background(gpui::transparent_black()),
-                        gpui::Edges::all(thickness),
+                        gpui_kit::solid_background(gpui_kit::transparent_black()),
+                        gpui_kit::Edges::all(thickness),
                         stroke_color,
-                        gpui::BorderStyle::default(),
+                        gpui_kit::BorderStyle::default(),
                     ));
                 }
                 return;
@@ -605,7 +609,7 @@ pub fn frame_item_shape(
                             let sub_start = start_p + target_gpui_rel * p1;
                             let sub_end = start_p + target_gpui_rel * p2;
 
-                            let mut path_builder = gpui::PathBuilder::stroke(line_thickness_px);
+                            let mut path_builder = gpui_kit::PathBuilder::stroke(line_thickness_px);
 
                             // Apply caps on endpoints of the entire gradient path
                             let is_start_cap = p1 == 0.0;
@@ -614,30 +618,30 @@ pub fn frame_item_shape(
                                 let r = line_thickness_px / 2.0;
 
                                 if is_start_cap {
-                                    window.paint_quad(gpui::quad(
-                                        gpui::Bounds::new(
-                                            sub_start - gpui::point(r, r),
-                                            gpui::size(line_thickness_px, line_thickness_px),
+                                    window.paint_quad(gpui_kit::quad(
+                                        gpui_kit::Bounds::new(
+                                            sub_start - gpui_kit::point(r, r),
+                                            gpui_kit::size(line_thickness_px, line_thickness_px),
                                         ),
-                                        gpui::Corners::all(r),
-                                        gpui::solid_background(typst_color_to_gpui_hsla(c1)),
-                                        gpui::Edges::all(Pixels::ZERO),
-                                        gpui::transparent_black(),
-                                        gpui::BorderStyle::default(),
+                                        gpui_kit::Corners::all(r),
+                                        gpui_kit::solid_background(typst_color_to_gpui_hsla(c1)),
+                                        gpui_kit::Edges::all(Pixels::ZERO),
+                                        gpui_kit::transparent_black(),
+                                        gpui_kit::BorderStyle::default(),
                                     ));
                                 }
 
                                 if is_end_cap {
-                                    window.paint_quad(gpui::quad(
-                                        gpui::Bounds::new(
-                                            sub_end - gpui::point(r, r),
-                                            gpui::size(line_thickness_px, line_thickness_px),
+                                    window.paint_quad(gpui_kit::quad(
+                                        gpui_kit::Bounds::new(
+                                            sub_end - gpui_kit::point(r, r),
+                                            gpui_kit::size(line_thickness_px, line_thickness_px),
                                         ),
-                                        gpui::Corners::all(r),
-                                        gpui::solid_background(typst_color_to_gpui_hsla(c2)),
-                                        gpui::Edges::all(Pixels::ZERO),
-                                        gpui::transparent_black(),
-                                        gpui::BorderStyle::default(),
+                                        gpui_kit::Corners::all(r),
+                                        gpui_kit::solid_background(typst_color_to_gpui_hsla(c2)),
+                                        gpui_kit::Edges::all(Pixels::ZERO),
+                                        gpui_kit::transparent_black(),
+                                        gpui_kit::BorderStyle::default(),
                                     ));
                                 }
                             }
@@ -647,13 +651,13 @@ pub fn frame_item_shape(
 
                             if let Ok(tessellated_path) = path_builder.build() {
                                 let angle = (linear.angle.to_deg() as f32 + 90.0) % 360.0;
-                                let sub_bg = gpui::linear_gradient(
+                                let sub_bg = gpui_kit::linear_gradient(
                                     angle,
-                                    gpui::LinearColorStop {
+                                    gpui_kit::LinearColorStop {
                                         color: typst_color_to_gpui_hsla(c1),
                                         percentage: 0.0,
                                     },
-                                    gpui::LinearColorStop {
+                                    gpui_kit::LinearColorStop {
                                         color: typst_color_to_gpui_hsla(c2),
                                         percentage: 1.0,
                                     },
@@ -683,9 +687,10 @@ pub fn frame_item_shape(
         let stroke_thickness = thickness.as_f32();
         let half_thickness = stroke_thickness / 2.0;
 
-        let padded_bbox = gpui::Bounds::new(
-            bbox.origin - gpui::point(Pixels::from(half_thickness), Pixels::from(half_thickness)),
-            gpui::size(
+        let padded_bbox = gpui_kit::Bounds::new(
+            bbox.origin
+                - gpui_kit::point(Pixels::from(half_thickness), Pixels::from(half_thickness)),
+            gpui_kit::size(
                 bbox.size.width + Pixels::from(stroke_thickness),
                 bbox.size.height + Pixels::from(stroke_thickness),
             ),
@@ -706,7 +711,7 @@ pub fn frame_item_shape(
                         padded_bbox,
                         path_hash.into(),
                         Some(&svg_bytes),
-                        gpui::TransformationMatrix::unit(),
+                        gpui_kit::TransformationMatrix::unit(),
                         typst_color_to_gpui_hsla(solid_color),
                         cx,
                     )
@@ -733,7 +738,7 @@ pub fn frame_item_shape(
                             padded_bbox,
                             path_hash.into(),
                             Some(&svg_bytes),
-                            gpui::TransformationMatrix::unit(),
+                            gpui_kit::TransformationMatrix::unit(),
                             stroke_color,
                             cx,
                         )
@@ -755,7 +760,7 @@ pub fn frame_item_shape(
                 let line_thickness_px =
                     Pixels::from(typst_stroke.thickness.to_pt() as f32 * scale_factor);
 
-                let mut path_builder = gpui::PathBuilder::stroke(line_thickness_px);
+                let mut path_builder = gpui_kit::PathBuilder::stroke(line_thickness_px);
                 path_builder.move_to(start_p);
                 path_builder.line_to(end_p);
 

@@ -474,7 +474,7 @@ impl CaretGeometryEngine {
 mod tests {
     use super::*;
     use crate::typst_element::GlyphInfo;
-    use gpui::{Bounds, point, size};
+    use gpui_kit::{Bounds, point, size};
 
     fn dummy_multiline_hit_map() -> HitMap {
         let mut hit_map = HitMap::default();
@@ -482,8 +482,8 @@ mod tests {
         for i in 0..3 {
             hit_map.push_glyph(GlyphInfo {
                 bounds: Bounds::new(
-                    point(gpui::px(i as f32 * 10.0), gpui::px(10.0)),
-                    size(gpui::px(10.0), gpui::px(15.0)),
+                    point(gpui_kit::px(i as f32 * 10.0), gpui_kit::px(10.0)),
+                    size(gpui_kit::px(10.0), gpui_kit::px(15.0)),
                 ),
                 byte_offset: i,
                 byte_len: 1,
@@ -494,8 +494,8 @@ mod tests {
         for i in 0..5 {
             hit_map.push_glyph(GlyphInfo {
                 bounds: Bounds::new(
-                    point(gpui::px(i as f32 * 10.0), gpui::px(30.0)),
-                    size(gpui::px(10.0), gpui::px(15.0)),
+                    point(gpui_kit::px(i as f32 * 10.0), gpui_kit::px(30.0)),
+                    size(gpui_kit::px(10.0), gpui_kit::px(15.0)),
                 ),
                 byte_offset: 3 + i,
                 byte_len: 1,

@@ -1,4 +1,4 @@
-use gpui::actions;
+use gpui_kit::actions;
 use serde::Deserialize;
 
 // Define actions for your application's menu items.
@@ -37,7 +37,7 @@ actions!(
     ]
 );
 
-#[derive(gpui::Action, Clone, PartialEq, Eq, Deserialize)]
+#[derive(gpui_kit::Action, Clone, PartialEq, Eq, Deserialize)]
 #[action(namespace = actions, no_json)]
 pub struct ChangeTheme {
     pub name: String,
@@ -51,7 +51,7 @@ pub struct ChangeTheme {
 //     pub line_number: usize,
 // }
 
-#[derive(gpui::Action, Clone, PartialEq, Eq, Deserialize)]
+#[derive(gpui_kit::Action, Clone, PartialEq, Eq, Deserialize)]
 #[action(namespace = actions, no_json)]
 pub struct OpenRecentFiles {
     pub path: String,

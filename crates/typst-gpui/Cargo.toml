@@ -6,8 +6,7 @@ license.workspace = true
 
 [dependencies]
 
-gpui.workspace = true
-gpui-component.workspace = true
+gpui-kit.workspace = true
 
 #added for line rendering
 lyon_path = "1.0.16"         # Ensure this is present

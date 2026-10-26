@@ -1,19 +1,19 @@
 pub mod handlers;
 pub mod render;
 
-use gpui::*;
+use gpui_kit::*;
 use std::sync::Arc;
 
 // Import necessary types
 use crate::{
     actions::RibbonAction,
-    editor::{FileContentUpdated, editor_panel::EditorPanel},
+    editor::{EditorStateExt, FileContentUpdated, editor_panel::EditorPanel},
     panels::{FilesPanel, OpenFileEvent},
     ribbon::RibbonPanel,
 };
 
-use gpui_component::{
-    dock::{DockArea, DockItem},
+use gpui_kit::component::{
+    dock::{DockArea, DockLayout, DockSkin, panel_handle},
     menu::AppMenuBar,
 };
 use gpui_util::ResultExt;
@@ -365,42 +365,28 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
         .detach();
 
         // --- 6. DockArea and MenuBar Setup ---
-        let dock_area_entity = cx.new(|cx| {
-            let mut dock_area = DockArea::new("main-dock", Some(1), window, cx);
-            let weak_dock_area = cx.entity().downgrade();
+        let (dock_area_entity, _skin) = DockSkin::dock_area("main-dock", Some(1), window, cx);
 
-            let dock_items = vec![
-                DockItem::tabs(
-                    vec![std::sync::Arc::new(files_panel.clone())],
-                    &weak_dock_area,
-                    window,
-                    cx,
+        dock_area_entity.update(cx, |dock_area, cx| {
+            let layout = DockLayout::h_split()
+                .child(
+                    DockLayout::tabs().panel_view(panel_handle(files_panel.clone()), cx),
+                    Some(px(200.0)),
                 )
-                .size(px(150.0)),
-                DockItem::tabs(
-                    vec![std::sync::Arc::new(editor_panel_entity.clone())],
-                    &weak_dock_area,
-                    window,
-                    cx,
-                ),
-                DockItem::tabs(
-                    vec![std::sync::Arc::new(preview_panel.clone())],
-                    &weak_dock_area,
-                    window,
-                    cx,
-                ),
-            ];
+                .child(
+                    DockLayout::tabs().panel_view(panel_handle(editor_panel_entity.clone()), cx),
+                    None,
+                )
+                .child(
+                    DockLayout::tabs().panel_view(panel_handle(preview_panel.clone()), cx),
+                    None,
+                );
 
-            dock_area.set_center(
-                DockItem::h_split(dock_items, &weak_dock_area, window, cx),
-                window,
-                cx,
-            );
-            dock_area
+            dock_area.set_center(layout, window, cx);
         });
 
         #[cfg(not(target_os = "macos"))]
-        let menu_bar = Some(gpui_component::menu::AppMenuBar::new(cx));
+        let menu_bar = Some(gpui_kit::component::menu::AppMenuBar::new(cx));
         #[cfg(target_os = "macos")]
         let menu_bar = None;
 

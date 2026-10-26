@@ -8,7 +8,7 @@ use typst_curve::TypstCurveExt;
 use typst_point::TypstPointExt;
 
 use crate::PreviewPanelEvent;
-use gpui::{
+use gpui_kit::{
     App, Bounds, Element, ElementId, EventEmitter, LayoutId, Pixels, Point, TransformationMatrix,
     Window,
 };
@@ -92,10 +92,10 @@ pub struct GradientCacheKey {
 }
 
 pub struct TypstRenderState {
-    pub image_cache: Mutex<HashMap<typst::visualize::Image, Arc<gpui::Image>>>,
-    pub animation_cache: Mutex<HashMap<gpui::ImageId, AnimationState>>,
+    pub image_cache: Mutex<HashMap<typst::visualize::Image, Arc<gpui_kit::Image>>>,
+    pub animation_cache: Mutex<HashMap<gpui_kit::ImageId, AnimationState>>,
     pub has_active_animations: AtomicBool,
-    pub gradient_cache: Mutex<HashMap<GradientCacheKey, Arc<gpui::Image>>>, // <-- ADDED
+    pub gradient_cache: Mutex<HashMap<GradientCacheKey, Arc<gpui_kit::Image>>>, // <-- ADDED
 }
 
 impl Default for TypstRenderState {
@@ -149,7 +149,7 @@ impl PartialEq for TypstElement {
     }
 }
 
-impl gpui::IntoElement for TypstElement {
+impl gpui_kit::IntoElement for TypstElement {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -174,8 +174,8 @@ impl Element for TypstElement {
     // The actual layout is done by Typst internally. We'll pass the document's size.
     fn request_layout(
         &mut self,
-        _id: Option<&gpui::GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
+        _id: Option<&gpui_kit::GlobalElementId>,
+        _inspector_id: Option<&gpui_kit::InspectorElementId>,
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
@@ -195,10 +195,10 @@ impl Element for TypstElement {
         }
 
         let layout_id = window.request_layout(
-            gpui::Style {
-                size: gpui::Size {
-                    width: gpui::px(max_width).into(),
-                    height: gpui::px(total_height).into(),
+            gpui_kit::Style {
+                size: gpui_kit::Size {
+                    width: gpui_kit::px(max_width).into(),
+                    height: gpui_kit::px(total_height).into(),
                 },
                 ..Default::default()
             },
@@ -212,9 +212,9 @@ impl Element for TypstElement {
     // Prepaint: Prepare the frame items for painting.
     fn prepaint(
         &mut self,
-        _id: Option<&gpui::GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        _bounds: gpui::Bounds<Pixels>,
+        _id: Option<&gpui_kit::GlobalElementId>,
+        _inspector_id: Option<&gpui_kit::InspectorElementId>,
+        _bounds: gpui_kit::Bounds<Pixels>,
         _request_layout: &mut Self::RequestLayoutState,
         _window: &mut Window,
         _cx: &mut App,
@@ -224,9 +224,9 @@ impl Element for TypstElement {
     // Paint: Draw the actual content.
     fn paint(
         &mut self,
-        _id: Option<&gpui::GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        bounds: gpui::Bounds<Pixels>, // Bounds allocated by request_layout
+        _id: Option<&gpui_kit::GlobalElementId>,
+        _inspector_id: Option<&gpui_kit::InspectorElementId>,
+        bounds: gpui_kit::Bounds<Pixels>, // Bounds allocated by request_layout
         _request_layout: &mut Self::RequestLayoutState,
         _prepaint: &mut Self::PrepaintState,
         window: &mut Window,
@@ -234,14 +234,14 @@ impl Element for TypstElement {
     ) {
         let scale_factor = PT_TO_PX * self.zoom;
         let mut generated_hit_map: HitMap = HitMap::default();
-        let page_margin_px = gpui::px(self.page_margin * self.zoom);
+        let page_margin_px = gpui_kit::px(self.page_margin * self.zoom);
 
         let mut current_page_screen_y = bounds.origin.y; // For actual painting
         let mut y_offset_from_top = Pixels::ZERO; // For STABLE hit-mapping
 
         let viewport = window.content_mask().bounds;
-        let view_top = viewport.origin.y - gpui::px(500.0);
-        let view_bottom = viewport.origin.y + viewport.size.height + gpui::px(500.0);
+        let view_top = viewport.origin.y - gpui_kit::px(500.0);
+        let view_bottom = viewport.origin.y + viewport.size.height + gpui_kit::px(500.0);
 
         for (i, page) in self.document.pages().iter().enumerate() {
             let page_height = Pixels::from(page.frame.height().to_pt() as f32 * scale_factor);
@@ -260,21 +260,21 @@ impl Element for TypstElement {
 
             if is_visible {
                 let page_width = Pixels::from(page.frame.width().to_pt() as f32 * scale_factor);
-                let frame_origin_in_gpui = gpui::point(bounds.origin.x, current_page_screen_y);
+                let frame_origin_in_gpui = gpui_kit::point(bounds.origin.x, current_page_screen_y);
 
-                let page_size_gpui = gpui::Size {
+                let page_size_gpui = gpui_kit::Size {
                     width: page_width,
                     height: page_height,
                 };
 
                 // Draw Background Quad
-                window.paint_quad(gpui::quad(
-                    gpui::Bounds::new(frame_origin_in_gpui, page_size_gpui),
-                    gpui::Corners::default(),
-                    gpui::rgb(0xFFFFFF),
-                    gpui::Edges::default(),
-                    gpui::black(),
-                    gpui::BorderStyle::default(),
+                window.paint_quad(gpui_kit::quad(
+                    gpui_kit::Bounds::new(frame_origin_in_gpui, page_size_gpui),
+                    gpui_kit::Corners::default(),
+                    gpui_kit::rgb(0xFFFFFF),
+                    gpui_kit::Edges::default(),
+                    gpui_kit::black(),
+                    gpui_kit::BorderStyle::default(),
                 ));
 
                 // Paint items ONLY for visible pages
@@ -286,7 +286,7 @@ impl Element for TypstElement {
                     window,
                     cx,
                     1,
-                    gpui::TransformationMatrix::unit(),
+                    gpui_kit::TransformationMatrix::unit(),
                     &mut generated_hit_map,
                 );
             }
@@ -316,7 +316,7 @@ impl Element for TypstElement {
             let sel_end = selection.start.max(selection.end);
 
             if sel_start != sel_end {
-                let highlight_color = gpui::Rgba {
+                let highlight_color = gpui_kit::Rgba {
                     r: 0.29,
                     g: 0.56,
                     b: 0.88,
@@ -328,7 +328,7 @@ impl Element for TypstElement {
                     // Check for any overlap between selection and glyph
                     if glyph_end > sel_start && glyph_info.byte_offset < sel_end {
                         let highlight_bounds = glyph_info.bounds; // Direct aligned bounds!
-                        window.paint_quad(gpui::fill(highlight_bounds, highlight_color));
+                        window.paint_quad(gpui_kit::fill(highlight_bounds, highlight_color));
                     }
                 }
             }
@@ -336,7 +336,7 @@ impl Element for TypstElement {
 
         // --- Draw Cursor ---
         if let Some(cursor_offset) = self.cursor_offset {
-            let mut cursor_visual_position_px: Option<gpui::Point<Pixels>> = None;
+            let mut cursor_visual_position_px: Option<gpui_kit::Point<Pixels>> = None;
             let mut cursor_line_height_px: Option<Pixels> = None;
 
             for glyph_info in &generated_hit_map.glyphs {
@@ -351,7 +351,7 @@ impl Element for TypstElement {
                 }
                 // 2. Caret is at the trailing boundary of this glyph (e.g. right before markup ']')
                 else if cursor_offset == glyph_end {
-                    cursor_visual_position_px = Some(gpui::point(
+                    cursor_visual_position_px = Some(gpui_kit::point(
                         glyph_info.bounds.top_right().x,
                         glyph_info.bounds.origin.y,
                     ));
@@ -364,7 +364,7 @@ impl Element for TypstElement {
             if cursor_visual_position_px.is_none() && !generated_hit_map.glyphs.is_empty() {
                 if let Some(last_glyph) = generated_hit_map.glyphs.last() {
                     if cursor_offset >= last_glyph.byte_offset + last_glyph.byte_len {
-                        cursor_visual_position_px = Some(gpui::point(
+                        cursor_visual_position_px = Some(gpui_kit::point(
                             last_glyph.bounds.top_right().x,
                             last_glyph.bounds.origin.y,
                         ));
@@ -374,24 +374,24 @@ impl Element for TypstElement {
             }
 
             if let Some(point_px) = cursor_visual_position_px {
-                let cursor_height = cursor_line_height_px.unwrap_or(gpui::px(16.0));
+                let cursor_height = cursor_line_height_px.unwrap_or(gpui_kit::px(16.0));
 
-                let cursor_rect = gpui::Bounds {
+                let cursor_rect = gpui_kit::Bounds {
                     origin: point_px,
-                    size: gpui::Size {
-                        width: gpui::px(1.5),
+                    size: gpui_kit::Size {
+                        width: gpui_kit::px(1.5),
                         height: cursor_height,
                     },
                 };
 
                 if self.show_cursor {
-                    window.paint_quad(gpui::quad(
+                    window.paint_quad(gpui_kit::quad(
                         cursor_rect,
-                        gpui::Corners::default(),
-                        gpui::rgb(0x4a90e2),
-                        gpui::Edges::default(),
-                        gpui::black(),
-                        gpui::BorderStyle::default(),
+                        gpui_kit::Corners::default(),
+                        gpui_kit::rgb(0x4a90e2),
+                        gpui_kit::Edges::default(),
+                        gpui_kit::black(),
+                        gpui_kit::BorderStyle::default(),
                     ));
                 }
             }
@@ -413,7 +413,7 @@ impl TypstElement {
         span_resolver: Option<Arc<dyn Fn(Span, u16) -> usize + Send + Sync + 'static>>, // Add this
     ) -> Self {
         Self {
-            id: gpui::ElementId::from(0),
+            id: gpui_kit::ElementId::from(0),
             document,
             page_margin: 20.0,
             zoom: 1.0,
@@ -539,7 +539,7 @@ impl TypstElement {
         window: &mut Window,
         cx: &mut App,
         tiling: &typst::visualize::Tiling,
-        bounds: gpui::Bounds<Pixels>, // This is the overall area to fill
+        bounds: gpui_kit::Bounds<Pixels>, // This is the overall area to fill
         y_offset_from_top: Pixels,
         scale_factor: f32,
         current_transform: TransformationMatrix,
@@ -561,11 +561,12 @@ impl TypstElement {
         for row in 0..rows {
             for col in 0..cols {
                 let cell_origin_in_target_area =
-                    gpui::point(cell_w_px * col as f32, cell_h_px * row as f32);
+                    gpui_kit::point(cell_w_px * col as f32, cell_h_px * row as f32);
                 let sub_origin = bounds.origin + cell_origin_in_target_area;
 
                 // 1. Calculate cell bounds
-                let cell_bounds = gpui::Bounds::new(sub_origin, gpui::size(cell_w_px, cell_h_px));
+                let cell_bounds =
+                    gpui_kit::Bounds::new(sub_origin, gpui_kit::size(cell_w_px, cell_h_px));
 
                 // 2. Intersect with the parent rect bounds (the 'bounds' argument)
                 // This forces absolute clipping to the rect's original dimensions
@@ -573,7 +574,7 @@ impl TypstElement {
 
                 if !clipped_cell_bounds.is_empty() {
                     window.with_content_mask(
-                        Some(gpui::ContentMask {
+                        Some(gpui_kit::ContentMask {
                             bounds: clipped_cell_bounds,
                         }),
                         |window| {

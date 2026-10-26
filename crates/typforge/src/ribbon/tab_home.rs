@@ -2,11 +2,11 @@ use crate::{
     actions::{self, RibbonAction},
     ribbon::panel::RibbonPanel,
 };
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Icon, IconName, Sizable, button::Button, color_picker::ColorPicker, h_flex,
     popover::Popover, scroll::ScrollableElement, v_flex,
 };
+use gpui_kit::*;
 
 impl RibbonPanel {
     pub fn handle_toggle_bold(&mut self, _: &actions::ToggleBold, cx: &mut Context<Self>) {

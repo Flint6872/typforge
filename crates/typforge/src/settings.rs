@@ -1,4 +1,4 @@
-use gpui::{App, Global};
+use gpui_kit::{App, Global};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

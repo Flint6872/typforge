@@ -1,5 +1,5 @@
-use gpui::{prelude::FluentBuilder, *};
-use gpui_component::{StyledExt, scroll::ScrollableElement};
+use gpui_kit::component::{StyledExt, scroll::ScrollableElement};
+use gpui_kit::{prelude::FluentBuilder, *};
 use parking_lot::Mutex;
 use std::{sync::Arc, time::Duration};
 use typst_layout::PagedDocument;
@@ -135,22 +135,22 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         });
     }
 
-    pub fn set_zoom(&mut self, zoom: f32, cx: &mut gpui::Context<Self>) {
+    pub fn set_zoom(&mut self, zoom: f32, cx: &mut gpui_kit::Context<Self>) {
         self.zoom = zoom.clamp(0.25, 5.0);
         cx.notify();
     }
 
-    pub fn zoom_in(&mut self, cx: &mut gpui::Context<Self>) {
+    pub fn zoom_in(&mut self, cx: &mut gpui_kit::Context<Self>) {
         self.set_zoom(self.zoom + 0.1, cx);
     }
 
     /// Decrement the zoom level by 10%
-    pub fn zoom_out(&mut self, cx: &mut gpui::Context<Self>) {
+    pub fn zoom_out(&mut self, cx: &mut gpui_kit::Context<Self>) {
         self.set_zoom(self.zoom - 0.1, cx);
     }
 
     /// Reset zoom to 100%
-    pub fn reset_zoom(&mut self, cx: &mut gpui::Context<Self>) {
+    pub fn reset_zoom(&mut self, cx: &mut gpui_kit::Context<Self>) {
         self.set_zoom(1.0, cx);
     }
 
@@ -465,7 +465,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             if link.bounds.contains(&point) {
                 match &link.destination {
                     typst::model::Destination::Url(url) => {
-                        let _ = gpui::App::open_url(cx, url.as_str());
+                        let _ = gpui_kit::App::open_url(cx, url.as_str());
                     }
                     typst::model::Destination::Location(loc) => {
                         self.scroll_to_location(*loc, cx);
@@ -487,7 +487,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
     ) {
         if let Some(doc) = &self.document {
             let scale_factor = (96.0 / 72.0) * self.zoom;
-            let page_margin_px = gpui::px(20.0 * self.zoom);
+            let page_margin_px = gpui_kit::px(20.0 * self.zoom);
             let mut target_y = Pixels::ZERO;
 
             let target_page_idx = pos.page.get().saturating_sub(1);
@@ -532,7 +532,7 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_focused = self.focus_handle.contains_focused(window, cx);
 
-        gpui::div()
+        gpui_kit::div()
             .id("preview-panel-root")
             .relative()
             .size_full()
@@ -674,12 +674,12 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
             )
             .on_click(|_, _, cx| cx.stop_propagation())
             .on_scroll_wheel(
-                cx.listener(|this, event: &gpui::ScrollWheelEvent, _win, cx| {
+                cx.listener(|this, event: &gpui_kit::ScrollWheelEvent, _win, cx| {
                     if event.modifiers.control || event.modifiers.platform {
-                        let delta = event.delta.pixel_delta(gpui::px(1.0)).y;
-                        if delta > gpui::px(0.) {
+                        let delta = event.delta.pixel_delta(gpui_kit::px(1.0)).y;
+                        if delta > gpui_kit::px(0.) {
                             this.set_zoom(this.zoom + 0.1, cx);
-                        } else if delta < gpui::px(0.) {
+                        } else if delta < gpui_kit::px(0.) {
                             this.set_zoom(this.zoom - 0.1, cx);
                         }
                     }
@@ -687,14 +687,14 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
             )
             .child(
                 // Stationary wrapper that hosts the scrollbar so it stays in place
-                gpui::div()
+                gpui_kit::div()
                     .id("preview-scroll-wrapper")
                     .relative()
                     .h_5_6()
                     .vertical_scrollbar(&self.scroll_handle)
                     .child(
                         // The actual scrolling container that handles the viewport and tracking
-                        gpui::div()
+                        gpui_kit::div()
                             .id("preview-scroll-container")
                             .overflow_scroll()
                             .track_scroll(&self.scroll_handle)
@@ -738,12 +738,12 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                                 .with_zoom(self.zoom)
                                 .into_any_element()
                             } else {
-                                gpui::div()
+                                gpui_kit::div()
                                     .size_full()
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .text_color(gpui::rgb(0x666666))
+                                    .text_color(gpui_kit::rgb(0x666666))
                                     .child("No document compiled")
                                     .into_any_element()
                             }),
@@ -946,17 +946,19 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
 }
 
 // Support for gpui_component's Docking system
-impl<W: TypstGpuiWorld> gpui_component::dock::Panel for PreviewPanel<W> {
+impl<W: TypstGpuiWorld> gpui_kit::base::dock::Panel for PreviewPanel<W> {
     fn panel_name(&self) -> &'static str {
         "PreviewPanel"
     }
+}
 
+impl<W: TypstGpuiWorld> component::dock::Panel for PreviewPanel<W> {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div().child("Preview")
     }
 }
 
-impl<W: TypstGpuiWorld> EventEmitter<gpui_component::dock::PanelEvent> for PreviewPanel<W> {}
+impl<W: TypstGpuiWorld> EventEmitter<gpui_kit::component::dock::PanelEvent> for PreviewPanel<W> {}
 
 impl<W: TypstGpuiWorld> EventEmitter<PreviewPanelEvent> for PreviewPanel<W> {}
 
@@ -967,7 +969,7 @@ impl<W: TypstGpuiWorld> Focusable for PreviewPanel<W> {
 }
 
 pub struct GpuiRegisteredFonts(pub std::collections::HashSet<u64>);
-impl gpui::Global for GpuiRegisteredFonts {}
+impl gpui_kit::Global for GpuiRegisteredFonts {}
 
 impl<W: TypstGpuiWorld> PreviewPanel<W> {
     pub fn next_visual_offset(&self, current: usize) -> Option<usize> {

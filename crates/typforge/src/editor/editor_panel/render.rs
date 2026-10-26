@@ -1,9 +1,8 @@
 // crates/typforge/src/editor/editor_panel/render.rs
 
 use crate::editor::{CodeEditor, DraggedTab, EditorPanel, FileContentUpdated, TabDrag};
-use gpui::*;
-use gpui_component::StyledExt;
-use gpui_component::{ActiveTheme, h_flex};
+use gpui_kit::component::{ActiveTheme, StyledExt, h_flex};
+use gpui_kit::*;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -328,7 +327,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
             )
             .child(
                 div()
-                    .flex_grow()
+                    .flex_grow_1()
                     .h_4_5()
                     .flex_col()
                     .child(editor_element)

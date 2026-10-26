@@ -1,6 +1,6 @@
-use gpui::{App, Pixels, TransformationMatrix};
+use gpui_kit::{App, Pixels, TransformationMatrix};
 
-pub fn typst_paint_to_gpui_hsla_from_paint(paint: &typst::visualize::Paint) -> gpui::Hsla {
+pub fn typst_paint_to_gpui_hsla_from_paint(paint: &typst::visualize::Paint) -> gpui_kit::Hsla {
     match paint {
         typst::visualize::Paint::Solid(color) => typst_color_to_gpui_hsla(color),
         typst::visualize::Paint::Gradient(gradient) => {
@@ -8,13 +8,13 @@ pub fn typst_paint_to_gpui_hsla_from_paint(paint: &typst::visualize::Paint) -> g
             let color = gradient.sample_at((0.5, 0.5), (1.0, 1.0)); // (x,y), (width,height)
             typst_color_to_gpui_hsla(&color)
         }
-        _ => gpui::black(), // Fallback for unsupported paint types
+        _ => gpui_kit::black(), // Fallback for unsupported paint types
     }
 }
 
-pub fn typst_color_to_gpui_hsla(color: &typst::visualize::Color) -> gpui::Hsla {
+pub fn typst_color_to_gpui_hsla(color: &typst::visualize::Color) -> gpui_kit::Hsla {
     let rgb = color.to_rgb();
-    gpui::Rgba {
+    gpui_kit::Rgba {
         r: rgb.red,
         g: rgb.green,
         b: rgb.blue,
@@ -23,26 +23,26 @@ pub fn typst_color_to_gpui_hsla(color: &typst::visualize::Color) -> gpui::Hsla {
     .into()
 }
 
-pub fn typst_paint_to_gpui_background(paint: &typst::visualize::Paint) -> gpui::Background {
+pub fn typst_paint_to_gpui_background(paint: &typst::visualize::Paint) -> gpui_kit::Background {
     // Use TypstPaint alias
     match paint {
         typst::visualize::Paint::Solid(color) => {
-            gpui::solid_background(typst_color_to_gpui_hsla(color))
+            gpui_kit::solid_background(typst_color_to_gpui_hsla(color))
         }
         typst::visualize::Paint::Gradient(gradient_arc) => {
             match gradient_arc {
                 typst::visualize::Gradient::Linear(linear) => {
-                    let stops: Vec<gpui::LinearColorStop> = linear
+                    let stops: Vec<gpui_kit::LinearColorStop> = linear
                         .stops
                         .iter()
-                        .map(|(color, offset)| gpui::LinearColorStop {
+                        .map(|(color, offset)| gpui_kit::LinearColorStop {
                             color: typst_color_to_gpui_hsla(color),
                             percentage: offset.get() as f32,
                         })
                         .collect();
 
                     if stops.is_empty() {
-                        return gpui::solid_background(gpui::transparent_black());
+                        return gpui_kit::solid_background(gpui_kit::transparent_black());
                     }
 
                     // Angle Fix: +90.0 to align Typst and GPUI coordinate systems
@@ -52,26 +52,30 @@ pub fn typst_paint_to_gpui_background(paint: &typst::visualize::Paint) -> gpui::
                         let color = stops
                             .first()
                             .map(|s| s.color)
-                            .unwrap_or(gpui::transparent_black());
-                        return gpui::solid_background(color);
+                            .unwrap_or(gpui_kit::transparent_black());
+                        return gpui_kit::solid_background(color);
                     }
 
                     // LIMITATION: GPUI 0.2.2 only supports 2 stops per quad.
                     // This is why complex gradients (rainbow, repeat) only work on
                     // Rects (which we tessellate manually) and not Circles/Lines yet.
-                    gpui::linear_gradient(angle, stops[0].clone(), stops[stops.len() - 1].clone())
+                    gpui_kit::linear_gradient(
+                        angle,
+                        stops[0].clone(),
+                        stops[stops.len() - 1].clone(),
+                    )
                 }
                 typst::visualize::Gradient::Radial(_radial) => {
                     // GPUI 0.2.2 has no native Radial Gradient Background.
                     // For now, we sample the middle of the gradient to provide a solid color fallback.
                     let color = gradient_arc.sample_at((0.5, 0.5), (1.0, 1.0));
-                    gpui::solid_background(typst_color_to_gpui_hsla(&color))
+                    gpui_kit::solid_background(typst_color_to_gpui_hsla(&color))
                 }
                 typst::visualize::Gradient::Conic(_conic) => {
                     // GPUI 0.2.2 has no native Conic Gradient Background.
                     // Fallback to solid color.
                     let color = gradient_arc.sample_at((0.5, 0.5), (1.0, 1.0));
-                    gpui::solid_background(typst_color_to_gpui_hsla(&color))
+                    gpui_kit::solid_background(typst_color_to_gpui_hsla(&color))
                 }
             }
         }
@@ -79,20 +83,20 @@ pub fn typst_paint_to_gpui_background(paint: &typst::visualize::Paint) -> gpui::
         // Handle Tiling as a separate Paint variant
         typst::visualize::Paint::Tiling(_) => {
             // This `typst_paint_to_gpui_background` function is generally for returning
-            // a single `gpui::Background` for `paint_quad`. For Tiling, the actual rendering
+            // a single `gpui_kit::Background` for `paint_quad`. For Tiling, the actual rendering
             // happens in `render_tiling` which is called earlier.
             // Here, we return a transparent background as a placeholder.
-            gpui::solid_background(gpui::transparent_black())
+            gpui_kit::solid_background(gpui_kit::transparent_black())
         }
     }
 }
 
-pub fn resolve_font_with_fallback(family: &str, weight: u16, cx: &App) -> Option<gpui::FontId> {
+pub fn resolve_font_with_fallback(family: &str, weight: u16, cx: &App) -> Option<gpui_kit::FontId> {
     let text_system = cx.text_system();
 
     // 1. Try exact name
-    let mut request = gpui::font(family.to_string());
-    request.weight = gpui::FontWeight(weight as f32);
+    let mut request = gpui_kit::font(family.to_string());
+    request.weight = gpui_kit::FontWeight(weight as f32);
     let id = text_system.resolve_font(&request);
     if let Some(resolved) = text_system.get_font_for_id(id) {
         if resolved.family == family {
@@ -103,8 +107,8 @@ pub fn resolve_font_with_fallback(family: &str, weight: u16, cx: &App) -> Option
     // 2. Try name without spaces (e.g. NewComputerModernMath)
     let collapsed = family.replace(" ", "");
     if collapsed != family {
-        let mut request = gpui::font(collapsed.clone());
-        request.weight = gpui::FontWeight(weight as f32);
+        let mut request = gpui_kit::font(collapsed.clone());
+        request.weight = gpui_kit::FontWeight(weight as f32);
         let id = text_system.resolve_font(&request);
         if let Some(resolved) = text_system.get_font_for_id(id) {
             if resolved.family == collapsed {

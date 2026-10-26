@@ -1,8 +1,8 @@
 use std::{collections::HashMap, eprintln};
 
 use crate::actions::{self, ChangeTheme};
-use gpui::{App, Global, Menu, MenuItem};
-use gpui_component::{ThemeRegistry, ThemeSet};
+use gpui_kit::component::{ThemeRegistry, ThemeSet};
+use gpui_kit::{App, Global, Menu, MenuItem};
 
 // 1. Define global state to track if a file is active
 pub struct MenuState {

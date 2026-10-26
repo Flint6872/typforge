@@ -1,6 +1,6 @@
 use crate::{actions::RibbonAction, ribbon::panel::RibbonPanel};
-use gpui::*;
-use gpui_component::ActiveTheme;
+use gpui_kit::component::ActiveTheme;
+use gpui_kit::*;
 
 impl RibbonPanel {
     pub(super) fn render_layout_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {

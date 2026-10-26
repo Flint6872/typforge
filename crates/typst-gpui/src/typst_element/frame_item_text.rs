@@ -4,7 +4,9 @@ use crate::typst_element::{
         resolve_font_with_fallback, typst_color_to_gpui_hsla, typst_paint_to_gpui_hsla_from_paint,
     },
 };
-use gpui::{App, Bounds, GlyphId, PathBuilder, Pixels, Point, TransformationMatrix, Window, size};
+use gpui_kit::{
+    App, Bounds, GlyphId, PathBuilder, Pixels, Point, TransformationMatrix, Window, size,
+};
 use typst::text::TextItem;
 
 // Adapter to pipe TrueType glyph outlines directly into GPUI's PathBuilder
@@ -16,31 +18,46 @@ struct GlyphPathBuilder {
 
 impl ttf_parser::OutlineBuilder for GlyphPathBuilder {
     fn move_to(&mut self, x: f32, y: f32) {
-        self.builder.move_to(gpui::point(
-            gpui::px(x * self.scale_x),
-            gpui::px(y * self.scale_y),
+        self.builder.move_to(gpui_kit::point(
+            gpui_kit::px(x * self.scale_x),
+            gpui_kit::px(y * self.scale_y),
         ));
     }
 
     fn line_to(&mut self, x: f32, y: f32) {
-        self.builder.line_to(gpui::point(
-            gpui::px(x * self.scale_x),
-            gpui::px(y * self.scale_y),
+        self.builder.line_to(gpui_kit::point(
+            gpui_kit::px(x * self.scale_x),
+            gpui_kit::px(y * self.scale_y),
         ));
     }
 
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
         self.builder.curve_to(
-            gpui::point(gpui::px(x * self.scale_x), gpui::px(y * self.scale_y)),
-            gpui::point(gpui::px(x1 * self.scale_x), gpui::px(y1 * self.scale_y)),
+            gpui_kit::point(
+                gpui_kit::px(x * self.scale_x),
+                gpui_kit::px(y * self.scale_y),
+            ),
+            gpui_kit::point(
+                gpui_kit::px(x1 * self.scale_x),
+                gpui_kit::px(y1 * self.scale_y),
+            ),
         );
     }
 
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
         self.builder.cubic_bezier_to(
-            gpui::point(gpui::px(x * self.scale_x), gpui::px(y * self.scale_y)),
-            gpui::point(gpui::px(x1 * self.scale_x), gpui::px(y1 * self.scale_y)),
-            gpui::point(gpui::px(x2 * self.scale_x), gpui::px(y2 * self.scale_y)),
+            gpui_kit::point(
+                gpui_kit::px(x * self.scale_x),
+                gpui_kit::px(y * self.scale_y),
+            ),
+            gpui_kit::point(
+                gpui_kit::px(x1 * self.scale_x),
+                gpui_kit::px(y1 * self.scale_y),
+            ),
+            gpui_kit::point(
+                gpui_kit::px(x2 * self.scale_x),
+                gpui_kit::px(y2 * self.scale_y),
+            ),
         );
     }
 
@@ -72,7 +89,7 @@ pub fn frame_item_text(
         id
     } else {
         cx.text_system()
-            .resolve_font(&gpui::font(font_family.clone()))
+            .resolve_font(&gpui_kit::font(font_family.clone()))
     };
 
     let font_size = Pixels::from(text_item.size.to_pt() as f32 * scale_factor);
@@ -110,13 +127,13 @@ pub fn frame_item_text(
             Pixels::from(glyph_instance.y_offset.at(text_item.size).to_pt() as f32 * scale_factor);
 
         let final_glyph_origin = item_absolute_origin_gpui
-            + gpui::point(
-                gpui::px(
+            + gpui_kit::point(
+                gpui_kit::px(
                     current_transform.rotation_scale[0][0] * local_x.as_f32()
                         + current_transform.rotation_scale[0][1] * local_y.as_f32()
                         + current_transform.translation[0],
                 ),
-                gpui::px(
+                gpui_kit::px(
                     current_transform.rotation_scale[1][0] * local_x.as_f32()
                         + current_transform.rotation_scale[1][1] * local_y.as_f32()
                         + current_transform.translation[1],
@@ -139,7 +156,7 @@ pub fn frame_item_text(
             {
                 // 1. Create a transform containing ONLY the rotation and scale
                 // This rotates and skews the glyph around its local (0,0) baseline
-                let lyon_transform = gpui::Transform::new(
+                let lyon_transform = gpui_kit::Transform::new(
                     current_transform.rotation_scale[0][0],
                     -current_transform.rotation_scale[0][1],
                     -current_transform.rotation_scale[1][0],
@@ -154,7 +171,7 @@ pub fn frame_item_text(
                 glyph_path_builder.builder.translate(final_glyph_origin);
 
                 if let Ok(path) = glyph_path_builder.builder.build() {
-                    window.paint_path(path, gpui::solid_background(text_color));
+                    window.paint_path(path, gpui_kit::solid_background(text_color));
                 }
             }
         } else {

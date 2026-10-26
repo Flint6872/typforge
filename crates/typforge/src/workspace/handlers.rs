@@ -1,7 +1,7 @@
 use crate::actions;
 use crate::editor::editor_panel::EditorPanel; // Import necessary panel types
 use crate::workspace::TypstNoteView;
-use gpui::*;
+use gpui_kit::*;
 
 impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
     pub(crate) fn handle_package_manager(
