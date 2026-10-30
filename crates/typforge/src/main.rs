@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::{
     components::{menus::setup_menus, theme},
+    editor::init_editor_languages,
     key_bindings::bind_keys,
     settings::load_settings,
     typst_world::GpuiWorld,
@@ -68,6 +69,7 @@ fn main() -> Result<()> {
             bind_keys(cx);
             theme::init(cx);
             theme::apply_settings_theme(cx);
+            init_editor_languages(cx);
 
             #[cfg(target_os = "windows")]
             cx.set_global(crate::components::menus::MenuState {

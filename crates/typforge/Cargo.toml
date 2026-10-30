@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 chrono.workspace = true
-gpui-kit.workspace = true
+gpui-kit = { workspace = true, features = ["tree-sitter"] }
 
 
 gpui_util = "0.2.2"

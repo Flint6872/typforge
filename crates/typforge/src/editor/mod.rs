@@ -1,9 +1,11 @@
 pub mod code_editor;
 pub mod editor_panel;
+pub mod language_setup;
 pub mod tabs;
 
 pub use code_editor::CodeEditor;
 pub use editor_panel::EditorPanel;
+pub use language_setup::init_editor_languages;
 
 //use gpui_kit::base::input::EditorState;
 use gpui_kit::component::{ActiveTheme, input::EditorState};
@@ -87,12 +89,16 @@ impl OpenedFile {
         let language = get_language_from_path(&path);
 
         let editor_state = cx.new(|cx| {
-            EditorState::new(window, cx)
+            let mut state = EditorState::new(window, cx)
                 .language(language.clone())
                 .soft_wrap(false)
                 .line_number(true)
                 .searchable(true)
-                .default_value(content) // Load file content
+                .default_value(content);
+
+            // Ensure highlighter is explicitly initialized for typst
+            state.set_highlighter(language.clone(), cx);
+            state
         });
 
         // Create the CodeEditor entity and pass its InputState

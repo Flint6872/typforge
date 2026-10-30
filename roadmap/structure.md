@@ -24,10 +24,10 @@ This directory houses the individual crates that make up the Typforge project.
     *   Application menu and keybinding management.
 *   **Dependencies:**
     *   **Workspace (Local):**
-        *   `gpui`, `gpui-component` (implicitly via `gpui.workspace` and `gpui-component.workspace` in `Cargo.toml`).
-        *   `typst-gpui` (via `typst-gpui = { path = "../typst-gpui" }`).
-        *   `typastry` (via `typastry = { path = "../typastry" }`).
-        *   `typsdocx` (via `typsdocx = { path = "../typsdocx" }`).
+      *   `gpui_kit` (providing `gpui`, `gpui_base`, and `gpui_component`).
+      *   `typst-gpui` (via `typst-gpui = { path = "../typst-gpui" }`).
+      *   `typastry` (via `typastry = { path = "../typastry" }`).
+      *   `typsdocx` (via `typsdocx = { path = "../typsdocx" }`).
     *   **External:** `chrono`, `parking_lot`, `ropey`, `serde_json`, `anyhow`, `lsp-types`, `embed-resource`, `ureq`, `flate2`, `tar`.
 *   **Source Files:**
     *   `Cargo.toml`
@@ -38,11 +38,17 @@ This directory houses the individual crates that make up the Typforge project.
         *   `menus.rs`: Handles application menu setup.
         *   `theme.rs`: Manages theme loading and application.
     *   `src/editor/`: Contains the text editing components.
-        *   `code_editor.rs`: A reusable, syntax-highlighting code editor component.
-        *   `editor_panel/`: The main panel for editing files, handling tabs, completions, and hover info.
-            *   `completions.rs`: Logic for code completion using `typastry`.
-            *   `handlers.rs`: Event handlers for the editor panel.
-            *   `render.rs`: Renders the editor panel UI, including tabs and the editor itself.
+           *   `code_editor.rs`: A reusable, syntax-highlighting code editor component wrapping `EditorState`.
+           *   `mod.rs`: Module declaration, exports `EditorStateExt` for UTF-8 byte range manipulation with undo history.
+           *   `editor_panel/`: The main panel for editing files, managing `EditorState` entities, tabs, completion providers (`TypstCompletionProvider`), and hover info.
+               *   `completions.rs`: Logic for code completion using `typastry`.
+               *   `handlers.rs`: Event handlers for the editor panel.
+               *   `render.rs`: Renders the editor panel UI.
+       *   `src/workspace/`: Top-level application view and layout orchestrator.
+           *   Configures `DockArea` with `DockSkin` rendering and `DockLayout` for window splits.
+           *   Wraps dock entities using `panel_handle` to bridge `gpui_base::dock::Panel` and `gpui_component::dock::Panel`.
+           *   `handlers.rs`: Handles application-level events and actions.
+           *   `render.rs`: Renders the main application window UI.
             *   `mod.rs`: Module declaration for the editor panel.
         *   `tabs.rs`: Tab management logic for open files.
     *   `src/key_bindings.rs`: Defines global keybindings.
@@ -89,8 +95,7 @@ This directory houses the individual crates that make up the Typforge project.
     *   Supports exporting rendered documents to PDF and DOCX.
 *   **Dependencies:**
     *   **Workspace (Local):**
-        *   `gpui` (via `gpui.workspace`).
-        *   `gpui-component` (via `gpui-component.workspace`).
+        *   `gpui_kit` (providing `gpui` and `gpui_component`).
         *   `typst` (via `typst.workspace`).
         *   `typst-syntax` (via `typst-syntax.workspace`).
         *   `typst-layout` (via `typst-layout.workspace`).
