@@ -7,7 +7,7 @@ use std::sync::Arc;
 // Import necessary types
 use crate::{
     actions::RibbonAction,
-    editor::{EditorStateExt, FileContentUpdated, editor_panel::EditorPanel},
+    editor::{DiagnosticsPanel, EditorPanel, EditorStateExt, FileContentUpdated},
     panels::{FilesPanel, OpenFileEvent},
     ribbon::RibbonPanel,
 };
@@ -27,6 +27,8 @@ pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> {
     pub menu_bar: Option<Entity<AppMenuBar>>,
     pub ribbon_panel: Entity<RibbonPanel>,
     pub editor_panel: Entity<EditorPanel<W>>,
+    pub diagnostics_panel: Entity<DiagnosticsPanel>,
+    pub has_diagnostics: bool,
     pub preview_panel: Entity<PreviewPanel<W>>,
     pub files_panel: Entity<FilesPanel>,
     pub window_handle: AnyWindowHandle,
@@ -46,10 +48,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
         let files_panel = cx.new(|cx| FilesPanel::new(window, cx));
         let editor_panel_entity =
             cx.new(|cx| EditorPanel::new(shared_world_arc.clone(), window, cx));
-
-        // editor_panel_entity.update(cx, |editor_panel, cx| {
-        //     editor_panel.new_file(window, cx); // Call the new_file method
-        // });
+        let diagnostics_panel = cx.new(|cx| DiagnosticsPanel::new(window, cx));
 
         let font_families: Vec<String> = {
             let world = shared_world_arc.lock();
@@ -222,7 +221,9 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                             .log_err();
                     }
                     PreviewPanelEvent::DiagnosticsChanged(diags) => {
-                        // Update diagnostics in the EditorPanel
+                        let has_errors = !diags.is_empty();
+
+                        // 1. Send diagnostics to editor (squiggles)
                         this_note_view
                             .editor_panel
                             .update(cx_for_note_view, |panel, cx| {
@@ -232,7 +233,6 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                                     {
                                         file.diagnostics = diags.clone();
 
-                                        // Extract the active Source from our shared world
                                         let world = panel.shared_world.lock();
                                         let main_id = world.main();
                                         if let Ok(source) = world.source(main_id) {
@@ -244,6 +244,23 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                                 }
                                 cx.notify();
                             });
+
+                        // 2. Send diagnostics to DiagnosticsPanel
+                        this_note_view
+                            .diagnostics_panel
+                            .update(cx_for_note_view, |panel, cx| {
+                                panel.set_diagnostics(diags.clone(), cx);
+                            });
+
+                        // 3. Toggle panel visibility if state changed
+                        if this_note_view.has_diagnostics != has_errors {
+                            this_note_view.has_diagnostics = has_errors;
+                            let window_handle = this_note_view.window_handle.clone();
+
+                            let _ = window_handle.update(cx_for_note_view, |this, window, cx| {
+                                this_note_view.update_dock_layout(window, cx);
+                            });
+                        }
                     }
                     PreviewPanelEvent::CursorMoved { offset, selection } => {
                         // 1. Store the active selection on TypstNoteView
@@ -374,7 +391,17 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                     Some(px(200.0)),
                 )
                 .child(
-                    DockLayout::tabs().panel_view(panel_handle(editor_panel_entity.clone()), cx),
+                    DockLayout::v_split()
+                        .child(
+                            DockLayout::tabs()
+                                .panel_view(panel_handle(editor_panel_entity.clone()), cx),
+                            None,
+                        )
+                        .child(
+                            DockLayout::tabs()
+                                .panel_view(panel_handle(diagnostics_panel.clone()), cx),
+                            Some(px(180.0)), // Height of diagnostics panel
+                        ),
                     None,
                 )
                 .child(
@@ -391,19 +418,25 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
         let menu_bar = None;
 
         // --- 7. Return TypstNoteView instance ---
-        Self {
+        let mut note_view = Self {
             dock_area: dock_area_entity,
             menu_bar,
             ribbon_panel,
             editor_panel: editor_panel_entity,
             preview_panel,
+            diagnostics_panel,
             files_panel,
-            window_handle, // Store the handle
+            window_handle,
             show_recent_files_picker: false,
             recent_picker_selected_index: None,
             recent_picker_focus_handle: cx.focus_handle(),
             active_selection: None,
-        }
+            has_diagnostics: false, // Initial state
+        };
+
+        note_view.update_dock_layout(window, cx);
+
+        note_view
     }
 
     /// Orchestrates formatting actions triggered from either the Editor or Preview Panel.
@@ -482,5 +515,36 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
         {
             self.active_selection = Some(sel.clone());
         }
+    }
+
+    pub fn update_dock_layout(&mut self, window: &mut Window, cx: &mut App) {
+        let editor_column = if self.has_diagnostics {
+            DockLayout::v_split()
+                .child(
+                    DockLayout::tabs().panel_view(panel_handle(self.editor_panel.clone()), cx),
+                    None,
+                )
+                .child(
+                    DockLayout::tabs().panel_view(panel_handle(self.diagnostics_panel.clone()), cx),
+                    Some(px(180.0)),
+                )
+        } else {
+            DockLayout::tabs().panel_view(panel_handle(self.editor_panel.clone()), cx)
+        };
+
+        let layout = DockLayout::h_split()
+            .child(
+                DockLayout::tabs().panel_view(panel_handle(self.files_panel.clone()), cx),
+                Some(px(200.0)),
+            )
+            .child(editor_column, None)
+            .child(
+                DockLayout::tabs().panel_view(panel_handle(self.preview_panel.clone()), cx),
+                None,
+            );
+
+        self.dock_area.update(cx, |dock_area, cx| {
+            dock_area.set_center(layout, window, cx);
+        });
     }
 }

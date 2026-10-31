@@ -1,16 +1,18 @@
 pub mod code_editor;
+pub mod diagnostics_panel;
 pub mod editor_panel;
 pub mod language_setup;
 pub mod tabs;
 
 pub use code_editor::CodeEditor;
+pub use diagnostics_panel::DiagnosticsPanel;
 pub use editor_panel::EditorPanel;
 pub use language_setup::init_editor_languages;
 
 //use gpui_kit::base::input::EditorState;
 use gpui_kit::component::{ActiveTheme, input::EditorState};
 use gpui_kit::{Context, EntityInputHandler as _, Window, *};
-use ropey::Rope;
+
 use std::{
     fs,
     ops::Range,

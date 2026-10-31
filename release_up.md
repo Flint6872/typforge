@@ -125,3 +125,6 @@ Add package discovery and import resolution support updated ast with import comp
 0.0.5 update
 
 Migrate from gpui and gpui-component to gpui-kit
+removed forked gpui-component crate
+
+Integrate SeniorMars tree-sitter-typst for syntax highlighting and parsing in the editor

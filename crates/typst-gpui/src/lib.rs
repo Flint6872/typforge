@@ -39,7 +39,7 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     world: Arc<Mutex<W>>,
     document: Option<std::sync::Arc<PagedDocument>>,
     pub render_state: Arc<TypstRenderState>,
-    diagnostics: Vec<typst::diag::SourceDiagnostic>,
+
     focus_handle: FocusHandle,
     zoom: f32, // Add zoom field
     pub source: String,
@@ -107,7 +107,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             world,
             document: None,
             render_state: Arc::new(TypstRenderState::default()),
-            diagnostics: Vec::new(),
+
             focus_handle,
             zoom: 1.0,
             source: String::new(),
@@ -223,7 +223,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                             );
 
                             panel.document = Some(doc);
-                            panel.diagnostics.clear();
+
                             cx.emit(PreviewPanelEvent::DiagnosticsChanged(Vec::new()));
 
                             // --- TRANSACTION SUCCEEDED: COMMIT ---
@@ -231,18 +231,15 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                         }
                         Err(errors) => {
                             let diags: Vec<_> = errors.into_iter().collect();
-                            panel.diagnostics = diags.clone();
-                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(diags));
+                            // Emit event to subscribers
+                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(diags.clone()));
 
                             // --- TRANSACTION FAILED: GRACEFUL ROLLBACK ---
                             if let Some(tx) = panel.pending_transaction.take() {
-                                let error_msg = panel
-                                    .diagnostics
-                                    .first()
-                                    .map(|d| d.message.to_string())
-                                    .unwrap_or_else(|| {
-                                        "Source edit resulted in compile error.".to_string()
-                                    });
+                                let error_msg =
+                                    diags.first().map(|d| d.message.to_string()).unwrap_or_else(
+                                        || "Source edit resulted in compile error.".to_string(),
+                                    );
 
                                 panel.visual_edit_error =
                                     Some(format!("Edit Reverted: {}", error_msg));
@@ -749,25 +746,6 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                             }),
                     ),
             )
-            .children(if !self.diagnostics.is_empty() {
-                Some(
-                    div()
-                        .absolute()
-                        .bottom_0()
-                        .w_full()
-                        .max_h(relative(0.5))
-                        .bg(rgba(0x3d1a1a))
-                        .overflow_y_scrollbar()
-                        .p_4()
-                        .children(self.diagnostics.iter().map(|diag| {
-                            div()
-                                .text_color(rgb(0xff4444))
-                                .child(format!("Error: {}", diag.message))
-                        })),
-                )
-            } else {
-                None
-            })
             // ==========================================
             // PILLAR 1: VISUAL EDITING ROLLBACK NOTIFIER
             // ==========================================
