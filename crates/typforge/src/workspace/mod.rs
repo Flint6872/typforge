@@ -27,7 +27,7 @@ pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> {
     pub menu_bar: Option<Entity<AppMenuBar>>,
     pub ribbon_panel: Entity<RibbonPanel>,
     pub editor_panel: Entity<EditorPanel<W>>,
-    pub diagnostics_panel: Entity<DiagnosticsPanel>,
+    pub diagnostics_panel: Entity<DiagnosticsPanel<W>>,
     pub has_diagnostics: bool,
     pub preview_panel: Entity<PreviewPanel<W>>,
     pub files_panel: Entity<FilesPanel>,
@@ -48,7 +48,8 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
         let files_panel = cx.new(|cx| FilesPanel::new(window, cx));
         let editor_panel_entity =
             cx.new(|cx| EditorPanel::new(shared_world_arc.clone(), window, cx));
-        let diagnostics_panel = cx.new(|cx| DiagnosticsPanel::new(window, cx));
+        let diagnostics_panel =
+            cx.new(|cx| DiagnosticsPanel::new(shared_world_arc.clone(), window, cx));
 
         let font_families: Vec<String> = {
             let world = shared_world_arc.lock();

@@ -128,3 +128,5 @@ Migrate from gpui and gpui-component to gpui-kit
 removed forked gpui-component crate
 
 Integrate SeniorMars tree-sitter-typst for syntax highlighting and parsing in the editor
+
+Implement rustc-style diagnostics rendering panel

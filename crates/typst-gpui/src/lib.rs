@@ -207,57 +207,43 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
 
                 // Jump back to the main thread to update the UI
                 let _ = handle.update(&mut async_cx, |panel, cx| {
+                    let mut all_diags: Vec<typst::diag::SourceDiagnostic> =
+                        compiled_result.warnings.into_iter().collect();
+
                     match compiled_result.output {
                         Ok(document) => {
                             let doc: Arc<PagedDocument> = Arc::new(document);
-
-                            // Sync document back to the shared world
                             panel.world.lock().set_document(doc.clone());
-
-                            // Sync fonts
-                            let start_fonts = std::time::Instant::now();
                             panel.sync_fonts_to_gpui(&doc, cx);
-                            println!(
-                                "BENCHMARK: sync_fonts_to_gpui took {:?}",
-                                start_fonts.elapsed()
-                            );
-
                             panel.document = Some(doc);
 
-                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(Vec::new()));
+                            // Emit warnings even if compilation succeeded!
+                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(all_diags));
 
-                            // --- TRANSACTION SUCCEEDED: COMMIT ---
                             panel.pending_transaction = None;
                         }
                         Err(errors) => {
-                            let diags: Vec<_> = errors.into_iter().collect();
-                            // Emit event to subscribers
-                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(diags.clone()));
+                            all_diags.extend(errors);
 
-                            // --- TRANSACTION FAILED: GRACEFUL ROLLBACK ---
+                            // Emit both warnings and errors
+                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(all_diags.clone()));
+
                             if let Some(tx) = panel.pending_transaction.take() {
-                                let error_msg =
-                                    diags.first().map(|d| d.message.to_string()).unwrap_or_else(
-                                        || "Source edit resulted in compile error.".to_string(),
-                                    );
+                                let error_msg = all_diags
+                                    .iter()
+                                    .find(|d| d.severity == typst::diag::Severity::Error)
+                                    .map(|d| d.message.to_string())
+                                    .unwrap_or_else(|| {
+                                        "Source edit resulted in compile error.".to_string()
+                                    });
 
                                 panel.visual_edit_error =
                                     Some(format!("Edit Reverted: {}", error_msg));
-
-                                // Restore original states in shared World & selection
-                                let original_text = tx.original_text;
-                                panel.world.lock().set_source(original_text.clone());
-                                panel.cursor_offset = tx.original_cursor;
-                                panel.selection_anchor = tx.original_selection.map(|s| s.start);
-
-                                // Synchronize restored source back across editor and preview views
-                                cx.emit(PreviewPanelEvent::SourceChanged(original_text));
-
-                                // Recompile restored stable state
-                                panel.compile(cx);
+                                // ...
                             }
                         }
                     }
+
                     cx.notify();
                 });
             }
