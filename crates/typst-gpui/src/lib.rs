@@ -228,7 +228,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                             // Emit both warnings and errors
                             cx.emit(PreviewPanelEvent::DiagnosticsChanged(all_diags.clone()));
 
-                            if let Some(tx) = panel.pending_transaction.take() {
+                            if let Some(_tx) = panel.pending_transaction.take() {
                                 let error_msg = all_diags
                                     .iter()
                                     .find(|d| d.severity == typst::diag::Severity::Error)

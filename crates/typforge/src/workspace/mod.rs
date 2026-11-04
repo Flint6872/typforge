@@ -258,7 +258,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                             this_note_view.has_diagnostics = has_errors;
                             let window_handle = this_note_view.window_handle.clone();
 
-                            let _ = window_handle.update(cx_for_note_view, |this, window, cx| {
+                            let _ = window_handle.update(cx_for_note_view, |_this, window, cx| {
                                 this_note_view.update_dock_layout(window, cx);
                             });
                         }
