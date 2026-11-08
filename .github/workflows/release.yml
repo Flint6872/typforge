@@ -43,7 +43,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.os == 'macos-14' && 'aarch64-apple-darwin x86_64-apple-darwin' || matrix.target }}
+          targets: ${{ matrix.os == 'macos-15' && 'aarch64-apple-darwin x86_64-apple-darwin' || matrix.target }}
 
       # Speeds up subsequent compilation tasks
       - name: Rust Cache
@@ -75,7 +75,7 @@ jobs:
       - name: Build Release Binary
         shell: bash
         run: |
-          if [ "${{ matrix.os }}" = "macos-14" ]; then
+          if [ "${{ matrix.os }}" = "macos-15" ]; then
             # 1. Compile both segments sequentially
             cargo build --release --target aarch64-apple-darwin
             cargo build --release --target x86_64-apple-darwin
@@ -98,7 +98,7 @@ jobs:
       - name: Package Directory and Compress
         shell: bash
         run: |
-          if [ "${{ matrix.os }}" = "macos-14" ]; then
+          if [ "${{ matrix.os }}" = "macos-15" ]; then
           # Extract version from GITHUB_REF_NAME (e.g., v0.0.3 -> 0.0.3)
           VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
 
