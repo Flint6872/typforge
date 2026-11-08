@@ -20,6 +20,26 @@ pub fn parse_typst(source: &str) -> Option<Tree> {
     parser.parse(source, None)
 }
 
+/// Returns the `tree_sitter::Language` for BibTeX from the grammar crate.
+pub fn bibtex_language() -> Language {
+    tree_sitter_bibtex::LANGUAGE.into()
+}
+
+/// Creates a newly initialized `tree_sitter::Parser` configured for BibTeX.
+pub fn create_bibtex_parser() -> Parser {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&bibtex_language())
+        .expect("Error loading TreeSitterBibtex grammar");
+    parser
+}
+
+/// Parses a BibTeX source code string into a Tree-Sitter `Tree`.
+pub fn parse_bibtex(source: &str) -> Option<Tree> {
+    let mut parser = create_bibtex_parser();
+    parser.parse(source, None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

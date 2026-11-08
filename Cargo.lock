@@ -7856,6 +7856,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-bibtex"
+version = "0.1.0"
+source = "git+https://github.com/latex-lsp/tree-sitter-bibtex#8d04ed27b3bc7929f14b7df9236797dab9f3fa66"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-json"
 version = "0.24.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7924,6 +7933,7 @@ dependencies = [
  "cc",
  "serde",
  "tree-sitter",
+ "tree-sitter-bibtex",
  "tree-sitter-typst",
  "typst",
  "typst-ide",

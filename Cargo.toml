@@ -18,8 +18,9 @@ members = [
 [workspace.dependencies]
 gpui-kit = { version = "0.8", features = ["tree-sitter"] }
 
-tree-sitter-typst = { git = "https://github.com/SeniorMars/tree-sitter-typst" }
 tree-sitter = "0.26.13"
+tree-sitter-typst = { git = "https://github.com/SeniorMars/tree-sitter-typst" }
+tree-sitter-bibtex = {git = "https://github.com/latex-lsp/tree-sitter-bibtex"}
 
 typst = "0.15"
 typst-syntax = "0.15"

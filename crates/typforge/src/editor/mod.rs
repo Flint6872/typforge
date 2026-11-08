@@ -148,6 +148,7 @@ fn get_language_from_path(path: &Path) -> String {
             "md" => "markdown",
             "toml" => "toml",
             "typ" => "typst",
+            "bib" => "bibtex",
             _ => "text",
         })
         .unwrap_or("text")

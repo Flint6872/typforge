@@ -5,17 +5,18 @@ use gpui_kit::component::input::{
     set_language_config,
 };
 use typastry::syntax::{
-    AUTO_CLOSING_PAIRS, BRACKET_PAIRS, HIGHLIGHTS_QUERY, INJECTIONS_QUERY, LOCALS_QUERY,
-    typst_language,
+    BIBTEX_AUTO_CLOSING_PAIRS, BIBTEX_BRACKET_PAIRS, BIBTEX_HIGHLIGHTS_QUERY, BIBTEX_LOCALS_QUERY,
+    TYPST_AUTO_CLOSING_PAIRS, TYPST_BRACKET_PAIRS, TYPST_HIGHLIGHTS_QUERY, TYPST_INJECTIONS_QUERY,
+    TYPST_LOCALS_QUERY, bibtex_language, typst_language,
 };
 
 /// Creates the `LanguageConfig` for Typst editing rules (brackets, auto-closing pairs).
 pub fn typst_language_config() -> LanguageConfig {
-    let brackets = BRACKET_PAIRS
+    let brackets = TYPST_BRACKET_PAIRS
         .iter()
         .map(|&(open, close)| BracketPair::new(open, close));
 
-    let auto_closing = AUTO_CLOSING_PAIRS.iter().map(|&(open, close)| {
+    let auto_closing = TYPST_AUTO_CLOSING_PAIRS.iter().map(|&(open, close)| {
         if open == "/*" {
             AutoClosingPair::new(open, close)
                 .not_in([SyntaxContext::String, SyntaxContext::Comment])
@@ -23,6 +24,21 @@ pub fn typst_language_config() -> LanguageConfig {
             AutoClosingPair::new(open, close)
         }
     });
+
+    LanguageConfig::default()
+        .brackets(brackets)
+        .auto_closing_pairs(auto_closing)
+}
+
+/// Creates the `LanguageConfig` for BibTeX editing rules (brackets, auto-closing pairs).
+pub fn bibtex_language_config() -> LanguageConfig {
+    let brackets = BIBTEX_BRACKET_PAIRS
+        .iter()
+        .map(|&(open, close)| BracketPair::new(open, close));
+
+    let auto_closing = BIBTEX_AUTO_CLOSING_PAIRS
+        .iter()
+        .map(|&(open, close)| AutoClosingPair::new(open, close));
 
     LanguageConfig::default()
         .brackets(brackets)
@@ -39,10 +55,24 @@ pub fn init_editor_languages(cx: &mut gpui_kit::App) {
         name: "typst".into(),
         language: Some(typst_language()),
         injection_languages: Vec::<SharedString>::new(),
-        highlights: HIGHLIGHTS_QUERY.into(),
-        injections: INJECTIONS_QUERY.into(),
-        locals: LOCALS_QUERY.into(),
+        highlights: TYPST_HIGHLIGHTS_QUERY.into(),
+        injections: TYPST_INJECTIONS_QUERY.into(),
+        locals: TYPST_LOCALS_QUERY.into(),
     };
 
     LanguageRegistry::singleton().register("typst", &grammar);
+
+    set_language_config("bibtex", bibtex_language_config(), cx);
+
+    //Register Tree-Sitter grammar for BibTeX
+    let bibtex_grammar = GrammarConfig {
+        name: "bibtex".into(),
+        language: Some(bibtex_language()),
+        // BibTeX generally doesn't inject other languages.
+        injection_languages: Vec::<SharedString>::new(),
+        highlights: BIBTEX_HIGHLIGHTS_QUERY.into(),
+        injections: "".into(),
+        locals: BIBTEX_LOCALS_QUERY.into(),
+    };
+    LanguageRegistry::singleton().register("bibtex", &bibtex_grammar);
 }

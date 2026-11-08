@@ -3,6 +3,7 @@ pub mod render;
 
 use gpui_kit::*;
 use std::sync::Arc;
+use typst::syntax::FileId;
 
 // Import necessary types
 use crate::{
@@ -222,7 +223,22 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                             .log_err();
                     }
                     PreviewPanelEvent::DiagnosticsChanged(diags) => {
-                        let has_errors = !diags.is_empty();
+                        // Filter diagnostics to only include those from Typst files.
+                        let typst_diags: Vec<typst::diag::SourceDiagnostic> = diags
+                            .iter()
+                            .filter(|diag| {
+                                if let Some(file_id) = diag.span.id() {
+                                    file_id.vpath().extension() == Some("typ")
+                                } else {
+                                    // If no file ID, it's not associated with a file,
+                                    // so we assume it's not a typst file for this context.
+                                    false
+                                }
+                            })
+                            .cloned() // Clone to create a new Vec from filtered references
+                            .collect();
+
+                        let has_errors = !typst_diags.is_empty();
 
                         // 1. Send diagnostics to editor (squiggles)
                         this_note_view

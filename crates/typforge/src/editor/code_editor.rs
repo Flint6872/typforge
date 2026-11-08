@@ -97,13 +97,30 @@ impl CodeEditor {
         source: &typst::syntax::Source,
         cx: &mut Context<Self>,
     ) {
+        // We filter based on the FileId associated with each diagnostic.
+        // This ensures that diagnostics are only processed if they originate
+        // from a Typst file.
+        let filtered_diagnostics: Vec<SourceDiagnostic> = diagnostics
+            .into_iter()
+            .filter(|diag| {
+                if let Some(file_id) = diag.span.id() {
+                    file_id.vpath().extension() == Some("typ")
+                } else {
+                    // If a diagnostic has no associated FileId, we don't display it
+                    // as it's not tied to a specific file in the project context.
+                    false
+                }
+            })
+            .collect();
+
         self.editor.update(cx, |input_state, input_cx| {
             let text = input_state.text().clone();
 
             if let Some(diagnostic_set) = input_state.diagnostics_mut() {
                 diagnostic_set.clear();
 
-                for diag in diagnostics {
+                for diag in filtered_diagnostics {
+                    // Use the filtered diagnostics here
                     let range = match diag.span.get() {
                         // If it's a standard numbered span, we can extract the SpanNumber
                         typst::syntax::DiagSpanKind::Number { num, .. } => {

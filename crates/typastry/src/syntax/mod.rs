@@ -2,6 +2,8 @@ pub mod config;
 pub mod parser;
 
 pub use config::{
-    AUTO_CLOSING_PAIRS, BRACKET_PAIRS, HIGHLIGHTS_QUERY, INJECTIONS_QUERY, LOCALS_QUERY,
+    BIBTEX_AUTO_CLOSING_PAIRS, BIBTEX_BRACKET_PAIRS, BIBTEX_HIGHLIGHTS_QUERY, BIBTEX_LOCALS_QUERY,
+    TYPST_AUTO_CLOSING_PAIRS, TYPST_BRACKET_PAIRS, TYPST_HIGHLIGHTS_QUERY, TYPST_INJECTIONS_QUERY,
+    TYPST_LOCALS_QUERY,
 };
-pub use parser::{create_typst_parser, parse_typst, typst_language};
+pub use parser::{bibtex_language, create_typst_parser, parse_typst, typst_language};

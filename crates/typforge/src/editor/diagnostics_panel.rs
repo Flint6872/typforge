@@ -46,6 +46,16 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> DiagnosticsPanel<W> {
 
         self.diagnostics = raw_diagnostics
             .into_iter()
+            // Filter diagnostics to only include those from Typst files.
+            .filter(|diag| {
+                if let Some(file_id) = diag.span.id() {
+                    file_id.vpath().extension() == Some("typ")
+                } else {
+                    // If no file ID, it's not associated with a file,
+                    // so we assume it's not a typst file for this context.
+                    false
+                }
+            })
             .map(|diag| resolve_diagnostic(&*world, diag))
             .collect();
 

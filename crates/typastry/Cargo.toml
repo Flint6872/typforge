@@ -23,6 +23,7 @@ typstyle-core = { version = "0.15", optional = true }
 
 tree-sitter.workspace = true
 tree-sitter-typst.workspace = true
+tree-sitter-bibtex.workspace = true
 
 [build-dependencies]
 cc = "1.0"
