@@ -480,6 +480,7 @@ impl Render for PackageManagerView {
                             .border_1()
                             .border_color(cx.theme().border)
                             .bg(cx.theme().tab_bar)
+                             .w_64()
                             .child(Input::new(&self.search_input)
                                 .cleanable(true)),
                     )

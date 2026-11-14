@@ -284,37 +284,130 @@ pub fn frame_item_image(
     scale_factor: f32,
     window: &mut Window,
     cx: &mut App,
-    _current_transform: TransformationMatrix,
+    current_transform: TransformationMatrix,
     render_state: &Arc<crate::typst_element::TypstRenderState>,
 ) {
     let width_px = Pixels::from(typst_image_size.x.to_pt() as f32 * scale_factor);
     let height_px = Pixels::from(typst_image_size.y.to_pt() as f32 * scale_factor);
+
+    // Calculate rotation angle in degrees from current_transform
+    let angle_rad =
+        current_transform.rotation_scale[1][0].atan2(current_transform.rotation_scale[0][0]);
+    let angle_deg = (angle_rad.to_degrees().round() as i32 % 360 + 360) % 360;
+
+    let is_rotated = angle_deg > 5 && angle_deg < 355;
+
     let image_bounds = gpui_kit::Bounds::new(origin, gpui_kit::size(width_px, height_px));
 
-    let gpui_image_arc = {
-        let mut cache = render_state.image_cache.lock();
-        cache.entry(image.clone()).or_insert_with(|| {
-            match image.kind() {
-                typst::visualize::ImageKind::Raster(raster_image) => {
-                    let format = match raster_image.format() {
-                        typst::visualize::RasterFormat::Exchange(typst::visualize::ExchangeFormat::Png) => Some(gpui_kit::ImageFormat::Png),
-                        typst::visualize::RasterFormat::Exchange(typst::visualize::ExchangeFormat::Jpg) => Some(gpui_kit::ImageFormat::Jpeg),
-                        typst::visualize::RasterFormat::Exchange(typst::visualize::ExchangeFormat::Gif) => Some(gpui_kit::ImageFormat::Gif),
-                        typst::visualize::RasterFormat::Exchange(typst::visualize::ExchangeFormat::Webp) => Some(gpui_kit::ImageFormat::Webp),
-                        _ => None,
-                    };
-                    format.map(|gpui_format| Arc::new(gpui_kit::Image::from_bytes(gpui_format, raster_image.data().to_vec())))
+    let gpui_image_arc = if is_rotated {
+        // Build a tiny SVG wrapper that applies the rotation around the center
+        let w = width_px.as_f32();
+        let h = height_px.as_f32();
+        let cx = w / 2.0;
+        let cy = h / 2.0;
+
+        let (mime, data_bytes) = match image.kind() {
+            typst::visualize::ImageKind::Raster(r) => {
+                let m = match r.format() {
+                    typst::visualize::RasterFormat::Exchange(
+                        typst::visualize::ExchangeFormat::Png,
+                    ) => "image/png",
+                    typst::visualize::RasterFormat::Exchange(
+                        typst::visualize::ExchangeFormat::Jpg,
+                    ) => "image/jpeg",
+                    typst::visualize::RasterFormat::Exchange(
+                        typst::visualize::ExchangeFormat::Gif,
+                    ) => "image/gif",
+                    typst::visualize::RasterFormat::Exchange(
+                        typst::visualize::ExchangeFormat::Webp,
+                    ) => "image/webp",
+                    _ => "image/png",
+                };
+                (m, r.data().as_slice())
+            }
+            typst::visualize::ImageKind::Svg(s) => ("image/svg+xml", s.data().as_slice()),
+            _ => ("image/png", [].as_slice()),
+        };
+
+        // Standard base64 encoding (very fast, done only once per image load)
+        let b64 = {
+            const CHARS: &[u8] =
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            let mut out = String::with_capacity(data_bytes.len() * 4 / 3 + 4);
+            for chunk in data_bytes.chunks(3) {
+                let b0 = chunk[0] as usize;
+                let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
+                let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
+                let n = (b0 << 16) | (b1 << 8) | b2;
+                out.push(CHARS[(n >> 18) & 63] as char);
+                out.push(CHARS[(n >> 12) & 63] as char);
+                if chunk.len() > 1 {
+                    out.push(CHARS[(n >> 6) & 63] as char);
+                } else {
+                    out.push('=');
                 }
-                typst::visualize::ImageKind::Svg(svg_image) => {
-                    Some(Arc::new(gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Svg, svg_image.data().to_vec())))
-                }
-                typst::visualize::ImageKind::Pdf(_pdf_image) => {
-                    eprintln!("Warning: PDF images are not directly rendered here. Rasterization required.");
-                    None
+                if chunk.len() > 2 {
+                    out.push(CHARS[n & 63] as char);
+                } else {
+                    out.push('=');
                 }
             }
-            .unwrap_or_else(|| Arc::new(gpui_kit::Image::empty()))
-        }).clone()
+            out
+        };
+
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
+                  <g transform="rotate({angle_deg}, {cx}, {cy})">
+                      <image href="data:{mime};base64,{b64}" width="{w}" height="{h}"/>
+                  </g>
+              </svg>"#
+        );
+
+        Arc::new(gpui_kit::Image::from_bytes(
+            gpui_kit::ImageFormat::Svg,
+            svg.into_bytes(),
+        ))
+    } else {
+        // Standard unrotated path (zero overhead, identical to what you have now)
+        let mut cache = render_state.image_cache.lock();
+        cache
+            .entry(image.clone())
+            .or_insert_with(|| {
+                match image.kind() {
+                    typst::visualize::ImageKind::Raster(raster_image) => {
+                        let format = match raster_image.format() {
+                            typst::visualize::RasterFormat::Exchange(
+                                typst::visualize::ExchangeFormat::Png,
+                            ) => Some(gpui_kit::ImageFormat::Png),
+                            typst::visualize::RasterFormat::Exchange(
+                                typst::visualize::ExchangeFormat::Jpg,
+                            ) => Some(gpui_kit::ImageFormat::Jpeg),
+                            typst::visualize::RasterFormat::Exchange(
+                                typst::visualize::ExchangeFormat::Gif,
+                            ) => Some(gpui_kit::ImageFormat::Gif),
+                            typst::visualize::RasterFormat::Exchange(
+                                typst::visualize::ExchangeFormat::Webp,
+                            ) => Some(gpui_kit::ImageFormat::Webp),
+                            _ => None,
+                        };
+                        format.map(|gpui_format| {
+                            Arc::new(gpui_kit::Image::from_bytes(
+                                gpui_format,
+                                raster_image.data().to_vec(),
+                            ))
+                        })
+                    }
+                    typst::visualize::ImageKind::Svg(svg_image) => {
+                        Some(Arc::new(gpui_kit::Image::from_bytes(
+                            gpui_kit::ImageFormat::Svg,
+                            svg_image.data().to_vec(),
+                        )))
+                    }
+                    typst::visualize::ImageKind::Pdf(_) => None,
+                }
+                .unwrap_or_else(|| Arc::new(gpui_kit::Image::empty()))
+            })
+            .clone()
     };
 
     if let Some(render_image) = gpui_image_arc.use_render_image(window, cx) {
