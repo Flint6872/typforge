@@ -11,6 +11,7 @@ use crate::{
     editor::{DiagnosticsPanel, EditorPanel, EditorStateExt, FileContentUpdated},
     panels::{FilesPanel, OpenFileEvent},
     ribbon::RibbonPanel,
+    workspace::render::ScreenClass::Expanded,
 };
 
 use gpui_kit::component::{
@@ -37,6 +38,8 @@ pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> {
     pub recent_picker_selected_index: Option<usize>,
     pub recent_picker_focus_handle: FocusHandle,
     pub active_selection: Option<std::ops::Range<usize>>,
+    pub current_screen_class: crate::workspace::render::ScreenClass,
+    pub show_mobile_menu: bool,
 }
 
 impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
@@ -434,6 +437,9 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
         #[cfg(target_os = "macos")]
         let menu_bar = None;
 
+        let initial_screen_class =
+            crate::workspace::render::ScreenClass::from_width(window.viewport_size().width);
+
         // --- 7. Return TypstNoteView instance ---
         let mut note_view = Self {
             dock_area: dock_area_entity,
@@ -449,6 +455,8 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
             recent_picker_focus_handle: cx.focus_handle(),
             active_selection: None,
             has_diagnostics: false, // Initial state
+            current_screen_class: initial_screen_class,
+            show_mobile_menu: false,
         };
 
         note_view.update_dock_layout(window, cx);
@@ -535,30 +543,77 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
     }
 
     pub fn update_dock_layout(&mut self, window: &mut Window, cx: &mut App) {
-        let editor_column = if self.has_diagnostics {
-            DockLayout::v_split()
-                .child(
-                    DockLayout::tabs().panel_view(panel_handle(self.editor_panel.clone()), cx),
+        let screen =
+            crate::workspace::render::ScreenClass::from_width(window.viewport_size().width);
+        self.current_screen_class = screen;
+
+        let layout = match screen {
+            crate::workspace::render::ScreenClass::Compact => {
+                // Mobile: All panels share a single tab bar instead of horizontal splits
+                let mut tabs = DockLayout::tabs()
+                    .panel_view(panel_handle(self.editor_panel.clone()), cx)
+                    .panel_view(panel_handle(self.preview_panel.clone()), cx)
+                    .panel_view(panel_handle(self.files_panel.clone()), cx);
+
+                if self.has_diagnostics {
+                    tabs = tabs.panel_view(panel_handle(self.diagnostics_panel.clone()), cx);
+                }
+
+                tabs
+            }
+            crate::workspace::render::ScreenClass::Medium => {
+                // Tablet: Hide file tree or collapse it, split Editor & Preview side-by-side
+                let editor_column = if self.has_diagnostics {
+                    DockLayout::v_split()
+                        .child(
+                            DockLayout::tabs()
+                                .panel_view(panel_handle(self.editor_panel.clone()), cx),
+                            None,
+                        )
+                        .child(
+                            DockLayout::tabs()
+                                .panel_view(panel_handle(self.diagnostics_panel.clone()), cx),
+                            Some(px(160.0)),
+                        )
+                } else {
+                    DockLayout::tabs().panel_view(panel_handle(self.editor_panel.clone()), cx)
+                };
+
+                DockLayout::h_split().child(editor_column, None).child(
+                    DockLayout::tabs().panel_view(panel_handle(self.preview_panel.clone()), cx),
                     None,
                 )
-                .child(
-                    DockLayout::tabs().panel_view(panel_handle(self.diagnostics_panel.clone()), cx),
-                    Some(px(180.0)),
-                )
-        } else {
-            DockLayout::tabs().panel_view(panel_handle(self.editor_panel.clone()), cx)
-        };
+            }
+            crate::workspace::render::ScreenClass::Expanded => {
+                // Desktop: Full 3-column layout
+                let editor_column = if self.has_diagnostics {
+                    DockLayout::v_split()
+                        .child(
+                            DockLayout::tabs()
+                                .panel_view(panel_handle(self.editor_panel.clone()), cx),
+                            None,
+                        )
+                        .child(
+                            DockLayout::tabs()
+                                .panel_view(panel_handle(self.diagnostics_panel.clone()), cx),
+                            Some(px(180.0)),
+                        )
+                } else {
+                    DockLayout::tabs().panel_view(panel_handle(self.editor_panel.clone()), cx)
+                };
 
-        let layout = DockLayout::h_split()
-            .child(
-                DockLayout::tabs().panel_view(panel_handle(self.files_panel.clone()), cx),
-                Some(px(200.0)),
-            )
-            .child(editor_column, None)
-            .child(
-                DockLayout::tabs().panel_view(panel_handle(self.preview_panel.clone()), cx),
-                None,
-            );
+                DockLayout::h_split()
+                    .child(
+                        DockLayout::tabs().panel_view(panel_handle(self.files_panel.clone()), cx),
+                        Some(px(200.0)),
+                    )
+                    .child(editor_column, None)
+                    .child(
+                        DockLayout::tabs().panel_view(panel_handle(self.preview_panel.clone()), cx),
+                        None,
+                    )
+            }
+        };
 
         self.dock_area.update(cx, |dock_area, cx| {
             dock_area.set_center(layout, window, cx);
