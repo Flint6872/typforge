@@ -34,17 +34,16 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK & NDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install NDK & cargo-ndk
+      - name: Install Android NDK, SDK 34 & cargo-ndk
         run: |
-          sdkmanager "ndk;27.2.12479018"
+          SDK_MANAGER=$(ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/cmdline-tools/*/bin/sdkmanager | head -n 1)
+          yes | "$SDK_MANAGER" --licenses || true
+          "$SDK_MANAGER" "ndk;27.2.12479018" "platforms;android-34" "build-tools;34.0.0"
           cargo install cargo-ndk
 
       - name: Build Rust library for Android
         env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
           RUST_FONTCONFIG_DLOPEN: "on"
         run: |
           PROFILE_FLAG=""
@@ -123,4 +122,3 @@ jobs:
         with:
           name: typforge-ios-app
           path: crates/typforge/ios/build/Build/Products/*-iphoneos/*.app
-  
