@@ -1,0 +1,4 @@
+name: Mobile Test Build (Android & iOS)
+on:
+  workflow_dispatch:
+  
