@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Application theme for the GPUI Mobile Android Example.
+
+  The key fix here is `android:windowBackground` set to white.  The old
+  theme (`Theme.NoTitleBar.Fullscreen`) used a black window background,
+  which caused a visible black flash on startup:
+
+    1. Activity starts → system shows the theme's windowBackground
+    2. Native surface is created → wgpu renderer initialises
+    3. First real GPUI frame is drawn
+
+  Between steps 1 and 3 the user saw black (the old theme's default).
+  By setting windowBackground to white we match the app's typical
+  content background, making the transition seamless.
+
+  We also keep all the fullscreen / no-title-bar flags from the
+  previous `Theme.NoTitleBar.Fullscreen` so the immersive experience
+  is preserved.
+-->
+<resources>
+
+    <!-- Base application theme for the GPUI example app. -->
+    <style name="GpuiTheme" parent="@android:style/Theme.NoTitleBar">
+        <!-- Match the app's dark theme surface color (0x121318) to eliminate
+             any flash between the system splash and the first rendered frame. -->
+        <item name="android:windowBackground">@color/gpui_surface</item>
+
+        <!-- Keep the window opaque so the compositor doesn't blend with
+             whatever is behind us (avoids transparency flicker). -->
+        <item name="android:windowIsTranslucent">false</item>
+
+        <!-- Disable the default window enter/exit animations to prevent
+             the brief flicker where the desktop is visible during the
+             activity transition. -->
+        <item name="android:windowAnimationStyle">@null</item>
+
+        <!-- Ensure hardware acceleration for wgpu / Vulkan rendering. -->
+        <item name="android:hardwareAccelerated">true</item>
+
+        <!-- No title bar — we render our own UI chrome. -->
+        <item name="android:windowNoTitle">true</item>
+
+        <!-- NOT fullscreen — allow the status bar and navigation bar to show
+             so we can color them via setStatusBarColor / setNavigationBarColor. -->
+        <item name="android:windowFullscreen">false</item>
+
+        <!-- Draw behind the status bar so our content fills the screen,
+             and we can set the bar colors programmatically. -->
+        <item name="android:statusBarColor">@color/gpui_surface</item>
+        <item name="android:navigationBarColor">@color/gpui_surface</item>
+
+        <!-- Disable default content transitions that could cause flicker. -->
+        <item name="android:windowContentTransitions">false</item>
+    </style>
+
+    <!-- Splash theme using AndroidX SplashScreen compat library.
+         On API < 31 the library emulates the system splash screen.
+         On API 31+ the system splash screen API is used natively.
+         GpuiActivity calls installSplashScreen() and holds the splash
+         visible until NATIVE_INITIALIZED is true via JNI. -->
+    <style name="GpuiSplashTheme" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/gpui_surface</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/GpuiTheme</item>
+    </style>
+
+</resources>

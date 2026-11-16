@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Layer-list that simulates the Android 12 splash screen on API < 31.
+     Shows the app icon centered on the gpui_surface background color. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/gpui_surface" />
+    <item
+        android:drawable="@mipmap/ic_launcher"
+        android:gravity="center"
+        android:width="108dp"
+        android:height="108dp" />
+</layer-list>

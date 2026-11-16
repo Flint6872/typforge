@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Splash screen icon: a simple GPUI logo placeholder.
+     Used as windowSplashScreenAnimatedIcon on API 31+ and as
+     a centered drawable in the splash layer-list on API < 31. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Rounded rectangle background -->
+    <path
+        android:fillColor="#6366F1"
+        android:pathData="M20,20h68a8,8 0,0 1,8 8v52a8,8 0,0 1,-8 8h-68a8,8 0,0 1,-8,-8v-52a8,8 0,0 1,8,-8z" />
+    <!-- "G" letter -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,42h-8v12h4v-4h4a8,8 0,1 0,0,-8zM54,46h-4v-2h4a1,1 0,0 1,0 2z" />
+</vector>

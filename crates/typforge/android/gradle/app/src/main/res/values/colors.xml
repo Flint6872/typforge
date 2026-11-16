@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App's dark theme surface color (matches BASE = 0x121318 in Rust). -->
+    <color name="gpui_surface">#FF121318</color>
+</resources>

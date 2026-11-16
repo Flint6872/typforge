@@ -17,6 +17,7 @@ members = [
 
 [workspace.dependencies]
 gpui-kit = { version = "0.9.1", features = ["tree-sitter"] }
+gpui-mobile = {git = "https://github.com/Flint6872/gpui-mobile" }
 
 tree-sitter = "0.26.13"
 tree-sitter-typst = { git = "https://github.com/SeniorMars/tree-sitter-typst" }

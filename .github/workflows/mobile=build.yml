@@ -1,0 +1,125 @@
+name: Mobile Test Build (Android & iOS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_profile:
+        description: "Cargo build profile"
+        required: true
+        default: "release"
+        type: choice
+        options:
+          - release
+          - debug
+
+jobs:
+  build-android:
+    name: Build Android (arm64-v8a)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK & NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK & cargo-ndk
+        run: |
+          sdkmanager "ndk;27.2.12479018"
+          cargo install cargo-ndk
+
+      - name: Build Rust library for Android
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
+          RUST_FONTCONFIG_DLOPEN: "on"
+        run: |
+          PROFILE_FLAG=""
+          if [ "${{ inputs.build_profile }}" = "release" ]; then
+            PROFILE_FLAG="--release"
+          fi
+
+          cargo ndk -t arm64-v8a \
+            -o crates/typforge/android/gradle/app/src/main/jniLibs \
+            build -p typforge --lib $PROFILE_FLAG
+
+      - name: Build Android APK
+        working-directory: crates/typforge/android/gradle
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: typforge-android-debug-apk
+          path: crates/typforge/android/gradle/app/build/outputs/apk/debug/*.apk
+
+  build-ios:
+    name: Build iOS (arm64)
+    runs-on: macos-14
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build Rust static library for iOS
+        run: |
+          PROFILE_FLAG=""
+          if [ "${{ inputs.build_profile }}" = "release" ]; then
+            PROFILE_FLAG="--release"
+          fi
+
+          cargo build -p typforge --lib --target aarch64-apple-ios $PROFILE_FLAG
+
+      - name: Generate Xcode project
+        working-directory: crates/typforge/ios
+        run: xcodegen generate
+
+      - name: Build iOS App (Unsigned)
+        working-directory: crates/typforge/ios
+        run: |
+          CONFIG="Release"
+          if [ "${{ inputs.build_profile }}" = "debug" ]; then
+            CONFIG="Debug"
+          fi
+
+          xcodebuild \
+            -project GpuiExample.xcodeproj \
+            -scheme GpuiExample \
+            -configuration "$CONFIG" \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Upload iOS App Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: typforge-ios-app
+          path: crates/typforge/ios/build/Build/Products/*-iphoneos/*.app

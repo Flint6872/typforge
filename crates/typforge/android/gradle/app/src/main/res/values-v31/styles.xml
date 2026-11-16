@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ (API 31) splash screen configuration.
+     Uses the AndroidX SplashScreen API with native system attributes.
+     GpuiActivity.installSplashScreen() bridges this with the compat layer. -->
+<resources>
+    <style name="GpuiSplashTheme" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/gpui_surface</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/GpuiTheme</item>
+        <!-- API 31+ native attributes (consumed by the system) -->
+        <item name="android:windowSplashScreenBackground">@color/gpui_surface</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+    </style>
+</resources>
