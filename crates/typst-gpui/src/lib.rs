@@ -656,8 +656,8 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                 cx.listener(|_, _, _, cx| cx.stop_propagation()),
             )
             .on_click(|_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(
-                cx.listener(|this, event: &gpui_kit::ScrollWheelEvent, _win, cx| {
+            .on_scroll(
+                cx.listener(|this, event: &gpui_kit::ScrollEvent, _win, cx| {
                     if event.modifiers.control || event.modifiers.platform {
                         let delta = event.delta.pixel_delta(gpui_kit::px(1.0)).y;
                         if delta > gpui_kit::px(0.) {

@@ -205,18 +205,16 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         div()
             .size_full()
             .track_focus(&self.focus_handle)
-            .on_scroll_wheel(
-                cx.listener(|this, event: &gpui::ScrollWheelEvent, _win, cx| {
-                    if event.modifiers.control || event.modifiers.platform {
-                        let delta = event.delta.pixel_delta(px(1.0)).y;
-                        if delta > px(0.) {
-                            this.set_zoom(this.zoom_level + 0.1, cx);
-                        } else if delta < px(0.) {
-                            this.set_zoom(this.zoom_level - 0.1, cx);
-                        }
+            .on_scroll(cx.listener(|this, event: &gpui::ScrollEvent, _win, cx| {
+                if event.modifiers.control || event.modifiers.platform {
+                    let delta = event.delta.pixel_delta(px(1.0)).y;
+                    if delta > px(0.) {
+                        this.set_zoom(this.zoom_level + 0.1, cx);
+                    } else if delta < px(0.) {
+                        this.set_zoom(this.zoom_level - 0.1, cx);
                     }
-                }),
-            )
+                }
+            }))
             .flex_col()
             .child(
                 // Scrollable Tab Bar Container

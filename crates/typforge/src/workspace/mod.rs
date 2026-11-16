@@ -3,7 +3,6 @@ pub mod render;
 
 use gpui_kit::*;
 use std::sync::Arc;
-use typst::syntax::FileId;
 
 // Import necessary types
 use crate::{
@@ -11,7 +10,6 @@ use crate::{
     editor::{DiagnosticsPanel, EditorPanel, EditorStateExt, FileContentUpdated},
     panels::{FilesPanel, OpenFileEvent},
     ribbon::RibbonPanel,
-    workspace::render::ScreenClass::Expanded,
 };
 
 use gpui_kit::component::{
