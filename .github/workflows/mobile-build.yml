@@ -75,7 +75,7 @@ jobs:
 
   build-ios:
     name: Build iOS (arm64)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
