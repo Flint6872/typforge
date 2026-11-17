@@ -30,24 +30,14 @@ use gpui_mobile::ios::ffi;
 // This function should only be compiled for mobile targets
 #[cfg(any(target_os = "android", target_os = "ios"))]
 fn run_mobile_app(app: gpui::Application) {
-    app.run(move |cx: &mut gpui::AppContext| {
+    app.run(move |cx: &mut App| {
         log::info!("GPUI Mobile App context received.");
 
-        cx.open_window(
-            WindowOptions::default(),
-            |window: &mut gpui::Window, cx: &mut gpui::ViewContext| {
-                cx.new_view(|_cx| {
-                    gpui::div()
-                        .size_full()
-                        .flex()
-                        .justify_center()
-                        .items_center()
-                        .child("Hello from Typforge Mobile!")
-                        .text_color(gpui::rgb(0xFFFFFF))
-                        .into_any_element()
-                })
-            },
-        );
+        cx.open_window(WindowOptions::default(), |_window, cx| {
+            cx.new(|_cx| MobileRootView)
+        })
+        .expect("Failed to open mobile window");
+
         cx.activate(true);
     });
 }
@@ -59,7 +49,7 @@ fn run_mobile_app(app: gpui::Application) {
 /// Called by the `android-activity` crate on a dedicated native thread.
 /// Does NOT return until the app is ready to exit.
 #[cfg(target_os = "android")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn android_main(app: android_activity::AndroidApp) {
     // Logger first — so everything after this is visible in logcat.
     android_logger::init_once(
