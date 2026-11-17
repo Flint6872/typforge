@@ -8254,6 +8254,7 @@ dependencies = [
  "gpui-kit",
  "gpui-mobile",
  "gpui_util",
+ "log",
  "lsp-types",
  "objc2 0.6.4",
  "openssl",

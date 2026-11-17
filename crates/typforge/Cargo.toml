@@ -9,14 +9,9 @@ name = "typforge"
 path = "src/lib.rs"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
-
 [dependencies]
 chrono.workspace = true
 gpui-kit = { workspace = true, features = ["tree-sitter"] }
-
-[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
-gpui-mobile.workspace = true
-
 gpui_util = "0.2.2"
 # gpui-component.workspace = true
 # gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
@@ -24,28 +19,28 @@ gpui_util = "0.2.2"
 typst-gpui = { path = "../typst-gpui" }
 typastry = { path = "../typastry" }
 
-
 parking_lot.workspace = true
 ropey = "2.0.0-beta.1"
 serde_json = "1.0.149"
 serde.workspace = true
 
-
-anyhow = "1.0" # Added for consistent error handling in main
+anyhow = "1.0"
+log = "0.4"
 
 typst.workspace = true
 typst-layout.workspace = true
 typst-kit = { version = "0.15", features = ["scan-fonts", "embedded-fonts", "universe-packages", "system-packages", "system-downloader"] }
-ureq = { version = "3.4", features = [ "json" ] } #added for typst-kit downloader
+ureq = { version = "3.4", features = ["json"] }
 tar = "0.4.46"
 flate2 = { version = "1", features = ["zlib-rs"] }
-
 
 lsp-types = "0.97.0"
 
 [target.'cfg(windows)'.dependencies]
 embed-resource = "3.0.11"
 
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+gpui-mobile.workspace = true
 
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "0.6"
