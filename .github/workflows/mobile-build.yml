@@ -39,19 +39,17 @@ jobs:
         with:
           accept-android-sdk-licenses: true
           packages: platform-tools
-          ndk: "27.2.12479018" # The NDK version you specified
+          ndk: "27.2.12479018"
 
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk
+      - name: Export NDK environment & Install cargo-ndk
+        run: |
+          # Propagate shell environment variable ANDROID_NDK_ROOT to ANDROID_NDK_HOME
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_ROOT" >> "$GITHUB_ENV"
+          cargo install cargo-ndk
 
       - name: Build Rust library for Android
         env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_ROOT }} # This env var is set by setup-android@v4
           RUST_FONTCONFIG_DLOPEN: "on"
-          # Explicitly pass linker and ar to cargo-ndk via environment variables.
-          # Use API level 26 as that's your minSdk in build.gradle.kts.
-          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: "${{ env.ANDROID_NDK_ROOT }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
-          CARGO_TARGET_AARCH64_LINUX_ANDROID_AR: "${{ env.ANDROID_NDK_ROOT }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
         run: |
           PROFILE_FLAG=""
           if [ "${{ inputs.build_profile }}" = "release" ]; then
@@ -74,7 +72,6 @@ jobs:
         with:
           name: typforge-android-debug-apk
           path: crates/typforge/android/gradle/app/build/outputs/apk/debug/*.apk
-
 
   build-ios:
     name: Build iOS (arm64)
