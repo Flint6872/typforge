@@ -1,3 +1,17 @@
+name: Mobile Test Build (Android & iOS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_profile:
+        description: "Cargo build profile"
+        required: true
+        default: "release"
+        type: choice
+        options:
+          - release
+          - debug
+
 jobs:
   build-android:
     name: Build Android (arm64-v8a)
@@ -60,3 +74,59 @@ jobs:
         with:
           name: typforge-android-debug-apk
           path: crates/typforge/android/gradle/app/build/outputs/apk/debug/*.apk
+
+  build-ios:
+    name: Build iOS (arm64)
+    runs-on: macos-15
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build Rust static library for iOS
+        run: |
+          PROFILE_FLAG=""
+          if [ "${{ inputs.build_profile }}" = "release" ]; then
+            PROFILE_FLAG="--release"
+          fi
+
+          cargo build -p typforge --lib --target aarch64-apple-ios $PROFILE_FLAG
+
+      - name: Generate Xcode project
+        working-directory: crates/typforge/ios
+        run: xcodegen generate
+
+      - name: Build iOS App (Unsigned)
+        working-directory: crates/typforge/ios
+        run: |
+          CONFIG="Release"
+          if [ "${{ inputs.build_profile }}" = "debug" ]; then
+            CONFIG="Debug"
+          fi
+
+          xcodebuild \
+            -project GpuiExample.xcodeproj \
+            -scheme GpuiExample \
+            -configuration "$CONFIG" \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Upload iOS App Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: typforge-ios-app
+          path: crates/typforge/ios/build/Build/Products/*-iphoneos/*.app
