@@ -35,7 +35,7 @@ android {
         }
 
         // Forward the library name to the manifest via a placeholder.
-        manifestPlaceholders["nativeLibraryName"] = "typeforge"
+        manifestPlaceholders["nativeLibraryName"] = "typforge"
     }
 
     buildTypes {
@@ -78,10 +78,10 @@ android {
         // release mode and stripping again can break backtraces.
         jniLibs {
             keepDebugSymbols += listOf(
-                "*/arm64-v8a/libtypeforge.so",
-                "*/armeabi-v7a/libtypeforge.so",
-                "*/x86_64/libtypeforge.so",
-                "*/x86/libtypeforge.so"
+                "*/arm64-v8a/libtypforge.so",
+                "*/armeabi-v7a/libtypforge.so",
+                "*/x86_64/libtypforge.so",
+                "*/x86/libtypforge.so"
             )
         }
     }
