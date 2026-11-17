@@ -157,7 +157,7 @@ static void GPUIResumeFrames(void *context);
     // Register the example app's root view (Router), then start GPUI.
     // gpui_ios_register_app() is defined in the example crate and sets up
     // the callback that creates the Router with all screens + demos.
-    // gpui_ios_run_demo() is defined in gpui-mobile and starts the run loop.
+    // gpui_ios_run_demo() is defined in gpui-typforge and starts the run loop.
     NSLog(@"Starting GPUI app...");
     gpui_ios_register_app();
     gpui_ios_run_demo();

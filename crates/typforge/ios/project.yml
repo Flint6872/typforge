@@ -30,7 +30,7 @@ targets:
         buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.gpui.mobile.example
+        PRODUCT_BUNDLE_IDENTIFIER: dev.gpui.typforge.example
         PRODUCT_NAME: GpuiExample
         INFOPLIST_FILE: Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -121,7 +121,7 @@ targets:
             CARGO_FLAGS=""
           fi
 
-          echo "Building gpui-mobile for ${RUST_TARGET} (${CONFIGURATION})..."
+          echo "Building typforge for ${RUST_TARGET} (${CONFIGURATION})..."
 
           # Ensure the Rust target is installed
           rustup target add "${RUST_TARGET}" 2>/dev/null || true

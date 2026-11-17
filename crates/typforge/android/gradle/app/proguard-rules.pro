@@ -1,4 +1,4 @@
-# ProGuard / R8 rules for the GPUI Mobile Android Example.
+# ProGuard / R8 rules for the GPUI typforge Android Example.
 #
 # This is a pure native (Rust) application using NativeActivity — there is no
 # Java or Kotlin application code to shrink, optimize, or obfuscate.

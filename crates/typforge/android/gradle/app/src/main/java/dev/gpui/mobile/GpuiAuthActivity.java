@@ -1,4 +1,4 @@
-package dev.gpui.mobile;
+package dev.gpui.typforge;
 
 import android.os.Bundle;
 

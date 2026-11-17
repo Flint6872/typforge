@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "GPUIMobileExample"
+rootProject.name = "typforge"
 include(":app")
