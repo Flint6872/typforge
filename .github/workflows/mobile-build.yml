@@ -6,27 +6,39 @@ on:
       build_profile:
         description: "Cargo build profile"
         required: true
-        default: "release"
+        default: "debug"
         type: choice
         options:
-          - release
           - debug
+          - release
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Android Build (cargo-ndk + Gradle APK)
+  # ─────────────────────────────────────────────────────────────────────────────
   build-android:
-    name: Build Android (arm64-v8a)
-    runs-on: ubuntu-24.04
+    name: Android Build (arm64-v8a)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Install Rust toolchain + Android target
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
 
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Set up Android SDK + NDK
+        uses: android-actions/setup-android@v4
+        with:
+          accept-android-sdk-licenses: true
+          packages: platform-tools
+
+      - name: Resolve NDK path
+        run: echo "ANDROID_NDK_HOME=$ANDROID_NDK_ROOT" >> "$GITHUB_ENV"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -34,34 +46,23 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK + NDK
-        uses: android-actions/setup-android@v4
-        with:
-          accept-android-sdk-licenses: true
-          packages: platform-tools
-          ndk: "27.2.12479018"
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
 
-      - name: Export NDK environment & Install cargo-ndk
-        run: |
-          # Propagate shell environment variable ANDROID_NDK_ROOT to ANDROID_NDK_HOME
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_ROOT" >> "$GITHUB_ENV"
-          cargo install cargo-ndk
-
-      - name: Build Rust library for Android
-        env:
-          RUST_FONTCONFIG_DLOPEN: "on"
+      - name: Build Rust shared library via cargo-ndk
         run: |
           PROFILE_FLAG=""
           if [ "${{ inputs.build_profile }}" = "release" ]; then
             PROFILE_FLAG="--release"
           fi
 
-          cargo ndk -t arm64-v8a \
+          cargo ndk \
+            -t arm64-v8a \
+            -P 26 \
             -o crates/typforge/android/gradle/app/src/main/jniLibs \
-            --api 26 \
             build -p typforge --lib $PROFILE_FLAG
 
-      - name: Build Android APK
+      - name: Assemble debug APK
         working-directory: crates/typforge/android/gradle
         run: |
           chmod +x gradlew
@@ -70,20 +71,23 @@ jobs:
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: typforge-android-debug-apk
+          name: typforge-android-apk
           path: crates/typforge/android/gradle/app/build/outputs/apk/debug/*.apk
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # iOS Build (Rust staticlib + Xcode build)
+  # ─────────────────────────────────────────────────────────────────────────────
   build-ios:
-    name: Build iOS (arm64)
+    name: iOS Build (arm64)
     runs-on: macos-15
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Install Rust toolchain + iOS target
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+          targets: aarch64-apple-ios
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -111,6 +115,9 @@ jobs:
           if [ "${{ inputs.build_profile }}" = "debug" ]; then
             CONFIG="Debug"
           fi
+
+          # Ensure cargo is in PATH for Xcode's pre-build script phase
+          export PATH="$HOME/.cargo/bin:$PATH"
 
           xcodebuild \
             -project GpuiExample.xcodeproj \
