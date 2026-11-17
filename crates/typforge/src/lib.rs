@@ -1,4 +1,29 @@
 //! Mobile library entry point for TypForge (`libtypforge.so` on Android, `libtypforge.a` on iOS).
+mod actions;
+mod components;
+pub mod editor;
+mod key_bindings;
+pub mod package_manager;
+mod panels;
+mod ribbon;
+mod settings;
+mod typst_world;
+
+mod workspace;
+use workspace::TypstNoteView;
+
+use crate::{
+    components::{menus::setup_menus, theme},
+    editor::init_editor_languages,
+    key_bindings::bind_keys,
+    settings::load_settings,
+    typst_world::GpuiWorld,
+};
+use gpui_kit::assets::Assets;
+use gpui_kit::component::Root;
+use gpui_kit::*;
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
