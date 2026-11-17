@@ -1,188 +1,191 @@
+// crates/typforge/src/lib.rs
+
 //! Mobile library entry point for TypForge (`libtypforge.so` on Android, `libtypforge.a` on iOS).
-mod actions;
-mod components;
-pub mod editor;
-mod key_bindings;
-pub mod package_manager;
-mod panels;
-mod ribbon;
-mod settings;
-mod typst_world;
 
-mod workspace;
-use workspace::TypstNoteView;
+#![allow(unused_imports)] // Temporarily allow during mobile setup
+#![allow(unused_variables)] // Temporarily allow during mobile setup
+#![deny(unsafe_op_in_unsafe_fn)] // Require `unsafe` for unsafe operations
 
-use crate::{
-    components::{menus::setup_menus, theme},
-    editor::init_editor_languages,
-    key_bindings::bind_keys,
-    settings::load_settings,
-    typst_world::GpuiWorld,
-};
-use gpui_kit::assets::Assets;
-use gpui_kit::component::Root;
-use gpui_kit::*;
-use parking_lot::Mutex;
-use std::sync::Arc;
+// Only include gpui-mobile and its re-exported gpui when targeting Android or iOS
+#[cfg(any(target_os = "android", target_os = "ios"))]
+extern crate gpui_mobile;
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use gpui_mobile::gpui::{self, App, WindowOptions, prelude::*}; // Use gpui-mobile's re-exported gpui
+
+use log;
+
+// Android-specific imports
 #[cfg(target_os = "android")]
-#[unsafe(no_mangle)]
-pub extern "C" fn gpui_android_main() {
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_max_level(log::LevelFilter::Info)
-            .with_tag("TypforgeAndroid"),
-    );
-    log::info!("Starting Typforge Android main");
+use {android_activity, android_logger, gpui_mobile::android::jni};
 
-    let platform = gpui_mobile::current_platform(false);
-    let _ = platform;
-
-    // TODO: Wire up gpui_mobile::gpui::Application::with_platform(platform).run(...)
-    // matching your gpui-mobile fork's android_app example.
-}
-
+// iOS-specific imports
 #[cfg(target_os = "ios")]
-#[unsafe(no_mangle)]
-pub extern "C" fn gpui_ios_register_app() {
-    log::info!("Registering Typforge iOS app");
+use gpui_mobile::ios::ffi;
 
-    // TODO: Register the root view callback with gpui_mobile::ios
-    // matching your gpui-mobile fork's ios example.
-}
+// ═══════════════════════════════════════════════════════════════════════════
+// Shared Mobile Application Setup
+// ═══════════════════════════════════════════════════════════════════════════
 
-/// Shared entry point called by desktop (`main.rs`), Android, and iOS.
-pub fn run_app(app: Application) {
-    app.with_assets(Assets).run(|cx: &mut App| {
-        gpui_kit::component::init(cx);
-        load_settings(cx);
-        bind_keys(cx);
-        theme::init(cx);
-        theme::apply_settings_theme(cx);
-        init_editor_languages(cx);
+// This function should only be compiled for mobile targets
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn run_mobile_app(app: gpui::Application) {
+    app.run(move |cx: &mut gpui::AppContext| {
+        log::info!("GPUI Mobile App context received.");
 
-        cx.set_global(crate::components::menus::MenuState {
-            has_active_file: cfg!(target_os = "windows"),
-        });
-
-        setup_menus(cx);
-
-        #[cfg(not(target_os = "macos"))]
-        if let Some(menus) = cx.get_menus() {
-            gpui_kit::component::global_state::GlobalState::global_mut(cx).set_app_menus(menus);
-        }
-
-        cx.set_global(typst_gpui::GpuiRegisteredFonts(
-            std::collections::HashSet::new(),
-        ));
-
-        let fonts = load_fonts(cx);
-        let mut world = GpuiWorld::new(fonts);
-        world.set_source(String::new());
-        let shared_world = Arc::new(Mutex::new(world));
-
-        // Desktop uses custom bounds & titlebars; mobile uses full-screen defaults
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        let window_options = {
-            let initial_bounds = Bounds::centered(None, size(px(1280.0), px(600.0)), cx);
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(initial_bounds)),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("TypForge".into()),
-                    appears_transparent: cfg!(target_os = "macos"),
-                    traffic_light_position: if cfg!(target_os = "macos") {
-                        Some(point(px(16.0), px(16.0)))
-                    } else {
-                        None
-                    },
-                    ..Default::default()
-                }),
-                window_decorations: if cfg!(target_os = "linux") {
-                    Some(WindowDecorations::Server)
-                } else {
-                    None
-                },
-                focus: true,
-                show: true,
-                kind: WindowKind::Normal,
-                is_resizable: true,
-                is_movable: true,
-                ..Default::default()
-            }
-        };
-
-        #[cfg(any(target_os = "android", target_os = "ios"))]
-        let window_options = WindowOptions::default();
-
-        cx.open_window(window_options, |window: &mut Window, cx: &mut App| {
-            let typst_note_view =
-                cx.new(|cx| TypstNoteView::<GpuiWorld>::new(window, shared_world, cx));
-            cx.new(|cx| Root::new(typst_note_view, window, cx))
-        })
-        .expect("Failed to open main TypForge window");
-
+        cx.open_window(
+            WindowOptions::default(),
+            |window: &mut gpui::Window, cx: &mut gpui::ViewContext| {
+                cx.new_view(|_cx| {
+                    gpui::div()
+                        .size_full()
+                        .flex()
+                        .justify_center()
+                        .items_center()
+                        .child("Hello from Typforge Mobile!")
+                        .text_color(gpui::rgb(0xFFFFFF))
+                        .into_any_element()
+                })
+            },
+        );
         cx.activate(true);
     });
 }
 
-fn load_fonts(cx: &mut App) -> typst_kit::fonts::FontStore {
-    let mut store = typst_kit::fonts::FontStore::new();
+// ═══════════════════════════════════════════════════════════════════════════
+// Android Entry Point
+// ═══════════════════════════════════════════════════════════════════════════
 
-    // Note: On mobile, embedded fonts are critical since desktop system fonts won't exist
-    store.extend(typst_kit::fonts::system());
-    store.extend(typst_kit::fonts::embedded());
-
-    let preferred_families = [
-        "New Computer Modern Math",
-        "Libertinus Serif",
-        "Segoe UI",
-        "Inter",
-        "Source Code Pro",
-        "Noto Sans CJK JP",
-    ];
-
-    for family_name in preferred_families {
-        if let Some(font_id) = store
-            .book()
-            .select(family_name, typst::text::FontVariant::default())
-        {
-            if let Some(font) = store.font(font_id.into()) {
-                log::info!("Found and loaded UI font: {}", family_name);
-                let data = font.data().to_vec();
-                let _ = cx
-                    .text_system()
-                    .add_fonts(vec![std::borrow::Cow::Owned(data)]);
-            }
-        }
-    }
-
-    store
-}
-
+/// Called by the `android-activity` crate on a dedicated native thread.
+/// Does NOT return until the app is ready to exit.
 #[cfg(target_os = "android")]
-#[unsafe(no_mangle)]
-pub extern "C" fn gpui_android_main() {
-    std::env::set_var("RUST_BACKTRACE", "1");
+#[no_mangle]
+pub extern "C" fn android_main(app: android_activity::AndroidApp) {
+    // Logger first — so everything after this is visible in logcat.
     android_logger::init_once(
         android_logger::Config::default()
             .with_max_level(log::LevelFilter::Info)
             .with_tag("TypforgeAndroid"),
     );
-    log::info!("Starting Typforge Android main");
 
-    let platform = gpui_mobile::current_platform(false);
-    run_app(Application::with_platform(platform));
+    // Panic hook — routes panics to logcat instead of silently aborting.
+    jni::install_panic_hook();
+
+    log::info!("android_main: entered");
+
+    // Initialise the global AndroidApp + AndroidPlatform.
+    let _platform = jni::init_platform(&app);
+    log::info!("android_main: platform initialised");
+
+    // Get a SharedPlatform (Rc-compatible wrapper around the global
+    // Arc<AndroidPlatform>) so we can hand it to GPUI.
+    let shared_platform = match jni::shared_platform() {
+        Some(s) => s,
+        None => {
+            log::error!("android_main: shared_platform() returned None — aborting");
+            return;
+        }
+    };
+
+    log::info!("android_main: creating GPUI Application");
+    let app = gpui::Application::with_platform(shared_platform.into_rc());
+
+    // `Application::run` on Android blocks by driving the native event loop.
+    // The `run_mobile_app` function (which opens the window) is deferred until
+    // `MainEvent::InitWindow` delivers a native surface.
+    run_mobile_app(app);
+
+    log::info!("android_main: Application.run returned — activity will finish");
 }
 
-#[cfg(target_os = "ios")]
-#[unsafe(no_mangle)]
-pub extern "C" fn gpui_ios_register_app() {
-    std::env::set_var("RUST_BACKTRACE", "1");
-    log::info!("Registering Typforge iOS app");
+// ═══════════════════════════════════════════════════════════════════════════
+// iOS Entry Point
+// ═══════════════════════════════════════════════════════════════════════════
 
-    // Note: Depending on your gpui-mobile fork's iOS lifecycle, you either call
-    // run_app(Application::with_platform(gpui_mobile::current_platform(false))) here
-    // or pass a closure into gpui_mobile::ios::register_app(|| { ... }).
-    let platform = gpui_mobile::current_platform(false);
-    run_app(Application::with_platform(platform));
+/// Minimal logger that routes Rust `log` crate messages through NSLog.
+#[cfg(target_os = "ios")]
+struct NsLogLogger;
+
+#[cfg(target_os = "ios")]
+impl log::Log for NsLogLogger {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
+        true
+    }
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            let msg = format!(
+                "[{}] {}: {}",
+                record.level(),
+                record.target(),
+                record.args()
+            );
+            unsafe {
+                nslog(&msg);
+            }
+        }
+    }
+    fn flush(&self) {}
+}
+
+/// Call NSLog from Rust via raw FFI.
+#[cfg(target_os = "ios")]
+unsafe fn nslog(msg: &str) {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    unsafe {
+        // Safety: This is an FFI call to NSLog, which is variadic.
+        extern "C" {
+            fn NSLog(fmt: *mut AnyObject, ...);
+        }
+        let c_msg = std::ffi::CString::new(msg).unwrap_or_default();
+        let ns_msg: *mut AnyObject = msg_send![class!(NSString), alloc];
+        let ns_msg: *mut AnyObject = msg_send![ns_msg, initWithUTF8String: c_msg.as_ptr()];
+        let c_fmt = std::ffi::CString::new("%@").unwrap_or_default();
+        let ns_fmt: *mut AnyObject = msg_send![class!(NSString), alloc];
+        let ns_fmt: *mut AnyObject = msg_send![ns_fmt, initWithUTF8String: c_fmt.as_ptr()];
+        NSLog(ns_fmt, ns_msg);
+    }
+}
+
+/// Register the example app's root view with the GPUI iOS platform.
+///
+/// This is called from `main.m` **before** `gpui_ios_run_demo()` so that
+/// when the GPUI run loop starts it knows which view to create.
+///
+/// The symbol lives in the example crate's static lib which is force-loaded
+/// alongside `libgpui_mobile.a` by the Xcode linker.
+#[cfg(target_os = "ios")]
+#[no_mangle]
+pub extern "C" fn gpui_ios_register_app() {
+    // Set up Rust logging → NSLog so log::info! etc. appear in devicectl --console.
+    let _ = log::set_logger(unsafe { &NsLogLogger })
+        .map(|()| log::set_max_level(log::LevelFilter::Info));
+
+    // Panic hook → NSLog so panics are visible.
+    std::panic::set_hook(Box::new(|info| {
+        let msg = format!("GPUI PANIC: {info}");
+        unsafe {
+            nslog(&msg);
+        }
+    }));
+
+    // std::env::set_var is an unsafe function
+    unsafe {
+        std::env::set_var("RUST_BACKTRACE", "1");
+    }
+
+    ffi::set_app_callback(Box::new(|cx: &mut gpui::AppContext| {
+        log::info!("GPUI iOS App context received.");
+        let app = gpui::Application::with_platform(gpui_mobile::current_platform(false));
+        run_mobile_app(app);
+    }));
+}
+
+/// Convenience entry point for the binary target (`main.rs`).
+#[cfg(target_os = "ios")]
+pub fn ios_main() {
+    unsafe {
+        gpui_ios_register_app();
+    } // Safety: FFI call
+    gpui_mobile::ios::ffi::run_app();
 }
