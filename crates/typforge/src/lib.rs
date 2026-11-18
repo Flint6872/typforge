@@ -4,6 +4,8 @@
 #![allow(unused_variables)] // Temporarily allow during mobile setup
 #![deny(unsafe_op_in_unsafe_fn)] // Require `unsafe` for unsafe operations
 
+use gpui_kit::component::Root;
+
 // Only include gpui-mobile and its re-exported gpui when targeting Android or iOS
 #[cfg(any(target_os = "android", target_os = "ios"))]
 extern crate gpui_mobile;
@@ -24,18 +26,42 @@ use gpui_mobile::ios::ffi;
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
+struct MobilePlaceholder;
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+impl Render for MobilePlaceholder {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child("TypForge Mobile")
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
 fn open_main_window(cx: &mut App) {
     log::info!("GPUI Mobile App context received.");
 
     gpui_kit::component::init(cx);
 
-    cx.open_window(
+    if let Err(err) = cx.open_window(
         WindowOptions {
             window_bounds: None,
             ..Default::default()
         },
-        |window, cx| cx.new(|cx| Root::new(typst_note_view, window, cx)),
-    )
+        |window, cx| {
+            let typst_note_view = cx.new(|cx| {
+                TypstNoteView::<crate::typst_world::GpuiWorld>::new(window, shared_world, cx)
+            });
+            cx.new(|cx| Root::new(typst_note_view, window, cx))
+        },
+    ) {
+        log::error!("Failed to open mobile window: {err:#}");
+    }
+
+    cx.activate(true);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
