@@ -1,60 +1,207 @@
-//! Mobile library entry point for TypForge (`libtypforge.so` on Android, `libtypforge.a` on iOS).
+//! Library and entry points for TypForge (Desktop, Android `libtypforge.so`, iOS `libtypforge.a`).
 
 #![allow(unused_imports)] // Temporarily allow during mobile setup
 #![allow(unused_variables)] // Temporarily allow during mobile setup
 #![deny(unsafe_op_in_unsafe_fn)] // Require `unsafe` for unsafe operations
 
-use gpui_kit::component::Root;
+use anyhow::Result;
+use std::sync::Arc;
 
-// Only include gpui-mobile and its re-exported gpui when targeting Android or iOS
+use gpui_kit::component::Root;
+use gpui_kit::*;
+use parking_lot::Mutex;
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use gpui_kit::assets::Assets;
+
 #[cfg(any(target_os = "android", target_os = "ios"))]
 extern crate gpui_mobile;
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
-use gpui_mobile::gpui::{self, App, Context, Render, Window, WindowOptions, div, prelude::*};
-
-// Android-specific imports
 #[cfg(target_os = "android")]
-use gpui_mobile::android::jni;
+use gpui_mobile::{android::jni, gpui::Application};
 
-// iOS-specific imports
 #[cfg(target_os = "ios")]
 use gpui_mobile::ios::ffi;
 
+mod actions;
+mod components;
+pub mod editor;
+mod key_bindings;
+pub mod package_manager;
+mod panels;
+mod ribbon;
+mod settings;
+pub mod typst_world;
+pub mod workspace;
+
+use crate::{
+    components::{menus::setup_menus, theme},
+    editor::init_editor_languages,
+    key_bindings::bind_keys,
+    settings::load_settings,
+    typst_world::GpuiWorld,
+    workspace::TypstNoteView,
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
-// Shared Mobile Application Setup
+// Shared Application Initialization & Font Loading
 // ═══════════════════════════════════════════════════════════════════════════
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
-struct MobilePlaceholder;
+fn init_app_state(cx: &mut App) -> Arc<Mutex<GpuiWorld>> {
+    gpui_kit::component::init(cx);
+    load_settings(cx);
+    bind_keys(cx);
+    theme::init(cx);
+    theme::apply_settings_theme(cx);
+    init_editor_languages(cx);
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
-impl Render for MobilePlaceholder {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child("TypForge Mobile")
+    cx.set_global(crate::components::menus::MenuState {
+        has_active_file: cfg!(target_os = "windows"),
+    });
+
+    setup_menus(cx);
+
+    #[cfg(not(target_os = "macos"))]
+    if let Some(menus) = cx.get_menus() {
+        gpui_kit::component::global_state::GlobalState::global_mut(cx).set_app_menus(menus);
     }
+
+    cx.set_global(typst_gpui::GpuiRegisteredFonts(
+        std::collections::HashSet::new(),
+    ));
+
+    let fonts = load_fonts(cx);
+    let mut world = GpuiWorld::new(fonts);
+    world.set_source(String::new());
+    Arc::new(Mutex::new(world))
 }
+
+fn load_fonts(cx: &mut App) -> typst_kit::fonts::FontStore {
+    let mut store = typst_kit::fonts::FontStore::new();
+
+    store.extend(typst_kit::fonts::system());
+    store.extend(typst_kit::fonts::embedded());
+
+    let preferred_families = [
+        "New Computer Modern Math",
+        "Libertinus Serif",
+        "Segoe UI",
+        "Inter",
+        "Source Code Pro",
+        "Noto Sans CJK JP",
+    ];
+
+    for family_name in preferred_families {
+        if let Some(font_id) = store
+            .book()
+            .select(family_name, typst::text::FontVariant::default())
+        {
+            if let Some(font) = store.font(font_id.into()) {
+                log::info!("Found and loaded UI font: {}", family_name);
+                let data = font.data().to_vec();
+                let _ = cx
+                    .text_system()
+                    .add_fonts(vec![std::borrow::Cow::Owned(data)]);
+            }
+        }
+    }
+
+    store
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Desktop Entry Point
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn run_desktop() -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var("WAYLAND_DISPLAY").is_ok() && std::env::var("TYPFORGE_X11_FORCED").is_err()
+        {
+            if let Ok(current_exe) = std::env::current_exe() {
+                let status = std::process::Command::new(current_exe)
+                    .args(std::env::args().skip(1))
+                    .env_remove("WAYLAND_DISPLAY")
+                    .env("TYPFORGE_X11_FORCED", "1")
+                    .status();
+
+                if let Ok(code) = status {
+                    std::process::exit(code.code().unwrap_or(0));
+                }
+            }
+        }
+    }
+
+    gpui_kit::application()
+        .with_assets(Assets)
+        .run(|cx: &mut App| {
+            let shared_world = init_app_state(cx);
+            let initial_bounds = Bounds::centered(None, size(px(1280.0), px(600.0)), cx);
+
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(initial_bounds)),
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("TypForge".into()),
+                        appears_transparent: cfg!(target_os = "macos"),
+                        traffic_light_position: if cfg!(target_os = "macos") {
+                            Some(point(px(16.0), px(16.0)))
+                        } else {
+                            None
+                        },
+                        ..Default::default()
+                    }),
+                    window_decorations: if cfg!(target_os = "linux") {
+                        Some(WindowDecorations::Server)
+                    } else {
+                        None
+                    },
+                    focus: true,
+                    show: true,
+                    kind: WindowKind::Normal,
+                    is_resizable: true,
+                    is_movable: true,
+                    ..Default::default()
+                },
+                |window: &mut Window, cx: &mut App| {
+                    let typst_note_view = cx.new(|cx| {
+                        TypstNoteView::<crate::typst_world::GpuiWorld>::new(
+                            window,
+                            shared_world,
+                            cx,
+                        )
+                    });
+
+                    cx.new(|cx| Root::new(typst_note_view, window, cx))
+                },
+            )
+            .unwrap();
+            cx.activate(true);
+        });
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shared Mobile Window Creation (Android & iOS)
+// ═══════════════════════════════════════════════════════════════════════════
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 fn open_main_window(cx: &mut App) {
     log::info!("GPUI Mobile App context received.");
 
-    gpui_kit::component::init(cx);
+    let shared_world = init_app_state(cx);
 
     if let Err(err) = cx.open_window(
         WindowOptions {
             window_bounds: None,
             ..Default::default()
         },
-        |window, cx| {
+        |window: &mut Window, cx: &mut App| {
             let typst_note_view = cx.new(|cx| {
                 TypstNoteView::<crate::typst_world::GpuiWorld>::new(window, shared_world, cx)
             });
+
             cx.new(|cx| Root::new(typst_note_view, window, cx))
         },
     ) {
@@ -94,7 +241,7 @@ pub extern "C" fn android_main(app: android_activity::AndroidApp) {
     };
 
     log::info!("android_main: creating GPUI Application");
-    gpui::Application::with_platform(shared_platform.into_rc()).run(|cx: &mut App| {
+    Application::with_platform(shared_platform.into_rc()).run(|cx: &mut App| {
         open_main_window(cx);
     });
 
