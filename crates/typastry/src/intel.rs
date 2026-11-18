@@ -195,11 +195,58 @@ pub fn detect_package_import_context_ast(
     None
 }
 
-/// Backward-compatible wrapper around `detect_package_import_context_ast`.
-pub fn detect_package_import_context(content: &str, cursor_index: usize) -> Option<String> {
-    let source = Source::detached(content);
-    detect_package_import_context_ast(&source, cursor_index).map(|(query, _)| query)
+/// Returns `true` if `cursor_index` is actively inside a parenthesized `Args` list
+/// (e.g. `#rect(fi|)` or `#rect(|)`), and `false` if outside (`#rect() |`) or inside
+/// a nested content/code block (`#rect([|])`).
+pub fn detect_inside_argument_context(source: &Source, cursor_index: usize) -> bool {
+    let content = source.text();
+    if cursor_index > content.len() || !content.is_char_boundary(cursor_index) {
+        return false;
+    }
+
+    let root = LinkedNode::new(source.root());
+    let Some(leaf) = root
+        .leaf_at(cursor_index, Side::Before)
+        .or_else(|| root.leaf_at(cursor_index, Side::After))
+    else {
+        return false;
+    };
+
+    let mut current = Some(leaf);
+    while let Some(node) = current {
+        match node.kind() {
+            // Found the argument list!
+            SyntaxKind::Args => {
+                let left_paren = node.children().find(|c| {
+                                   c.kind() == SyntaxKind::LeftParen
+                                       || (c.kind() == SyntaxKind::Error && &content[c.range()] == "(")
+                               });
+                let right_paren = node.children().find(|c| c.kind() == SyntaxKind::RightParen);
+
+                if let Some(lp) = left_paren {
+                    // Cursor must be after the opening '('
+                    if cursor_index >= lp.range().end {
+                        if let Some(rp) = right_paren {
+                            // If closed, cursor must be before or at the closing ')'
+                            return cursor_index <= rp.range().start;
+                        }
+                        // If unclosed, we are definitely inside
+                        return true;
+                    }
+                }
+                return false;
+            }
+            // Stop if we hit a boundary that clearly exits the code/args context.
+            // We omit Markup here because it is often the root node.
+            SyntaxKind::ContentBlock | SyntaxKind::Math => return false,
+            _ => {}
+        }
+        current = node.parent().cloned();
+    }
+
+    false
 }
+
 
 /// Generates package autocompletions based on installed/cached packages on disk.
 fn get_package_completions(query: &str) -> Vec<TypastryCompletion> {
@@ -272,6 +319,9 @@ pub fn get_enhanced_completions_with_range(
     };
     let typed_prefix_lower = typed_prefix.to_lowercase();
 
+    // Context check for smart paren insertion
+    let inside_args = detect_inside_argument_context(source, cursor_index);
+
     // 4. Process & filter compiler suggestions
     let filtered: Vec<TypastryCompletion> = raw_completions
         .into_iter()
@@ -296,11 +346,16 @@ pub fn get_enhanced_completions_with_range(
             let apply_text =
                 if label.starts_with("import") || raw_apply_text.starts_with("import \"@") {
                     "import \"@".to_string()
-                } else if raw_apply_text.contains('(') {
+                } else if !inside_args && raw_apply_text.contains('(') {
+                    // Outside arguments: append `()` for function calls
                     let base = raw_apply_text.split('(').next().unwrap_or(&label);
                     format!("{}()", base)
                 } else {
+                    // Inside arguments or no parens: strip snippet markers and existing parens
                     raw_apply_text
+                        .split('(')
+                        .next()
+                        .unwrap_or(&raw_apply_text)
                         .replace("${}", "")
                         .replace("${1:}", "")
                         .replace("${2:}", "")
@@ -351,6 +406,7 @@ pub fn get_enhanced_completions_with_range(
         items: results,
     }
 }
+
 
 /// Backward-compatible wrapper returning only the completion items.
 pub fn get_enhanced_completions(
@@ -549,4 +605,30 @@ mod tests {
         let len = s4.text().len();
         assert_eq!(get_trigger_range_ast(&s4, len), (5..9, true));
     }
+
+    #[test]
+      fn test_inside_argument_context() {
+          // Inside unclosed argument list
+          let s1 = Source::detached("#rect(fi");
+          eprintln!("TREE: {:#?}", s1.root());
+          assert!(detect_inside_argument_context(&s1, s1.text().len()));
+
+          // Inside empty parens: `#rect(|)`
+          let s2 = Source::detached("#rect()");
+          assert!(detect_inside_argument_context(&s2, 6));
+
+          // Outside after closing paren: `#rect()|` and `#rect() |`
+          assert!(!detect_inside_argument_context(&s2, 7));
+          let s3 = Source::detached("#rect() ");
+          assert!(!detect_inside_argument_context(&s3, 8));
+
+          // Inside nested content block of an argument: `#rect(width: [hello|`
+          let s4 = Source::detached("#rect(width: [hello");
+          assert!(!detect_inside_argument_context(&s4, s4.text().len()));
+
+          // Multi-line argument list
+          let s5 = Source::detached("#rect(\n  width: 10pt,\n  fi\n)");
+          let cursor = s5.text().find("fi").unwrap() + 2;
+          assert!(detect_inside_argument_context(&s5, cursor));
+      }
 }
