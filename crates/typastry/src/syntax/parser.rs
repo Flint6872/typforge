@@ -55,7 +55,7 @@ mod tests {
         let source = "= Heading\nHello *world*!";
         let tree = parse_typst(source).expect("Failed to parse Typst source");
         let root = tree.root_node();
-        assert_eq!(root.kind(), "source");
+        assert_eq!(root.kind(), "source_file");
         assert!(!root.has_error());
     }
 }

@@ -1,9 +1,17 @@
 #![cfg(feature = "intel")]
 use std::fs;
-use typst::syntax::Side;
-use typst::syntax::Source;
+use std::ops::Range;
+use typst::syntax::{Side, Source};
 pub use typst_ide::{Completion, IdeWorld, Tooltip, autocomplete, tooltip};
 use typst_layout::PagedDocument;
+use typst_syntax::{LinkedNode, SyntaxKind, ast, ast::AstNode};
+
+/// A completion payload with an exact byte replacement range in the source.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct CompletionResponse {
+    pub replace_range: Range<usize>,
+    pub items: Vec<TypastryCompletion>,
+}
 
 /// A portable, serializable classification for completion options.
 /// Useful for other editors (Python, TypeScript/WASM, terminal) to map cleanly to their own UI.
@@ -130,30 +138,67 @@ pub fn get_hover_info(
 }
 
 /// Checks if the cursor is inside a package import string like `#import "@..."`
-/// Returns `Some(query_text)` (the text between the opening quote and cursor).
-pub fn detect_package_import_context(content: &str, cursor_index: usize) -> Option<String> {
-    if cursor_index == 0 || cursor_index > content.len() {
+/// using the `typst-syntax` CST.
+/// Returns `Some((query_text, replace_range))` where `replace_range` covers the
+/// text between the opening `"` and `cursor_index`.
+pub fn detect_package_import_context_ast(
+    source: &Source,
+    cursor_index: usize,
+) -> Option<(String, Range<usize>)> {
+    let content = source.text();
+    if cursor_index == 0 || cursor_index > content.len() || !content.is_char_boundary(cursor_index)
+    {
         return None;
     }
 
-    let before_cursor = &content[..cursor_index];
+    let root = LinkedNode::new(source.root());
+    // Use or_else to robustly find a leaf node at or around the cursor
+    let Some(leaf) = root
+        .leaf_at(cursor_index, Side::Before)
+        .or_else(|| root.leaf_at(cursor_index, Side::After))
+    else {
+        return None;
+    };
 
-    // Find the nearest opening quote `"` before cursor on this line
-    let last_quote_idx = before_cursor.rfind('"')?;
-    let text_inside_quotes = &before_cursor[last_quote_idx + 1..];
+    if !matches!(leaf.kind(), SyntaxKind::Str | SyntaxKind::Error) {
+        return None;
+    }
 
-    // It must start with '@' to qualify as a package import
+    let leaf_range = leaf.range();
+    let leaf_text = &content[leaf_range.clone()];
+    if !leaf_text.starts_with('"') || cursor_index <= leaf_range.start {
+        return None;
+    }
+
+    // If the string literal is closed, the cursor must sit strictly before the closing quote.
+    let is_closed =
+        leaf.kind() == SyntaxKind::Str && leaf_text.len() >= 2 && leaf_text.ends_with('"');
+    if is_closed && cursor_index >= leaf_range.end {
+        return None;
+    }
+
+    let query_start = leaf_range.start + 1;
+    let text_inside_quotes = &content[query_start..cursor_index];
     if !text_inside_quotes.starts_with('@') {
         return None;
     }
 
-    // Ensure this quote is preceded by `import` or `#import`
-    let preceding_text = before_cursor[..last_quote_idx].trim_end();
-    if preceding_text.ends_with("import") {
-        Some(text_inside_quotes.to_string())
-    } else {
-        None
+    // Walk ancestors to confirm we are inside a `ModuleImport` node.
+    let mut current = leaf.parent().cloned();
+    while let Some(node) = current {
+        if node.kind() == SyntaxKind::ModuleImport {
+            return Some((text_inside_quotes.to_string(), query_start..cursor_index));
+        }
+        current = node.parent().cloned();
     }
+
+    None
+}
+
+/// Backward-compatible wrapper around `detect_package_import_context_ast`.
+pub fn detect_package_import_context(content: &str, cursor_index: usize) -> Option<String> {
+    let source = Source::detached(content);
+    detect_package_import_context_ast(&source, cursor_index).map(|(query, _)| query)
 }
 
 /// Generates package autocompletions based on installed/cached packages on disk.
@@ -189,63 +234,55 @@ fn get_package_completions(query: &str) -> Vec<TypastryCompletion> {
     completions
 }
 
-/// High-level, modular completions engine. Fetches, filters, and applies
-/// package completions and coaching rules on pure Rust primitives.
-pub fn get_enhanced_completions(
+/// High-level, modular completions engine returning both the exact replacement
+/// byte range and processed completions.
+pub fn get_enhanced_completions_with_range(
     world: &dyn IdeWorld,
     document: Option<&PagedDocument>,
     source: &Source,
     cursor_index: usize,
-) -> Vec<TypastryCompletion> {
+) -> CompletionResponse {
     let content = source.text();
 
-    // 1. --- PHASE 2: PACKAGE IMPORT COMPLETIONS ---
-    // If the cursor is typing inside `#import "@..."`, return package completions directly
-    if let Some(query) = detect_package_import_context(content, cursor_index) {
+    // 1. Package import completions (`#import "@..."`)
+    if let Some((query, replace_range)) = detect_package_import_context_ast(source, cursor_index) {
         let package_completions = get_package_completions(&query);
         if !package_completions.is_empty() {
-            return package_completions;
+            return CompletionResponse {
+                replace_range,
+                items: package_completions,
+            };
         }
     }
 
     let mut results = Vec::new();
 
-    // 2. Fetch raw underlying compiler suggestion list
+    // 2. Fetch raw compiler suggestions (works even when `document` is `None`)
     let raw_completions = get_completions(world, document, source, cursor_index, false);
 
-    // 3. Discover cursor contexts
-    let (trigger_offset, is_hash_command) = get_trigger_info(content, cursor_index);
-    let typed_prefix = if cursor_index > trigger_offset {
-        let start = if is_hash_command {
-            trigger_offset + 1
-        } else {
-            trigger_offset
-        };
-        if cursor_index > start {
-            content
-                .chars()
-                .skip(start)
-                .take(cursor_index - start)
-                .collect::<String>()
-                .to_lowercase()
-        } else {
-            String::new()
-        }
+    // 3. Discover exact AST trigger range & prefix (UTF-8 safe)
+    let (replace_range, _is_hash_command) = get_trigger_range_ast(source, cursor_index);
+    let typed_prefix = if replace_range.start < replace_range.end
+        && content.is_char_boundary(replace_range.start)
+        && content.is_char_boundary(replace_range.end)
+    {
+        content[replace_range.clone()].to_string()
     } else {
         String::new()
     };
+    let typed_prefix_lower = typed_prefix.to_lowercase();
 
     // 4. Process & filter compiler suggestions
     let filtered: Vec<TypastryCompletion> = raw_completions
         .into_iter()
         .filter(|c| {
-            if typed_prefix.is_empty() {
+            if typed_prefix_lower.is_empty() {
                 true
             } else {
                 c.label
                     .to_string()
                     .to_lowercase()
-                    .starts_with(&typed_prefix)
+                    .starts_with(&typed_prefix_lower)
             }
         })
         .map(|c| {
@@ -256,7 +293,6 @@ pub fn get_enhanced_completions(
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| label.clone());
 
-            // Handle import completions: insert `import "@` so cursor lands on `@`
             let apply_text =
                 if label.starts_with("import") || raw_apply_text.starts_with("import \"@") {
                     "import \"@".to_string()
@@ -291,14 +327,14 @@ pub fn get_enhanced_completions(
 
     results.extend(filtered);
 
-    // 5. --- COACHING: PHYSICAL DIMENSIONS & UNITS HEURISTICS ---
-    if !typed_prefix.is_empty() && is_physical_dimension_context(content, trigger_offset) {
-        if let Ok(_number) = typed_prefix.parse::<f64>() {
+    // 5. Coaching: Physical dimensions & units heuristics
+    if !typed_prefix.is_empty() && is_physical_dimension_context_ast(source, cursor_index) {
+        if typed_prefix.parse::<f64>().is_ok() {
             let units = ["pt", "em", "cm", "mm"];
             for unit in units {
                 let suggested_text = format!("{}{}", typed_prefix, unit);
                 results.insert(
-                    0, // Push coaching recommendations directly to the top!
+                    0,
                     TypastryCompletion {
                         label: suggested_text.clone(),
                         apply: suggested_text,
@@ -310,71 +346,117 @@ pub fn get_enhanced_completions(
         }
     }
 
-    results
+    CompletionResponse {
+        replace_range,
+        items: results,
+    }
 }
 
-/// Helper function to detect if the target parameter context expects physical dimensions / units.
-pub fn is_physical_dimension_context(content: &str, mut offset: usize) -> bool {
-    let chars: Vec<char> = content.chars().collect();
+/// Backward-compatible wrapper returning only the completion items.
+pub fn get_enhanced_completions(
+    world: &dyn IdeWorld,
+    document: Option<&PagedDocument>,
+    source: &Source,
+    cursor_index: usize,
+) -> Vec<TypastryCompletion> {
+    get_enhanced_completions_with_range(world, document, source, cursor_index).items
+}
 
-    // Skip spaces backwards
-    while offset > 0 {
-        if let Some(c) = chars.get(offset - 1) {
-            if c.is_whitespace() {
-                offset -= 1;
-                continue;
-            }
-        }
-        break;
-    }
-
-    // Check for parameter assignment separator `:`
-    if offset == 0 || chars.get(offset - 1) != Some(&':') {
+/// Checks if the cursor is in the value position of a dimension-expecting named argument
+/// (e.g. `#rect(width: 10|)`), avoiding false positives in markup or math mode.
+pub fn is_physical_dimension_context_ast(source: &Source, cursor_index: usize) -> bool {
+    let content = source.text();
+    if cursor_index == 0 || cursor_index > content.len() || !content.is_char_boundary(cursor_index)
+    {
         return false;
     }
-    offset -= 1;
 
-    // Skip spaces backwards
-    while offset > 0 {
-        if let Some(c) = chars.get(offset - 1) {
-            if c.is_whitespace() {
-                offset -= 1;
-                continue;
+    let root = LinkedNode::new(source.root());
+    let Some(leaf) = root
+        .leaf_at(cursor_index, Side::Before)
+        .or_else(|| root.leaf_at(cursor_index, Side::After))
+    else {
+        return false;
+    };
+
+    let mut current = Some(leaf);
+    while let Some(node) = current {
+        match node.kind() {
+            // Stop if we hit a nested content/math/markup block before reaching a Named arg.
+            SyntaxKind::ContentBlock | SyntaxKind::Markup | SyntaxKind::Math => return false,
+            SyntaxKind::Named => {
+                // Confirm the cursor is after the `:` separator (value position).
+                let colon_end = node
+                    .children()
+                    .find(|c| c.kind() == SyntaxKind::Colon)
+                    .map(|c| c.range().end);
+
+                let Some(colon_end) = colon_end else {
+                    return false;
+                };
+                if cursor_index < colon_end {
+                    return false;
+                }
+
+                let Some(named_ast) = node.cast::<ast::Named>() else {
+                    return false;
+                };
+
+                return matches!(
+                    named_ast.name().as_str(),
+                    "size"
+                        | "margin"
+                        | "gap"
+                        | "gutter"
+                        | "width"
+                        | "height"
+                        | "radius"
+                        | "stroke"
+                        | "inset"
+                        | "outset"
+                        | "spacing"
+                );
             }
+            _ => {}
         }
-        break;
+        current = node.parent().cloned();
     }
 
-    // Scan backward to extract parameter name identifier
-    let mut param_start = offset;
-    while param_start > 0 {
-        if let Some(prev_c) = chars.get(param_start - 1) {
-            if prev_c.is_alphanumeric() || *prev_c == '_' || *prev_c == '-' {
-                param_start -= 1;
-                continue;
-            }
-        }
-        break;
+    false
+}
+
+/// Backward-compatible wrapper around `is_physical_dimension_context_ast`.
+pub fn is_physical_dimension_context(content: &str, offset: usize) -> bool {
+    let source = Source::detached(content);
+    is_physical_dimension_context_ast(&source, offset)
+}
+
+/// Computes the exact byte replacement range and whether the trigger is a `#` command
+/// using the `typst-syntax` CST.
+pub fn get_trigger_range_ast(source: &Source, cursor_index: usize) -> (Range<usize>, bool) {
+    let content = source.text();
+    let clamped = cursor_index.min(content.len());
+    if clamped == 0 || !content.is_char_boundary(clamped) {
+        return (clamped..clamped, false);
     }
 
-    if param_start < offset {
-        let param_name: String = chars[param_start..offset].iter().collect();
-        matches!(
-            param_name.as_str(),
-            "size"
-                | "margin"
-                | "gap"
-                | "gutter"
-                | "width"
-                | "height"
-                | "radius"
-                | "stroke"
-                | "inset"
-                | "outset"
-                | "spacing"
-        )
-    } else {
-        false
+    let root = LinkedNode::new(source.root());
+    let Some(leaf) = root.leaf_at(clamped, Side::Before) else {
+        return (clamped..clamped, false);
+    };
+
+    match leaf.kind() {
+        SyntaxKind::Hash => (clamped..clamped, true),
+        SyntaxKind::Ident | SyntaxKind::Int | SyntaxKind::Float => {
+            let start = leaf.range().start;
+            let is_hash = leaf
+                .prev_sibling()
+                .map(|p| p.kind() == SyntaxKind::Hash)
+                .unwrap_or_else(|| start > 0 && content[..start].ends_with('#'));
+            (start..clamped, is_hash)
+        }
+        SyntaxKind::Dot => (clamped..clamped, false),
+        _ => (clamped..clamped, false),
     }
 }
 
@@ -404,4 +486,67 @@ pub fn get_trigger_info(content: &str, cursor: usize) -> (usize, bool) {
     }
 
     (word_start, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_package_import_context_ast() {
+        // Single-line unclosed import
+        let s1 = Source::detached("#import \"@preview/cetz:");
+        let res1 = detect_package_import_context_ast(&s1, s1.text().len());
+        assert_eq!(res1, Some(("@preview/cetz:".to_string(), 9..23)));
+
+        // Preceding string/comment on same line
+        let s2 = Source::detached("\"hello\" #import \"@preview/");
+        let res2 = detect_package_import_context_ast(&s2, s2.text().len());
+        assert_eq!(res2, Some(("@preview/".to_string(), 17..26)));
+
+        // Multi-line import statement with imported items
+        let s3 = Source::detached("#import \"@preview/cetz:0.2.0\": (\n  canvas,\n  draw,\n)");
+        // Cursor at index 22 is inside the string right after `@preview/cetz`
+        let res3 = detect_package_import_context_ast(&s3, 22);
+        assert_eq!(res3, Some(("@preview/cetz".to_string(), 9..22)));
+
+        // Cursor at index 29 (after the closing quote) should not trigger
+        assert_eq!(detect_package_import_context_ast(&s3, 29), None);
+    }
+
+    #[test]
+    fn test_dimension_context_ast() {
+        // Valid dimension parameter
+        let s1 = Source::detached("#rect(width: 10");
+        assert!(is_physical_dimension_context_ast(&s1, s1.text().len()));
+
+        // False-positive avoidance in normal markup
+        let s2 = Source::detached("Text with size: 10");
+        assert!(!is_physical_dimension_context_ast(&s2, s2.text().len()));
+
+        // False-positive avoidance in math mode
+        let s3 = Source::detached("$ 1 + 2 $");
+        assert!(!is_physical_dimension_context_ast(&s3, 5));
+
+        // False-positive avoidance inside content block of a named arg
+        let s4 = Source::detached("#rect(width: [size: 10");
+        assert!(!is_physical_dimension_context_ast(&s4, s4.text().len()));
+    }
+
+    #[test]
+    fn test_trigger_range_ast() {
+        let s1 = Source::detached("#re");
+        assert_eq!(get_trigger_range_ast(&s1, 3), (1..3, true));
+
+        let s2 = Source::detached("#");
+        assert_eq!(get_trigger_range_ast(&s2, 1), (1..1, true));
+
+        let s3 = Source::detached("#page.");
+        assert_eq!(get_trigger_range_ast(&s3, 6), (6..6, false));
+
+        // Multi-byte UTF-8 before #ident
+        let s4 = Source::detached("— #rect");
+        let len = s4.text().len();
+        assert_eq!(get_trigger_range_ast(&s4, len), (5..9, true));
+    }
 }
