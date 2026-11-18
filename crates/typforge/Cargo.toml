@@ -34,7 +34,7 @@ ureq = { version = "3.4", features = ["json"] }
 tar = "0.4.46"
 flate2 = { version = "1", features = ["zlib-rs"] }
 
-lsp-types = "0.97.0"
+lsp-types.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 embed-resource = "3.0.11"

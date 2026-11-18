@@ -86,16 +86,16 @@ targets:
         ARCHS: "arm64"
         ONLY_ACTIVE_ARCH: YES
         # SDK-conditional static lib path for debug builds.
-        "EXAMPLE_STATIC_LIB[sdk=iphonesimulator*]": "$(PROJECT_DIR)/../target/aarch64-apple-ios-sim/debug/libtypforgee.a"
-        "EXAMPLE_STATIC_LIB[sdk=iphoneos*]": "$(PROJECT_DIR)/../target/aarch64-apple-ios/debug/libtypforgee.a"
+        "EXAMPLE_STATIC_LIB[sdk=iphonesimulator*]": "$(PROJECT_DIR)/../target/aarch64-apple-ios-sim/debug/libtypforge.a"
+        "EXAMPLE_STATIC_LIB[sdk=iphoneos*]": "$(PROJECT_DIR)/../target/aarch64-apple-ios/debug/libtypforge.a"
       configs:
         Debug:
           GCC_OPTIMIZATION_LEVEL: "0"
           DEBUG_INFORMATION_FORMAT: "dwarf-with-dsym"
           SWIFT_OPTIMIZATION_LEVEL: "-Onone"
         Release:
-          "EXAMPLE_STATIC_LIB[sdk=iphonesimulator*]": "$(PROJECT_DIR)/../target/aarch64-apple-ios-sim/release/libtypforgee.a"
-          "EXAMPLE_STATIC_LIB[sdk=iphoneos*]": "$(PROJECT_DIR)/../target/aarch64-apple-ios/release/libtypforgee.a"
+          "EXAMPLE_STATIC_LIB[sdk=iphonesimulator*]": "$(PROJECT_DIR)/../target/aarch64-apple-ios-sim/release/libtypforge.a"
+          "EXAMPLE_STATIC_LIB[sdk=iphoneos*]": "$(PROJECT_DIR)/../target/aarch64-apple-ios/release/libtypforge.a"
           GCC_OPTIMIZATION_LEVEL: "s"
           DEBUG_INFORMATION_FORMAT: "dwarf-with-dsym"
           SWIFT_OPTIMIZATION_LEVEL: "-O"
