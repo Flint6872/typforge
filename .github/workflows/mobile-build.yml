@@ -120,8 +120,8 @@ jobs:
           export PATH="$HOME/.cargo/bin:$PATH"
 
           xcodebuild \
-            -project GpuiExample.xcodeproj \
-            -scheme GpuiExample \
+            -project typforge.xcodeproj \
+            -scheme typforge \
             -configuration "$CONFIG" \
             -sdk iphoneos \
             -derivedDataPath build \

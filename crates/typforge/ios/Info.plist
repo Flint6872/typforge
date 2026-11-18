@@ -6,7 +6,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>GpuiExample</string>
+    <string>typforge</string>
     <key>CFBundleIdentifier</key>
     <string>dev.gpui.typforge.example</string>
     <key>CFBundleInfoDictionaryVersion</key>
