@@ -311,18 +311,46 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                                 target_offset,
                             );
 
+                            // Clone the necessary values to move into the nested closure
+                            let props_for_ribbon = active_props.clone();
+                            let ribbon_cursor_context =
+                                this_note_view // Use the existing cursor_context field
+                                    .editor_panel
+                                    .read(cx_for_note_view)
+                                    .open_files
+                                    .iter()
+                                    .find(|f| {
+                                        &f.path
+                                            == this_note_view
+                                                .editor_panel
+                                                .read(cx_for_note_view)
+                                                .active_file_path
+                                                .as_ref()
+                                                .unwrap()
+                                    })
+                                    .map(|f| f.editor_state.read(cx_for_note_view).cursor())
+                                    .map(|cursor| {
+                                        let source = typst::syntax::Source::detached(&source_code);
+                                        typastry::inspector::TypastryInspector::inspect_cursor(
+                                            &source, cursor,
+                                        )
+                                    })
+                                    .unwrap_or(typastry::inspector::CursorContext::InMarkup);
+
                             let window_handle = this_note_view.window_handle.clone();
                             let ribbon_panel_handle = this_note_view.ribbon_panel.clone();
 
-                            let _ = window_handle.update(cx_for_note_view, |_, window, app_cx| {
-                                ribbon_panel_handle.update(app_cx, |ribbon, ribbon_cx| {
-                                    ribbon.update_active_properties(
-                                        &active_props,
-                                        window,
-                                        ribbon_cx,
-                                    );
+                            let _ =
+                                window_handle.update(cx_for_note_view, move |_, window, app_cx| {
+                                    ribbon_panel_handle.update(app_cx, |ribbon, ribbon_cx| {
+                                        ribbon.update_active_properties(
+                                            &props_for_ribbon,      // Use the cloned variable
+                                            &ribbon_cursor_context, // Use the cloned variable
+                                            window,
+                                            ribbon_cx, // Use ribbon_cx here, not cx
+                                        );
+                                    });
                                 });
-                            });
                         }
                     }
                     PreviewPanelEvent::UndoRequested => {

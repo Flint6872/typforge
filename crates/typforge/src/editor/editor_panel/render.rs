@@ -1,9 +1,8 @@
-// crates/typforge/src/editor/editor_panel/render.rs
-
 use crate::editor::{CodeEditor, DraggedTab, EditorPanel, FileContentUpdated, TabDrag};
-use gpui_kit::component::{ActiveTheme, StyledExt, h_flex};
+use gpui_kit::component::{ActiveTheme, StyledExt, h_flex, v_flex}; // Add v_flex for vertical stacking
 use gpui_kit::*;
 
+use gpui_kit::prelude::FluentBuilder;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
@@ -192,16 +191,75 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                 .absolute()
                 .top(pos.y + px(20.))
                 .left(pos.x)
-                .bg(rgb(0x333333))
+                .bg(rgb(0x333333)) // Use cx.theme().colors.popover for consistency
                 .border_1()
-                .border_color(rgb(0x555555))
+                .border_color(rgb(0x555555)) // Use cx.theme().colors.border for consistency
                 .p_2()
                 .rounded_md()
                 .shadow_lg()
                 .child(text)
         });
 
-        // 3. Stack the editor and the popup
+        // 3. Prepare the Signature Help Popup if it exists
+        // You will likely need to store the screen position of the cursor in EditorPanel state
+        // to position this accurately. For now, using a placeholder.
+        let signature_help_popup = self.current_signature_help.as_ref().map(|help| {
+            // Placeholder: Assume cursor_screen_position is stored in EditorPanel state
+            // and adjust px values as needed for actual positioning.
+            let pos_x = px(100.0); // Replace with actual cursor X
+            let pos_y = px(100.0); // Replace with actual cursor Y
+
+            let active_idx = help.active_parameter;
+
+            let params_element = h_flex()
+                .gap_1()
+                .children(help.parameters.iter().enumerate().map(|(idx, p)| {
+                    let is_active = idx == active_idx;
+                    div()
+                        .text_sm()
+                        .when(is_active, |s| s.font_bold().text_color(rgb(0x61afef))) // Highlight active parameter
+                        .child(format!(
+                            "{}{}",
+                            p.name,
+                            if idx + 1 < help.parameters.len() {
+                                ", "
+                            } else {
+                                ""
+                            }
+                        ))
+                }));
+
+            // Render signature card with func_name(params) and optional docs
+            v_flex() // Use v_flex for vertical stacking of elements in the card
+                .absolute()
+                .top(pos_y + px(20.)) // Position below the cursor
+                .left(pos_x)
+                .bg(cx.theme().colors.popover)
+                .border_1()
+                .border_color(cx.theme().colors.border)
+                .p_2()
+                .rounded_md()
+                .shadow_lg()
+                .child(
+                    div()
+                        .text_color(cx.theme().colors.foreground)
+                        .child(format!("{}(", help.func_name))
+                        .child(params_element)
+                        .child(")"),
+                )
+                .when_some(help.doc.clone(), |s, doc_text| {
+                    s.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().colors.muted_foreground)
+                            .px_1() // Add some padding for doc text
+                            .mt_1() // Margin top for separation
+                            .child(doc_text),
+                    )
+                })
+        });
+
+        // 4. Stack the editor and the popups
         div()
             .size_full()
             .track_focus(&self.focus_handle)
@@ -329,7 +387,8 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                     .h_4_5()
                     .flex_col()
                     .child(editor_element)
-                    .children(hover_popup),
+                    .children(hover_popup)
+                    .children(signature_help_popup), // Add this line to display signature help
             )
     }
 }

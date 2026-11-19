@@ -1,5 +1,5 @@
 use std::ops::Range;
-use typst_syntax::{LinkedNode, Side, SyntaxKind, ast, ast::AstNode, parse};
+use typst_syntax::{LinkedNode, Side, SyntaxKind, ast, parse};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum EditAction {
