@@ -1,5 +1,5 @@
 use std::ops::Range;
-use typst_syntax::{LinkedNode, Side, SyntaxKind, parse};
+use typst_syntax::{LinkedNode, Side, SyntaxKind, ast, ast::AstNode, parse};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum EditAction {
@@ -16,7 +16,7 @@ pub enum EditAction {
     SetMargin(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TextEdit {
     pub range: Range<usize>,
     pub new_text: String,
@@ -769,6 +769,139 @@ pub fn detect_properties_at_offset(content: &str, offset: usize) -> ActiveProper
     props
 }
 
+/// Inserts or updates a named parameter (`key: value`) on the nearest enclosing
+/// `FuncCall` or `SetRule` at `offset`, returning a localized `TextEdit`.
+/// Handles empty `()`, existing arguments, trailing commas, and value updates
+/// without fragile string splitting or buffer cloning.
+pub fn inject_or_update_parameter(
+    content: &str,
+    offset: usize,
+    key: &str,
+    value: &str,
+) -> Option<TextEdit> {
+    let clamped = offset.min(content.len());
+    if !content.is_char_boundary(clamped) {
+        return None;
+    }
+
+    let tree = parse(content);
+    let root = LinkedNode::new(&tree);
+    let leaf = root
+        .leaf_at(clamped, Side::Before)
+        .or_else(|| root.leaf_at(clamped, Side::After))?;
+
+    // Walk up to find the nearest enclosing FuncCall or SetRule
+    let mut current = Some(leaf);
+    let mut call_node = None;
+    while let Some(node) = current {
+        if matches!(node.kind(), SyntaxKind::FuncCall | SyntaxKind::SetRule) {
+            call_node = Some(node);
+            break;
+        }
+        current = node.parent().cloned();
+    }
+    let call_node = call_node?;
+
+    let args_node = call_node.children().find(|c| c.kind() == SyntaxKind::Args);
+
+    // Case 1: No `Args` node at all (e.g. `#set page`) -> append `(key: value)`
+    let Some(args) = args_node else {
+        let insert_pos = call_node.range().end;
+        let new_text = format!("({}: {})", key, value);
+        let val_start = insert_pos + key.len() + 3; // after `(key: `
+        return Some(TextEdit {
+            range: insert_pos..insert_pos,
+            new_selection: val_start..(val_start + value.len()),
+            new_text,
+        });
+    };
+
+    let left_paren = args.children().find(|c| c.kind() == SyntaxKind::LeftParen);
+    let right_paren = args.children().find(|c| c.kind() == SyntaxKind::RightParen);
+
+    // Case 2: `Args` exists without `(` (e.g. `#rect[hello]`) -> insert `(key: value)` before `Args`
+    let (Some(lp), Some(rp)) = (left_paren, right_paren) else {
+        let insert_pos = args.range().start;
+        let new_text = format!("({}: {})", key, value);
+        let val_start = insert_pos + key.len() + 3;
+        return Some(TextEdit {
+            range: insert_pos..insert_pos,
+            new_selection: val_start..(val_start + value.len()),
+            new_text,
+        });
+    };
+
+    // Case 3: Parameter `key` is already defined -> replace only its value expression span
+    for child in args.children() {
+        if child.kind() == SyntaxKind::Named {
+            if let Some(named_ast) = child.cast::<ast::Named>() {
+                if named_ast.name().as_str() == key {
+                    let mut found_colon = false;
+                    let val_children: Vec<_> = child
+                        .children()
+                        .filter(|c| {
+                            if found_colon {
+                                c.kind() != SyntaxKind::Space
+                            } else if c.kind() == SyntaxKind::Colon {
+                                found_colon = true;
+                                false
+                            } else {
+                                false
+                            }
+                        })
+                        .collect();
+
+                    let target_range = match (val_children.first(), val_children.last()) {
+                        (Some(first), Some(last)) => first.range().start..last.range().end,
+                        _ => child.range(),
+                    };
+
+                    return Some(TextEdit {
+                        range: target_range.clone(),
+                        new_text: value.to_string(),
+                        new_selection: target_range.start..(target_range.start + value.len()),
+                    });
+                }
+            }
+        }
+    }
+
+    // Case 4: Parameter `key` is not defined -> splice into `(...)` before `RightParen`
+    let last_non_space = args
+        .children()
+        .filter(|c| c.range().end <= rp.range().start && c.kind() != SyntaxKind::Space)
+        .last();
+
+    let (insert_pos, new_text, val_offset_in_insert) = match last_non_space {
+        // Empty `()` or `( )`
+        Some(node) if node.kind() == SyntaxKind::LeftParen => {
+            let txt = format!("{}: {}", key, value);
+            (lp.range().end, txt, key.len() + 2)
+        }
+        // Trailing comma already present (e.g. `#rect(width: 10pt,)`)
+        Some(node) if node.kind() == SyntaxKind::Comma => {
+            let txt = format!(" {}: {}", key, value);
+            (node.range().end, txt, key.len() + 3)
+        }
+        // Existing argument without trailing comma (e.g. `#rect(width: 10pt)`)
+        Some(node) => {
+            let txt = format!(", {}: {}", key, value);
+            (node.range().end, txt, key.len() + 4)
+        }
+        None => {
+            let txt = format!("{}: {}", key, value);
+            (rp.range().start, txt, key.len() + 2)
+        }
+    };
+
+    let val_start = insert_pos + val_offset_in_insert;
+    Some(TextEdit {
+        range: insert_pos..insert_pos,
+        new_text,
+        new_selection: val_start..(val_start + value.len()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -908,5 +1041,65 @@ mod tests {
 
         let out_props = detect_properties_at_offset("Hello", 999);
         assert_eq!(out_props, ActiveProperties::default());
+    }
+
+    fn apply_text_edit(content: &str, edit: &TextEdit) -> String {
+        format!(
+            "{}{}{}",
+            &content[..edit.range.start],
+            edit.new_text,
+            &content[edit.range.end..]
+        )
+    }
+
+    #[test]
+    fn test_inject_or_update_parameter() {
+        // 1. Empty parens
+        let c1 = "#rect()";
+        let Some(e1) = inject_or_update_parameter(c1, 6, "fill", "red") else {
+            panic!("failed to inject parameter into empty parens");
+        };
+        assert_eq!(apply_text_edit(c1, &e1), "#rect(fill: red)");
+
+        // 2. Append to existing argument without trailing comma
+        let c2 = "#rect(width: 10pt)";
+        let Some(e2) = inject_or_update_parameter(c2, 10, "fill", "blue") else {
+            panic!("failed to append parameter to call without trailing comma");
+        };
+        assert_eq!(apply_text_edit(c2, &e2), "#rect(width: 10pt, fill: blue)");
+
+        // 3. Append when trailing comma already exists
+        let c3 = "#rect(width: 10pt,)";
+        let Some(e3) = inject_or_update_parameter(c3, 10, "fill", "green") else {
+            panic!("failed to append parameter when trailing comma exists");
+        };
+        assert_eq!(apply_text_edit(c3, &e3), "#rect(width: 10pt, fill: green)");
+
+        // 4. Update existing parameter value in place
+        let c4 = "#rect(width: 10pt, fill: red)";
+        let Some(e4) = inject_or_update_parameter(c4, 10, "fill", "rgb(\"#ff00ff\")") else {
+            panic!("failed to update existing parameter value");
+        };
+        assert_eq!(
+            apply_text_edit(c4, &e4),
+            "#rect(width: 10pt, fill: rgb(\"#ff00ff\"))"
+        );
+
+        // 5. FuncCall with content block only (no parens)
+        let c5 = "#rect[Hello]";
+        let Some(e5) = inject_or_update_parameter(c5, 8, "fill", "yellow") else {
+            panic!("failed to insert parens before content block");
+        };
+        assert_eq!(apply_text_edit(c5, &e5), "#rect(fill: yellow)[Hello]");
+
+        // 6. SetRule support
+        let c6 = "#set page(paper: \"a4\")";
+        let Some(e6) = inject_or_update_parameter(c6, 12, "flipped", "true") else {
+            panic!("failed to insert parameter into #set rule");
+        };
+        assert_eq!(
+            apply_text_edit(c6, &e6),
+            "#set page(paper: \"a4\", flipped: true)"
+        );
     }
 }
