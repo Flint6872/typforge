@@ -1,5 +1,7 @@
+// crates/typforge/src/editor/editor_panel/render.rs
+
 use crate::editor::{CodeEditor, DraggedTab, EditorPanel, FileContentUpdated, TabDrag};
-use gpui_kit::component::{ActiveTheme, StyledExt, h_flex, v_flex}; // Add v_flex for vertical stacking
+use gpui_kit::component::{ActiveTheme, StyledExt, h_flex, v_flex};
 use gpui_kit::*;
 
 use gpui_kit::prelude::FluentBuilder;
@@ -25,7 +27,6 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
 
         // 1. Create the base Editor UI
         let editor_element = if self.open_files.is_empty() {
-            // <--- PRIMARY CONDITION: Is the list of open files empty?
             div()
                 .size_full()
                 .flex()
@@ -45,13 +46,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                         .margins(px(8.))
                         .child("Create a new file or open an existing project to get started."),
                 )
-                .child(
-                    div()
-                        .flex_row()
-                        .gap_4() // Space between actions
-                        .margins(px(16.))
-                        .children(vec![
-                            // New File Action
+                .child(div().flex_row().gap_4().margins(px(16.)).children(vec![
                             div()
                                 .flex()
                                 .flex_row()
@@ -69,7 +64,6 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                                         .child(div().child("+"))
                                         .child(div().child("N")),
                                 ),
-                            // Open File Action
                             div()
                                 .flex()
                                 .flex_row()
@@ -87,7 +81,6 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                                         .child(div().child("+"))
                                         .child(div().child("O")),
                                 ),
-                            // Open Folder Action
                             div()
                                 .flex()
                                 .flex_row()
@@ -105,7 +98,6 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                                         .child(div().child("+"))
                                         .child(div().child("K")),
                                 ),
-                            // Open Recent Action
                             div()
                                 .flex()
                                 .flex_row()
@@ -123,8 +115,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                                         .child(div().child("+"))
                                         .child(div().child("R")),
                                 ),
-                        ]),
-                )
+                        ]))
                 .into_any_element()
         } else if let Some(ref active_path) = active_file_path {
             if active_path == &PathBuf::from("typforge://package-manager") {
@@ -175,7 +166,6 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                 div().into_any_element()
             }
         } else {
-            // This case covers when open_files is NOT empty, but active_file_path IS None.
             div().into_any_element()
         };
 
@@ -191,75 +181,104 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                 .absolute()
                 .top(pos.y + px(20.))
                 .left(pos.x)
-                .bg(rgb(0x333333)) // Use cx.theme().colors.popover for consistency
-                .border_1()
-                .border_color(rgb(0x555555)) // Use cx.theme().colors.border for consistency
-                .p_2()
-                .rounded_md()
-                .shadow_lg()
-                .child(text)
-        });
-
-        // 3. Prepare the Signature Help Popup if it exists
-        // You will likely need to store the screen position of the cursor in EditorPanel state
-        // to position this accurately. For now, using a placeholder.
-        let signature_help_popup = self.current_signature_help.as_ref().map(|help| {
-            // Placeholder: Assume cursor_screen_position is stored in EditorPanel state
-            // and adjust px values as needed for actual positioning.
-            let pos_x = px(100.0); // Replace with actual cursor X
-            let pos_y = px(100.0); // Replace with actual cursor Y
-
-            let active_idx = help.active_parameter;
-
-            let params_element = h_flex()
-                .gap_1()
-                .children(help.parameters.iter().enumerate().map(|(idx, p)| {
-                    let is_active = idx == active_idx;
-                    div()
-                        .text_sm()
-                        .when(is_active, |s| s.font_bold().text_color(rgb(0x61afef))) // Highlight active parameter
-                        .child(format!(
-                            "{}{}",
-                            p.name,
-                            if idx + 1 < help.parameters.len() {
-                                ", "
-                            } else {
-                                ""
-                            }
-                        ))
-                }));
-
-            // Render signature card with func_name(params) and optional docs
-            v_flex() // Use v_flex for vertical stacking of elements in the card
-                .absolute()
-                .top(pos_y + px(20.)) // Position below the cursor
-                .left(pos_x)
                 .bg(cx.theme().colors.popover)
                 .border_1()
                 .border_color(cx.theme().colors.border)
                 .p_2()
                 .rounded_md()
                 .shadow_lg()
-                .child(
-                    div()
-                        .text_color(cx.theme().colors.foreground)
-                        .child(format!("{}(", help.func_name))
-                        .child(params_element)
-                        .child(")"),
-                )
-                .when_some(help.doc.clone(), |s, doc_text| {
-                    s.child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().colors.muted_foreground)
-                            .px_1() // Add some padding for doc text
-                            .mt_1() // Margin top for separation
-                            .child(doc_text),
-                    )
-                })
+                .child(text)
         });
 
-        // 4. Stack the editor and the popups
+        // 3. Compute real-time cursor screen position from active editor state
+        let cursor_screen_pos = active_file_path.as_ref().and_then(|active_path| {
+            let file = self.open_files.iter().find(|f| f.path == *active_path)?;
+            let state = file.editor_state.read(cx);
+            let cursor = state.cursor();
+            let len = state.text().len();
+            let range = if cursor < len {
+                cursor..cursor + 1
+            } else if cursor > 0 {
+                cursor - 1..cursor
+            } else {
+                0..0
+            };
+            let bounds = state.range_to_bounds(&range)?;
+            Some(point(bounds.left(), bounds.bottom()))
+        });
+
+        // 4. Prepare Signature Help Popup at the exact cursor position
+        let signature_help_popup = self.current_signature_help.as_ref().and_then(|help| {
+            let pos = cursor_screen_pos?;
+            let active_idx = help.active_parameter;
+
+            let params_element =
+                h_flex()
+                    .gap_1()
+                    .flex_wrap()
+                    .children(help.parameters.iter().enumerate().map(|(idx, p)| {
+                        let is_active = idx == active_idx;
+                        div()
+                            .text_sm()
+                            .when(is_active, |s| s.font_bold().text_color(rgb(0x61afef)))
+                            .child(format!(
+                                "{}{}",
+                                p.name,
+                                if idx + 1 < help.parameters.len() {
+                                    ", "
+                                } else {
+                                    ""
+                                }
+                            ))
+                    }));
+
+            // Extract just the summary paragraph (first block) rather than the whole manual
+            let summary_doc = help.doc.as_ref().and_then(|doc_text| {
+                let first_para: String = doc_text
+                    .lines()
+                    .take_while(|line| !line.trim().is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                (!first_para.trim().is_empty()).then_some(first_para)
+            });
+
+            Some(
+                anchored()
+                    .position(point(pos.x, pos.y + px(4.0)))
+                    .snap_to_window()
+                    .child(
+                        v_flex()
+                            .max_w(px(550.0))
+                            .max_h(px(220.0))
+                            .bg(cx.theme().colors.popover)
+                            .border_1()
+                            .border_color(cx.theme().colors.border)
+                            .p_2()
+                            .rounded_md()
+                            .shadow_lg()
+                            .child(
+                                h_flex()
+                                    .flex_wrap()
+                                    .text_color(cx.theme().colors.foreground)
+                                    .child(format!("{}(", help.func_name))
+                                    .child(params_element)
+                                    .child(")"),
+                            )
+                            .when_some(summary_doc, |s, doc_text| {
+                                s.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().colors.muted_foreground)
+                                        .px_1()
+                                        .mt_1()
+                                        .child(doc_text),
+                                )
+                            }),
+                    ),
+            )
+        });
+
+        // 5. Stack the editor and the popups
         div()
             .size_full()
             .track_focus(&self.focus_handle)
@@ -275,7 +294,6 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
             }))
             .flex_col()
             .child(
-                // Scrollable Tab Bar Container
                 div().w_full().bg(cx.theme().tab_bar).child(
                     h_flex().flex_nowrap().items_baseline().children(
                         if self.open_files.is_empty() {
@@ -388,7 +406,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                     .flex_col()
                     .child(editor_element)
                     .children(hover_popup)
-                    .children(signature_help_popup), // Add this line to display signature help
+                    .children(signature_help_popup),
             )
     }
 }

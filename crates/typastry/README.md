@@ -1,115 +1,120 @@
 # typASTry 🧶
 
-A lightweight, high-level, embedded AST manipulation and intelligence engine for [Typst](https://github.com/typst/typst) editors. 
+A high-performance, embedded AST manipulation and intelligence engine for [Typst](https://github.com/typst/typst). 
 
-Weaving raw syntax trees into elegant editor experiences.
-
----
-
-## Compatibility
-
-This library is developed and tested against **Typst v0.15.0**. While it may function with other versions, using it with versions other than the specified one is not guaranteed to be stable or may require adjustments.
+`typASTry` transforms low-level Typst compiler internals into a high-level, UI-agnostic library designed for custom desktop editor frontends (e.g., GPUI, GTK).
 
 ---
 
+## The "Tinymist" Alternative for Embedded Editors
+Unlike LSPs which require external process management and JSON-RPC overhead, `typASTry` operates **in-process and synchronously**. It provides "LSP-grade" intelligence—completions, signature help, and AST mutation—directly to your editor's main thread with microsecond latency.
 
-## Why typASTry?
+## Key Capabilities
 
-Typst provides low-level parsing compiler blocks (`typst-syntax`, `typst-ide`), but building actual editor capabilities on top of them requires writing massive amounts of boilerplate. 
-
-`typASTry` fills this gap by acting as a **generic, side-effect-free syntax controller** that you can drop directly into any editor environment (Rust-native, WASM/Web, FFI/Python, or lightweight LSPs).
-
-### Embedded vs. LSP
-While LSPs (like Tinymist) are wonderful for standard IDEs, they introduce serialization overhead, process isolation complexities, and state out-of-sync risks. `typASTry` runs directly in your editor process, offering:
-* 🚀 **Zero-Copy / Zero-Serialization**: Pass references (`&str`) and indices (`usize`) directly.
-* ⚡ **Microsecond Latency**: Synchronous AST updates and queries run directly on your UI/working thread.
-* 🎯 **Smart AST Mutators**: Native algorithms that prevent nested styling bugs (e.g. nested `#text` calls) and handle complex document insertions gracefully.
+* **Context-Aware Intelligence:** AST-backed completion, signature help, and parameter injection that understands when you're inside a function call vs. markup.
+* **Zero-Socket Architecture:** Built for high-performance editors that require sub-millisecond AST feedback.
+* **Smart AST Mutation:** Methods that modify function arguments and set rules without destroying document formatting or creating nested style artifacts.
+* **Pre-Compile Resilience:** Intelligence features function even when the document is in an incomplete state and hasn't yet produced a valid `PagedDocument`.
 
 ---
 
-## Key Features & API
+## Quick Start: Integrating `typASTry`
 
-### 1. Smart Formatting & Injections (`edit`)
-Instead of dumb string wrapping, `typASTry` parses Typst's AST to merge arguments and prevent formatting nesting. For example, applying a size change to a selection inside a `#text(font: "Inter")[Selection]` will cleanly merge parameters into the existing node instead of double-nesting.
+`typASTry` requires an implementation of `typst::World` (usually provided by your editor's document state).
 
-```rust
-use typastry::edit::{apply_edit_action, EditAction};
-
-let content = "Hello #text(font: \"Inter\")[world]";
-let edit = apply_edit_action(
-    content, 
-    27..32, // "world" selection
-    &EditAction::SetFontSize(14.0)
-);
-
-assert_eq!(edit.new_text, "(font: \"Inter\", size: 14pt)");
-assert_eq!(edit.range, 11..26); // Automatically targets the parent Args node!
-```
-
-### 2. AST Property Detection (`edit`)
-Find resolved formatting values (bold, italic, size, font family, color) at any cursor offset to dynamically update editor formatting toolbar active highlights.
-
-```rust
-use typastry::edit::detect_properties_at_offset;
-
-let content = "Hello *world*";
-let props = detect_properties_at_offset(content, 8);
-
-assert!(props.is_bold);
-```
-
-### 3. Coached Autocomplete (`intel`)
-Provides smart autocompletes that filter compiler raw suggestions and inject context-aware **Coaching Suggestions** (like automatically recommending length units: `pt`, `em`, `mm` after size parameters).
+### 1. Context-Aware Completions
+Use `get_enhanced_completions` to receive a `TypastryCompletionResponse`. This includes an exact `replace_range` so your editor can perform correct text edits without index math errors.
 
 ```rust
 use typastry::intel::get_enhanced_completions;
 
-// Query enhanced completions directly against your implementation of typst::World
-let completions = get_enhanced_completions(&world, document, &source, cursor);
+let response = get_enhanced_completions(&world, None, &source, cursor_offset);
+
+for item in response.items {
+    // Label: "fill", Apply: "fill: ", etc.
+    // Use response.replace_range to apply text_edit
+}
 ```
 
-### 4. Direct Document Formatting (`format`)
-High-performance formatting powered directly by `typstyle`.
+### 2. Live Signature Help
+Display function parameters and active arguments as the user types.
 
 ```rust
-use typastry::format::format_document;
+use typastry::intel::get_signature_help;
 
-let formatted = format_document(content, 80)?;
+if let Some(help) = get_signature_help(&world, None, &source, cursor_offset) {
+    println!("Function: {}", help.func_name);
+    println!("Active Param: {}", help.parameters[help.active_parameter].name);
+}
 ```
 
----
+### 3. AST-Anchored Parameter Injection
+Instead of regex-based editing, use the CST to safely inject or update parameters.
 
-## Feature Flags
+```rust
+use typastry::edit::inject_or_update_parameter;
 
-`typASTry` is highly modular. If you are compiling to WebAssembly or only need simple AST editing without full formatting dependencies, you can disable them cleanly:
-
-```toml
-[dependencies]
-typastry = { version = "0.1.0", default-features = false, features = ["intel"] }
+// Safely adds/updates 'fill' to a #rect() call at the cursor
+if let Some(edit) = inject_or_update_parameter(source_text, cursor, "fill", "red") {
+    // edit.new_text: "fill: red"
+    // edit.range: The span to replace
+}
 ```
 
-| Feature | Default | Description | Key Dependencies |
-|---------|---------|-------------|------------------|
-| `intel` | **Yes** | Rich autocompletes, hover info, and trigger context heuristics. | `typst-ide`, `typst-layout` |
-| `format`| **Yes** | Direct standard document formatting. | `typstyle-core` |
-| *None*  | —       | Standard AST mutators, smart togglers, and property inspectors. | `typst-syntax` (Very lightweight) |
+### 4. Visual Inspector
+Get the current cursor context (Markup, Code, Math, or Function Call) for status bar or ribbon updates.
+```rust
+use typastry::inspector::TypastryInspector;
 
----
+let context = TypastryInspector::inspect_cursor(&source, cursor);
+match context {
+    CursorContext::InFunctionCall { name, active_param_index, .. } => {
+        // Toggle ribbon buttons for function-specific properties
+    }
+    _ => {}
+}
+```
 
-## Contributing
+5. Syntax Utilities (syntax)
+typASTry bundles optimized Tree-sitter grammars and configuration for both Typst and BibTeX. This allows direct access to tree_sitter::Language instances, syntax highlight/injection queries, and auto-closing bracket/quote pairs. It provides a comprehensive, embedded solution for fundamental editor syntax features.
+
+```rust
+use typastry::syntax::{typst_language, create_typst_parser};
+use typastry::syntax::{BIBTEX_LANGUAGE, BIBTEX_HIGHLIGHTS_QUERY}; // Corrected to use BIBTEX_LANGUAGE
+use typastry::syntax::{TYPST_AUTO_CLOSING_PAIRS, BIBTEX_AUTO_CLOSING_PAIRS};
+
+// Get the Typst Tree-sitter language and parser
+let typst_lang = typst_language();
+let mut typst_parser = create_typst_parser();
+let typst_tree = typst_parser.parse("#let x = 1", None);
+
+// Access Typst highlight queries and auto-closing pairs
+let typst_highlights = TYPST_HIGHLIGHTS_QUERY;
+for (open, close) in TYPST_AUTO_CLOSING_PAIRS {
+    println!("Typst Auto-close: {} -> {}", open, close);
+}
+
+// Get the BibTeX Tree-sitter language and highlight query
+let bibtex_lang = BIBTEX_LANGUAGE; // Assuming BIBTEX_LANGUAGE is exposed
+let bibtex_highlights = BIBTEX_HIGHLIGHTS_QUERY;
+for (open, close) in BIBTEX_AUTO_CLOSING_PAIRS {
+    println!("BibTeX Auto-close: {} -> {}", open, close);
+}
+```
+### Architectural Philosophy
+- UI-Agnostic: No dependencies on gpui or gtk.
+- Compile-time Modularity: Toggle intel or format features to keep the binary footprint minimal for restricted environments.
+- Error Tolerance: Built to process incomplete or malformed code during active keystrokes, leveraging typst-syntax resilience.
+
+### Feature Flags
+
+| Feature | Default | Description |
+| -------- | -------- | -------- |
+| intel    | Yes     | Completion coaching, signature help, and AST inspection.     |
+| format    | Yes     | Native typstyle document formatting integration.     |
+
+### Contributing
 We welcome contributions for more AST presets! Please open a PR to add:
-* Smart table/grid manipulators.
-* Advanced markdown conversions.
-* Creative autocomplete coaching heuristics.
-```
-
----
-
-## Final Review
-
-All tests pass, compiler checks are clean, features are isolated, and generic documentation is deployed! Let's do a final verification. Run:
-```sh
-cargo check --workspace
-```
-
-If that completes successfully, you have officially established `typASTry` as a standout community utility! How would you like to proceed? We can write a git commit message for these final architectural upgrades or set up a task file.
+- Smart table/grid manipulators.
+- Advanced markdown conversions.
+- Creative autocomplete coaching heuristics.
