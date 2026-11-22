@@ -1,5 +1,7 @@
 pub mod edit;
 pub mod inspector;
+#[cfg(feature = "spellcheck")]
+pub mod spellcheck;
 pub mod syntax;
 pub mod wysiwyg;
 

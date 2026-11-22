@@ -1,6 +1,12 @@
 I am building a pure Rust, offline-first Typst word processor using GPUI to ensure a low memory footprint and a responsive, lag-free UI. 
 
-I want to implement local spelling and grammar checking inside my existing crate that currently handles AST parsing and code completion. 
+Here is my Cargo workspace layout:
+- `crates/typforge` — main binary
+- `crates/typsdocx` — Typst to MS Word export
+- `crates/typst-gpui` — GPUI renderer, text/glyph rendering, caret, hit testing, canvas interactions, PDF/DOCX export (depends on `gpui_kit`, `typst`, `typst-syntax`, `typst-layout`, `typsdocx`, `typastry`)
+- `crates/typastry` — holds AST info; designed to be reusable/independent for other Typst editors
+
+I am considering placing AST-aware spell/grammar diagnostic logic in `typastry` (potentially behind a feature flag so external consumers aren't forced to take it) while keeping GPUI background execution, hit-map lookup, and right-click menu handling in `typst-gpui` (initially targeting rendered/preview interaction, with clean span mapping so it can extend to editor text as well). please review current code to help me decide where it would best fit.
 
 ### Architecture & Requirements:
 1. **Libraries:** Use `zspell` (Hunspell dictionaries) for spell checking and `harper-core` for grammar/style checking.
@@ -13,8 +19,5 @@ I want to implement local spelling and grammar checking inside my existing crate
    - "Inspect Element" (for your existing introspection feature)
    - "Format Selection"
    - Standard text options (Copy, Paste, Select All)
-
-### My Existing Code:
-[PASTE YOUR RELEVANT AST/COMPLETION/HIT-MAP CODE STRUCTURES HERE]
 
 Please provide a phased, implementation-ready guide and idiomatic Rust code starting with setting up the diagnostic structures, dictionary loader, and background worker using GPUI's background executor.

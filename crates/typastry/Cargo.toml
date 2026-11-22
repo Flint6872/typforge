@@ -6,9 +6,10 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["intel", "format"]
+default = ["intel", "format", "spellcheck"]
 intel = ["dep:typst-ide", "dep:typst-layout"]
 format = ["dep:typstyle-core"]
+spellcheck = ["dep:zspell", "dep:harper-core"]
 
 [dependencies]
 typst.workspace = true
@@ -24,6 +25,10 @@ typstyle-core = { version = "0.15", optional = true }
 tree-sitter.workspace = true
 tree-sitter-typst.workspace = true
 tree-sitter-bibtex.workspace = true
+
+#spellcheck
+zspell = { version = "0.5", optional = true }
+harper-core = { version = "0.20", optional = true } # pin to your target version
 
 [build-dependencies]
 cc = "1.0"
