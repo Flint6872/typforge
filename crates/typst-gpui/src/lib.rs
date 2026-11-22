@@ -890,6 +890,9 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                                             "height" => "50pt",
                                             "radius" => "4pt",
                                             "size" => "11pt",
+                                            "font" => "\"Libertinus Serif\"",
+                                            "weight" => "\"bold\"",
+                                            "style" => "\"italic\"",
                                             _ => "10pt",
                                         };
                                         this.apply_visual_edit(
@@ -1096,9 +1099,21 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         self.pending_transaction = Some(tx);
         self.visual_edit_error = None;
 
+        // --- FIX START ---
+        // Use the start of the range of the *inspected element* as the target offset.
+        // The inspected_element already identified the FuncCall/SetRule we want to modify.
+        let target_element_offset = if let Some(ref inspected) = self.inspected_element {
+            inspected.element_range.start
+        } else {
+            // Fallback: This case should ideally not be hit if the context menu is open.
+            // Using cursor_offset as a fallback might still lead to the error message.
+            self.cursor_offset
+        };
+        // --- FIX END ---
+
         if let Some((mutated_text, new_range)) = typastry::wysiwyg::apply_named_argument_edit(
             &text,
-            self.cursor_offset,
+            target_element_offset, // Pass the corrected offset here
             property_name,
             property_value,
         ) {

@@ -1,4 +1,5 @@
 use std::ops::Range;
+use typst::WorldExt;
 use typst_syntax::{LinkedNode, Side, SyntaxKind, ast, parse};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -786,32 +787,71 @@ pub fn inject_or_update_parameter(
 
     let tree = parse(content);
     let root = LinkedNode::new(&tree);
-    let leaf = root
-        .leaf_at(clamped, Side::Before)
-        .or_else(|| root.leaf_at(clamped, Side::After))?;
+
+    // --- Start: Robust leaf finding ---
+    // Try to get a leaf *at or immediately after* the offset, then fallback to *before*.
+    // This is crucial for offsets at the start of nodes.
+    let leaf_option = root
+        .leaf_at(clamped, Side::After)
+        .or_else(|| root.leaf_at(clamped, Side::Before));
+
+    let leaf = match leaf_option {
+        Some(l) => l,
+        None => {
+            return None;
+        }
+    };
+
+    // --- End: Robust leaf finding ---
 
     // Walk up to find the nearest enclosing FuncCall or SetRule
     let mut current = Some(leaf);
-    let mut call_node = None;
+    let mut call_node: Option<LinkedNode> = None;
     while let Some(node) = current {
         if matches!(node.kind(), SyntaxKind::FuncCall | SyntaxKind::SetRule) {
             call_node = Some(node);
             break;
         }
+        // Stop if we hit Markup which usually indicates we've exited the relevant code structure
+        if node.kind() == SyntaxKind::Markup {
+            return None;
+        }
         current = node.parent().cloned();
     }
-    let call_node = call_node?;
+    let call_node = match call_node {
+        Some(node) => node,
+        None => {
+            return None;
+        }
+    };
+
+    // Get the callee (function name) node to find the correct insertion point
+    let callee_node = call_node.children().find(|c| {
+        c.kind() != SyntaxKind::Hash && c.kind() != SyntaxKind::Space && c.kind() != SyntaxKind::Set
+    });
+
+    let callee_node = match callee_node {
+        Some(node) => node,
+        None => {
+            return None;
+        }
+    };
+
+    let insertion_point_after_callee = callee_node.range().end;
 
     let args_node = call_node.children().find(|c| c.kind() == SyntaxKind::Args);
 
-    // Case 1: No `Args` node at all (e.g. `#set page`) -> append `(key: value)`
+    // Case 1: No `Args` node at all (e.g., `#text[...]` or `#set page`)
+    // Insert `(key: value)` immediately after the callee.
     let Some(args) = args_node else {
-        let insert_pos = call_node.range().end;
         let new_text = format!("({}: {})", key, value);
-        let val_start = insert_pos + key.len() + 3; // after `(key: `
+        let val_start_offset_in_new_text = key.len() + 3; // e.g., for "(key: value)", 'v' starts at len(key) + 3
+
         return Some(TextEdit {
-            range: insert_pos..insert_pos,
-            new_selection: val_start..(val_start + value.len()),
+            // Insert at the end of the callee's name
+            range: insertion_point_after_callee..insertion_point_after_callee,
+            new_selection: (insertion_point_after_callee + val_start_offset_in_new_text)
+                ..(insertion_point_after_callee + val_start_offset_in_new_text + value.len()),
             new_text,
         });
     };
@@ -819,19 +859,23 @@ pub fn inject_or_update_parameter(
     let left_paren = args.children().find(|c| c.kind() == SyntaxKind::LeftParen);
     let right_paren = args.children().find(|c| c.kind() == SyntaxKind::RightParen);
 
-    // Case 2: `Args` exists without `(` (e.g. `#rect[hello]`) -> insert `(key: value)` before `Args`
+    // Case 2: `Args` exists but is malformed (no parens) -> This case is less common
+    // and might indicate an error state in the source. For robustness, we assume
+    // valid Args nodes have parens. If not, fallback to inserting after callee.
     let (Some(lp), Some(rp)) = (left_paren, right_paren) else {
-        let insert_pos = args.range().start;
+        // Treat as if no Args node exists and insert after callee.
         let new_text = format!("({}: {})", key, value);
-        let val_start = insert_pos + key.len() + 3;
+        let val_start_offset_in_new_text = key.len() + 3;
+
         return Some(TextEdit {
-            range: insert_pos..insert_pos,
-            new_selection: val_start..(val_start + value.len()),
+            range: insertion_point_after_callee..insertion_point_after_callee,
+            new_selection: (insertion_point_after_callee + val_start_offset_in_new_text)
+                ..(insertion_point_after_callee + val_start_offset_in_new_text + value.len()),
             new_text,
         });
     };
 
-    // Case 3: Parameter `key` is already defined -> replace only its value expression span
+    // Case 3: Parameter `key` is already defined -> replace only its value expression span.
     for child in args.children() {
         if child.kind() == SyntaxKind::Named {
             if let Some(named_ast) = child.cast::<ast::Named>() {
@@ -853,7 +897,9 @@ pub fn inject_or_update_parameter(
 
                     let target_range = match (val_children.first(), val_children.last()) {
                         (Some(first), Some(last)) => first.range().start..last.range().end,
-                        _ => child.range(),
+                        _ => {
+                            child.range() // Fallback if no specific value children found
+                        }
                     };
 
                     return Some(TextEdit {
@@ -866,28 +912,30 @@ pub fn inject_or_update_parameter(
         }
     }
 
-    // Case 4: Parameter `key` is not defined -> splice into `(...)` before `RightParen`
+    // Case 4: Parameter `key` is not defined -> splice into `(...)` before `RightParen`.
+
     let last_non_space = args
         .children()
         .filter(|c| c.range().end <= rp.range().start && c.kind() != SyntaxKind::Space)
         .last();
 
     let (insert_pos, new_text, val_offset_in_insert) = match last_non_space {
-        // Empty `()` or `( )`
+        // Empty `()` or `( )` (e.g., cursor in #text(|) )
         Some(node) if node.kind() == SyntaxKind::LeftParen => {
             let txt = format!("{}: {}", key, value);
             (lp.range().end, txt, key.len() + 2)
         }
-        // Trailing comma already present (e.g. `#rect(width: 10pt,)`)
+        // Trailing comma already present (e.g., `#rect(width: 10pt,)`)
         Some(node) if node.kind() == SyntaxKind::Comma => {
             let txt = format!(" {}: {}", key, value);
             (node.range().end, txt, key.len() + 3)
         }
-        // Existing argument without trailing comma (e.g. `#rect(width: 10pt)`)
+        // Existing argument without trailing comma (e.g., `#rect(width: 10pt)`)
         Some(node) => {
             let txt = format!(", {}: {}", key, value);
             (node.range().end, txt, key.len() + 4)
         }
+        // No existing arguments (empty `()` case, e.g., #func(|))
         None => {
             let txt = format!("{}: {}", key, value);
             (rp.range().start, txt, key.len() + 2)
@@ -895,6 +943,7 @@ pub fn inject_or_update_parameter(
     };
 
     let val_start = insert_pos + val_offset_in_insert;
+
     Some(TextEdit {
         range: insert_pos..insert_pos,
         new_text,
