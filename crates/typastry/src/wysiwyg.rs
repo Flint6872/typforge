@@ -13,113 +13,27 @@ pub struct MutationTransaction {
 }
 
 /// Applies a named property/argument change to a function call in the source text.
-/// Uses defensive AST lookups and performs safe string-slice mutation.
+/// Delegates to `crate::edit::inject_or_update_parameter`.
 pub fn apply_named_argument_edit(
     source_text: &str,
     element_offset: usize,
     property_name: &str,
     property_value: &str,
 ) -> Option<(String, std::ops::Range<usize>)> {
-    let source = Source::detached(source_text);
-    let root = LinkedNode::new(source.root());
-    let leaf = root.leaf_at(element_offset, Side::Before)?;
+    let edit = crate::edit::inject_or_update_parameter(
+        source_text,
+        element_offset,
+        property_name,
+        property_value,
+    );
 
-    // Walk up ancestors to find the target FuncCall
-    let mut current = leaf;
-    let mut func_call_node = None;
-    loop {
-        if current.kind() == SyntaxKind::FuncCall {
-            func_call_node = Some(current);
-            break;
-        }
-        if let Some(parent) = current.parent() {
-            current = parent.clone();
-        } else {
-            break;
-        }
-    }
-
-    let func_node = func_call_node?;
-
-    // Find the Args child node
-    let mut args_node = None;
-    for child in func_node.children() {
-        if child.kind() == SyntaxKind::Args {
-            args_node = Some(child);
-            break;
-        }
-    }
-
-    let args = args_node?;
-
-    // Check if the named argument already exists in the call
-    let mut existing_named_node = None;
-    for child in args.children() {
-        if child.kind() == SyntaxKind::Named {
-            if let Some(named_ast) = child.cast::<ast::Named>() {
-                if named_ast.name().as_str() == property_name {
-                    existing_named_node = Some(child);
-                    break;
-                }
-            }
-        }
-    }
-
-    if let Some(named_node) = existing_named_node {
-        // Find the child node representing the value expression of the named argument
-        let mut value_node = None;
-        if let Some(named_ast) = named_node.cast::<ast::Named>() {
-            let expr = named_ast.expr();
-            for c in named_node.children() {
-                if c.span() == expr.span() {
-                    value_node = Some(c);
-                    break;
-                }
-            }
-        }
-
-        let target_node = match value_node {
-            Some(node) => node,
-            None => named_node.clone(),
-        };
-
-        let range = target_node.range();
-        let mut new_text = source_text.to_string();
-        new_text.replace_range(range.clone(), property_value);
-
-        // Calculate new value range in the mutated source string
-        let diff_len = property_value.len() as isize - (range.end - range.start) as isize;
-        let new_range = range.start..(range.end as isize + diff_len) as usize;
-        Some((new_text, new_range))
-    } else {
-        // Named argument does not exist; append it safely
-        let args_range = args.range();
-        let args_text = &source_text[args_range.clone()];
-
-        if let Some(closing_paren_idx) = args_text.rfind(')') {
-            let insert_offset = args_range.start + closing_paren_idx;
-
-            // Check if we need a leading comma separator
-            let has_other_args = args
-                .cast::<ast::Args>()
-                .map(|a| a.items().next().is_some())
-                .unwrap_or(false);
-
-            let insertion = if has_other_args {
-                format!(", {}: {}", property_name, property_value)
-            } else {
-                format!("{}: {}", property_name, property_value)
-            };
-
+    match edit {
+        Some(e) => {
             let mut new_text = source_text.to_string();
-            new_text.insert_str(insert_offset, &insertion);
-
-            let start = insert_offset + insertion.len() - property_value.len();
-            let end = start + property_value.len();
-            Some((new_text, start..end))
-        } else {
-            None
+            new_text.replace_range(e.range, &e.new_text);
+            Some((new_text, e.new_selection))
         }
+        None => None,
     }
 }
 

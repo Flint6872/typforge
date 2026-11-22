@@ -10,3 +10,6 @@
 $ 5+5 / 6 $
 
 = Hi
+
+
+#text(size: 1cm, fill: red)[asdfjk]

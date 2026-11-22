@@ -10,8 +10,11 @@ use parking_lot::Mutex;
 use std::rc::Rc;
 use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
+use typastry::edit::{detect_properties_at_offset, inject_or_update_parameter};
 use typastry::format::format_document;
-use typastry::intel::{Tooltip, get_hover_info};
+use typastry::inspector::{CursorContext, TypastryInspector, TypastryJump};
+use typastry::intel::{Tooltip, TypastrySignatureHelp, get_signature_help};
+use typst::syntax::Source;
 
 impl<W: typst::World + typastry::IdeWorld + 'static> EventEmitter<FileContentUpdated>
     for EditorPanel<W>
@@ -24,6 +27,7 @@ pub struct EditorSelectionChanged {
     pub size: Option<f32>,
     pub font: Option<String>,
     pub color: Option<String>,
+    pub cursor_context: CursorContext,
 }
 
 impl<W: typst::World + typastry::IdeWorld + 'static> EventEmitter<EditorSelectionChanged>
@@ -41,6 +45,7 @@ pub struct EditorPanel<W: typst::World + typastry::IdeWorld + 'static> {
     pub current_hover_content: Option<Tooltip>,
     pub current_hover_position: Option<Point<Pixels>>,
     pub last_hover_request_time: Option<Instant>,
+    pub current_signature_help: Option<TypastrySignatureHelp>,
     pub package_manager_view: Option<Entity<PackageManagerView>>,
 }
 
@@ -57,6 +62,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
             current_hover_content: self.current_hover_content.clone(),
             current_hover_position: self.current_hover_position.clone(),
             last_hover_request_time: self.last_hover_request_time,
+            current_signature_help: self.current_signature_help.clone(),
             package_manager_view: self.package_manager_view.clone(),
         }
     }
@@ -73,6 +79,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
             current_hover_content: None,
             current_hover_position: None,
             last_hover_request_time: None,
+            current_signature_help: None,
             package_manager_view: None,
         }
     }
@@ -95,7 +102,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
 
             if let Ok(source) = world_lock.source(main_id) {
                 let document = world_lock.document();
-                get_hover_info(&*world_lock, document.as_deref(), &source, byte_offset)
+                TypastryInspector::tooltip(&*world_lock, document.as_deref(), &source, byte_offset)
             } else {
                 None
             }
@@ -110,27 +117,122 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         }
     }
 
-    pub fn clear_hover(&mut self, cx: &mut Context<Self>) {
-        self.current_hover_content = None;
-        self.current_hover_position = None;
-        cx.notify();
-    }
-
+    // 5. Update update_ribbon_selection to inspect cursor & signature help:
     pub fn update_ribbon_selection(
         &mut self,
         content: &str,
         cursor: usize,
         cx: &mut Context<Self>,
     ) {
-        // Query the active cursor styling state directly from typastry's pure AST engine
-        let props = typastry::edit::detect_properties_at_offset(content, cursor);
+        let source = Source::detached(content);
+        let props = detect_properties_at_offset(content, cursor);
+        let cursor_context = TypastryInspector::inspect_cursor(&source, cursor);
+
+        // Update active signature help
+        self.update_signature_help(&source, cursor, cx);
+
         cx.emit(EditorSelectionChanged {
             is_bold: props.is_bold,
             is_italic: props.is_italic,
             size: props.size,
             font: props.font,
             color: props.color,
+            cursor_context,
         });
+    }
+
+    pub fn update_signature_help(
+        &mut self,
+        source: &Source,
+        cursor: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let help = {
+            let world_lock = self.shared_world.lock();
+            get_signature_help(&*world_lock, None, source, cursor)
+        };
+
+        if self.current_signature_help != help {
+            self.current_signature_help = help;
+            cx.notify();
+        }
+    }
+
+    // 6. AST Parameter Injection method for Ribbons / Toolbars:
+    pub fn inject_parameter_at_cursor(
+        &mut self,
+        key: &str,
+        value: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(active_path) = &self.active_file_path {
+            if let Some(file) = self.open_files.iter_mut().find(|f| f.path == *active_path) {
+                let content = file.editor_state.read(cx).text().to_string();
+                let cursor = file.editor_state.read(cx).cursor();
+
+                if let Some(edit) = inject_or_update_parameter(&content, cursor, key, value) {
+                    file.editor_state.update(cx, |state, input_cx| {
+                        state.replace_range_with_history(
+                            edit.range,
+                            &edit.new_text,
+                            window,
+                            input_cx,
+                        );
+                        state.set_selected_range(edit.new_selection, input_cx);
+                    });
+                }
+            }
+        }
+    }
+
+    // 7. Jump from Click (canvas preview to editor source):
+    pub fn handle_canvas_jump(
+        &mut self,
+        page: usize,
+        x_pt: f64,
+        y_pt: f64,
+        _window: &mut Window, // Changed to _window as we'll use the Context's App
+        cx: &mut Context<Self>,
+    ) {
+        let jump = {
+            let world_lock = self.shared_world.lock();
+            let document = world_lock.document();
+            if let Some(doc) = document.as_deref() {
+                TypastryInspector::jump_from_click(&*world_lock, doc, page, x_pt, y_pt)
+            } else {
+                None
+            }
+        };
+
+        if let Some(jump) = jump {
+            match jump {
+                TypastryJump::File { vpath, offset } => {
+                    let path = PathBuf::from(vpath);
+                    if let Ok(()) = self.open_file(path.clone(), _window, cx) {
+                        // Pass _window from arguments
+                        if let Some(offset) = offset {
+                            if let Some(file) = self.open_files.iter_mut().find(|f| f.path == path)
+                            {
+                                file.editor_state.update(cx, |state, input_cx| {
+                                    state.set_selected_range(offset..offset, input_cx);
+                                });
+                            }
+                        }
+                    }
+                }
+                TypastryJump::Url(url) => {
+                    cx.open_url(&url);
+                }
+                TypastryJump::Position { .. } => {}
+            }
+        }
+    }
+
+    pub fn clear_hover(&mut self, cx: &mut Context<Self>) {
+        self.current_hover_content = None;
+        self.current_hover_position = None;
+        cx.notify();
     }
 
     pub fn undo(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -7,7 +7,7 @@ use lsp_types::{
 use parking_lot::Mutex;
 use ropey::{LineType, Rope};
 use std::sync::Arc;
-use typastry::intel::{CompletionKind, get_enhanced_completions, get_trigger_info};
+use typastry::intel::{CompletionKind, get_enhanced_completions};
 
 pub struct TypstCompletionProvider<W: typst::World + typastry::IdeWorld + 'static> {
     shared_world: Arc<Mutex<W>>,
@@ -28,31 +28,16 @@ impl<W: typst::World + typastry::IdeWorld + 'static> TypstCompletionProvider<W> 
         let main_id = world.main();
 
         let items = if let Ok(source) = world.source(main_id) {
-            // 1. Fetch filtered, enhanced, and coached suggestions directly from typastry
-            let enhanced_completions = get_enhanced_completions(&*world, None, &source, cursor);
+            // 1. Fetch exact replace range and suggestions directly from typastry
+            let resp = get_enhanced_completions(&*world, None, &source, cursor);
 
             let rope_str = rope.to_string();
-            let package_query = typastry::intel::detect_package_import_context(&rope_str, cursor);
+            let start_pos = offset_to_lsp_position(rope, resp.replace_range.start);
+            let end_pos = offset_to_lsp_position(rope, cursor);
 
-            // 2. Compute exact text replacement range
-            let (start_pos, end_pos, is_hash_command) = if let Some(ref query) = package_query {
-                let start_offset = cursor.saturating_sub(query.len());
-                (
-                    offset_to_lsp_position(rope, start_offset),
-                    offset_to_lsp_position(rope, cursor),
-                    false,
-                )
-            } else {
-                let (trigger_offset, is_hash) = get_trigger_info(&rope_str, cursor);
-                (
-                    offset_to_lsp_position(rope, trigger_offset),
-                    offset_to_lsp_position(rope, cursor),
-                    is_hash,
-                )
-            };
-
-            // 3. Map clean suggestions to LSP completion items
-            let list: Vec<CompletionItem> = enhanced_completions
+            // 2. Map clean suggestions to LSP completion items
+            let list: Vec<CompletionItem> = resp
+                .items
                 .into_iter()
                 .map(|c| {
                     let kind = match c.kind {
@@ -66,15 +51,13 @@ impl<W: typst::World + typastry::IdeWorld + 'static> TypstCompletionProvider<W> 
                         CompletionKind::Text => CompletionItemKind::TEXT,
                     };
 
-                    let replacement_text = if package_query.is_some() {
+                    let replacement_text = if c.kind == CompletionKind::Package {
                         let has_closing_quote = rope_str.as_bytes().get(cursor) == Some(&b'"');
                         if has_closing_quote {
                             c.apply.clone()
                         } else {
                             format!("{}\"", c.apply)
                         }
-                    } else if is_hash_command && c.kind != CompletionKind::Unit {
-                        format!("#{}", c.apply)
                     } else {
                         c.apply
                     };

@@ -7,6 +7,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::*;
 use typastry::edit::ActiveProperties;
+use typastry::inspector::CursorContext;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum RibbonTab {
@@ -24,15 +25,16 @@ pub struct RibbonPanel {
     pub is_bold: bool,
     pub is_italic: bool,
     pub is_underline: bool,
-    #[allow(dead_code)] //will build this out at a later time
+    #[allow(dead_code)]
     pub paper_size: String,
     pub is_flipped: bool,
     pub columns: usize,
     pub(super) text_color_picker: Entity<ColorPickerState>,
-    // Dropdown state
     pub font_families: Vec<String>,
     pub font_dropdown_open: bool,
     pub font_size_dropdown_open: bool,
+    // Store current AST cursor context
+    pub cursor_context: CursorContext,
 }
 
 impl RibbonPanel {
@@ -65,12 +67,77 @@ impl RibbonPanel {
             font_families,
             font_dropdown_open: false,
             font_size_dropdown_open: false,
+            cursor_context: CursorContext::InMarkup,
         }
     }
 
     fn select_tab(&mut self, tab: RibbonTab, cx: &mut Context<Self>) {
         self.active_tab = tab;
         cx.notify();
+    }
+
+    pub fn update_active_properties(
+        &mut self,
+        props: &ActiveProperties,
+        cursor_context: &CursorContext,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.cursor_context = cursor_context.clone();
+
+        // Optional: switch to Insert tab if editing visual blocks
+        if let CursorContext::InFunctionCall { name, .. } = cursor_context {
+            if matches!(
+                name.as_str(),
+                "rect" | "circle" | "image" | "grid" | "table"
+            ) {
+                self.active_tab = RibbonTab::Insert;
+            }
+        }
+
+        let mut changed = false;
+
+        if self.is_bold != props.is_bold {
+            self.is_bold = props.is_bold;
+            changed = true;
+        }
+
+        if self.is_italic != props.is_italic {
+            self.is_italic = props.is_italic;
+            changed = true;
+        }
+
+        if self.is_underline != props.is_underline {
+            self.is_underline = props.is_underline;
+            changed = true;
+        }
+
+        if let Some(ref font) = props.font {
+            if &self.selected_font != font {
+                self.selected_font = font.clone();
+                changed = true;
+            }
+        }
+
+        if let Some(size) = props.size {
+            if (self.font_size - size).abs() > 0.01 {
+                self.font_size = size;
+                changed = true;
+            }
+        }
+
+        if let Some(ref color_str) = props.color {
+            if let Some(hsla) = parse_typst_color_to_hsla(color_str) {
+                let picker = self.text_color_picker.clone();
+                picker.update(cx, |state, picker_cx| {
+                    state.set_value(hsla, _window, picker_cx);
+                });
+            }
+        }
+
+        if changed {
+            cx.notify();
+        }
     }
 }
 
@@ -194,59 +261,6 @@ impl RibbonPanel {
             .cursor_pointer()
             .on_mouse_down(MouseButton::Left, on_click)
             .child(label)
-    }
-}
-
-impl RibbonPanel {
-    pub fn update_active_properties(
-        &mut self,
-        props: &ActiveProperties,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let mut changed = false;
-
-        if self.is_bold != props.is_bold {
-            self.is_bold = props.is_bold;
-            changed = true
-        }
-
-        if self.is_italic != props.is_italic {
-            self.is_italic = props.is_italic;
-            changed = true;
-        }
-
-        if self.is_underline != props.is_underline {
-            self.is_underline = props.is_underline;
-            changed = true;
-        }
-
-        if let Some(ref font) = props.font {
-            if &self.selected_font != font {
-                self.selected_font = font.clone();
-                changed = true;
-            }
-        }
-
-        if let Some(size) = props.size {
-            if (self.font_size - size).abs() > 0.01 {
-                self.font_size = size;
-                changed = true;
-            }
-        }
-
-        if let Some(ref color_str) = props.color {
-            if let Some(hsla) = parse_typst_color_to_hsla(color_str) {
-                let picker = self.text_color_picker.clone();
-                picker.update(cx, |state, picker_cx| {
-                    state.set_value(hsla, _window, picker_cx);
-                });
-            }
-        }
-
-        if changed {
-            cx.notify();
-        }
     }
 }
 
