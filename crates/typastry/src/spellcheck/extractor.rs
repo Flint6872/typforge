@@ -1,5 +1,5 @@
 use std::ops::Range;
-use typst_syntax::{LinkedNode, Source, SyntaxKind, ast, ast::AstNode};
+use typst_syntax::{LinkedNode, Source, SyntaxKind, ast};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OffsetMapping {

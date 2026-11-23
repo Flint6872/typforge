@@ -1,5 +1,11 @@
 pub mod extractor;
 
+#[cfg(feature = "spellcheck")]
+pub mod dictionary;
+
+#[cfg(feature = "spellcheck")]
+pub mod checker;
+
 use crate::edit::TextEdit;
 use std::ops::Range;
 
@@ -18,13 +24,11 @@ pub enum DiagnosticSeverity {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TextDiagnostic {
-    /// Byte range in the raw Typst `Source` text.
     pub range: Range<usize>,
     pub message: String,
     pub suggestions: Vec<String>,
     pub source: DiagnosticSource,
     pub severity: DiagnosticSeverity,
-    /// Exact slice from the raw source (useful for "Ignore Word" / "Add to Dictionary").
     pub flagged_text: String,
 }
 
