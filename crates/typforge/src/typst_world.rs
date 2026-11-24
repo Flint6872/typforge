@@ -148,6 +148,54 @@ impl GpuiWorld {
             }
         }
     }
+
+    pub fn set_source_internal(&mut self, source: String) {
+        self.source_text = source;
+    }
+
+    // Rename your internal method that updates document info
+    pub fn set_main_document_info_internal(
+        &mut self,
+        document_path: Option<PathBuf>,
+        content: String,
+    ) {
+        let is_switching = document_path != self.current_document_physical_path;
+        self.source_text = content;
+
+        if is_switching {
+            if let Ok(mut sources) = self.sources.lock() {
+                sources.clear();
+            }
+            if let Ok(mut files) = self.files.lock() {
+                files.clear();
+            }
+        }
+
+        if let Some(path) = document_path {
+            self.root = path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("/"))
+                .to_path_buf();
+            self.current_document_physical_path = Some(path.clone());
+
+            let relative_path = path.strip_prefix(&self.root).unwrap_or(&path);
+            let mut vpath_str = relative_path.to_string_lossy().to_string();
+            if !vpath_str.starts_with('/') {
+                vpath_str = format!("/{}", vpath_str);
+            }
+            self.main_file_id = FileId::new(RootedPath::new(
+                VirtualRoot::Project,
+                VirtualPath::new(vpath_str).expect("must be valid"),
+            ));
+        } else {
+            self.root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+            self.current_document_physical_path = None;
+            self.main_file_id = FileId::new(RootedPath::new(
+                VirtualRoot::Project,
+                VirtualPath::new("/__main__.typ").expect("hardcoded path must be valid"),
+            ));
+        }
+    }
 }
 
 impl World for GpuiWorld {
@@ -311,6 +359,10 @@ impl TypstGpuiWorld for GpuiWorld {
 
     fn set_main_document_info(&mut self, path: Option<std::path::PathBuf>, content: String) {
         self.set_main_document_info(path, content);
+    }
+
+    fn main_file_id(&self) -> FileId {
+        self.main_file_id
     }
 }
 

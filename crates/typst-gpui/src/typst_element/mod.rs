@@ -19,7 +19,7 @@ use std::{
 use typastry::spellcheck::TextDiagnostic;
 use typst::{
     layout::{Frame, FrameItem},
-    syntax::Span,
+    syntax::{FileId, Span},
 };
 use typst_curve::TypstCurveExt;
 use typst_layout::PagedDocument;
@@ -123,6 +123,7 @@ pub struct TypstElement {
     show_cursor: bool,
     pub span_resolver: Option<Arc<dyn Fn(Span, u16) -> usize + Send + Sync + 'static>>,
     diagnostics: Vec<TextDiagnostic>,
+    cached_sources: Arc<HashMap<FileId, Arc<typst_syntax::Source>>>,
 }
 
 // Manual implementation of Debug for TypstElement
@@ -433,6 +434,8 @@ impl TypstElement {
         on_hit_map_updated: Option<Arc<Mutex<dyn FnMut(HitMap, &mut App) + Send + Sync + 'static>>>,
         show_cursor: bool,
         span_resolver: Option<Arc<dyn Fn(Span, u16) -> usize + Send + Sync + 'static>>, // Add this
+        diagnostics: Vec<TextDiagnostic>,
+        cached_sources: Arc<HashMap<FileId, Arc<typst_syntax::Source>>>,
     ) -> Self {
         Self {
             id: gpui_kit::ElementId::from(0),
@@ -447,7 +450,8 @@ impl TypstElement {
             on_hit_map_updated,
             show_cursor,
             span_resolver,
-            diagnostics: Vec::new(),
+            diagnostics,
+            cached_sources,
         }
     }
 

@@ -2,6 +2,7 @@ use crate::typst_element::{HitMap, TypstElement, TypstRenderState};
 use gpui_kit::component::{StyledExt, scroll::ScrollableElement};
 use gpui_kit::{prelude::FluentBuilder, *};
 use parking_lot::Mutex;
+use std::collections::HashMap;
 use std::{sync::Arc, time::Duration};
 use typastry::spellcheck::{
     Dictionary, TextDiagnostic, checker::check_source, dictionary::DictionaryManager,
@@ -22,6 +23,7 @@ pub trait TypstGpuiWorld: typst::World + Send + Sync + 'static {
         None
     }
     fn set_document(&mut self, _doc: std::sync::Arc<PagedDocument>) {}
+    fn main_file_id(&self) -> typst::syntax::FileId;
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -806,18 +808,75 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                             .child(if let Some(doc) = &self.document {
                                 // Create the resolver closure accessing the world
                                 let world_clone = self.world.clone();
+
+                                // --- OPTIMIZATION: Pre-collect all unique FileIds and their Sources ---
+                                let mut collected_sources_map = HashMap::new();
+
+                                // Get the FileId of the main document from the world
+                                let main_doc_file_id = world_clone.lock().main_file_id();
+                                if let Ok(main_source) = world_clone.lock().source(main_doc_file_id)
+                                {
+                                    collected_sources_map
+                                        .insert(main_doc_file_id, Arc::new(main_source));
+                                }
+                                // Removed the `if let Some(main_id) = ...` guard here,
+                                // as `main_file_id()` on the trait now returns `FileId` directly.
+
+                                // 2. Recursively collect all FileIds referenced within the document's frames
+                                let mut all_referenced_file_ids_in_frames =
+                                    std::collections::HashSet::new();
+                                for page in doc.pages() {
+                                    collect_file_ids_from_frame_recursive(
+                                        &page.frame,
+                                        &mut all_referenced_file_ids_in_frames,
+                                    );
+                                }
+
+                                // 3. Fetch sources for any referenced FileIds not already in our map
+                                for id in &all_referenced_file_ids_in_frames {
+                                    if !collected_sources_map.contains_key(id) {
+                                        if let Ok(source) = world_clone.lock().source(*id) {
+                                            collected_sources_map.insert(*id, Arc::new(source));
+                                        }
+                                    }
+                                }
+
+                                let cached_sources_arc = Arc::new(collected_sources_map);
+
+                                // The span_resolver now closes over the pre-collected sources.
+                                // We clone `cached_sources_arc` here to move a new Arc into the closure.
+                                let span_resolver_cached_sources = cached_sources_arc.clone(); // <--- CLONE HERE
                                 let span_resolver = Some(std::sync::Arc::new(
                                     move |span: typst::syntax::Span, offset: u16| {
                                         if let Some(file_id) = span.id() {
-                                            if let Ok(source) = world_clone.lock().source(file_id) {
-                                                // Use .get() to access the internal data of the Span
+                                            // Look up source in our cached map first
+                                            if let Some(source) =
+                                                span_resolver_cached_sources.get(&file_id)
+                                            {
+                                                // <--- USE CLONED ARC
                                                 if let typst::syntax::SpanKind::Number {
                                                     num, ..
                                                 } = span.get()
                                                 {
-                                                    // Now you have the SpanNumber (num) to pass to range()
                                                     if let Some(range) = source.range(num, None) {
                                                         return range.start + offset as usize;
+                                                    }
+                                                }
+                                            } else {
+                                                // Fallback: If a FileId is not in the cached map (e.g., from an implicitly imported package),
+                                                // we still need to get it from the world. This path is less performant but necessary for robustness.
+                                                if let Ok(source) =
+                                                    world_clone.lock().source(file_id)
+                                                {
+                                                    if let typst::syntax::SpanKind::Number {
+                                                        num,
+                                                        ..
+                                                    } = span.get()
+                                                    {
+                                                        if let Some(range) = source.range(num, None)
+                                                        {
+                                                            return range.start + offset as usize;
+                                                        }
                                                     }
                                                 }
                                             }
@@ -836,7 +895,9 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                                     self.selection_range(),
                                     self.on_hit_map_updated_callback.clone(),
                                     self.cursor_visible,
-                                    span_resolver, // Pass the resolver here
+                                    span_resolver,
+                                    self.diagnostics.clone(),
+                                    cached_sources_arc,
                                 )
                                 .with_zoom(self.zoom)
                                 .into_any_element()
@@ -1199,6 +1260,42 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
     ) {
         self.inspected_element = Some(props);
         cx.notify();
+    }
+}
+
+fn collect_file_ids_from_frame_recursive(
+    frame: &typst::layout::Frame,
+    file_ids: &mut std::collections::HashSet<typst::syntax::FileId>,
+) {
+    for (_, item) in frame.items() {
+        match item {
+            typst::layout::FrameItem::Text(text_item) => {
+                // Iterate over each glyph in the TextItem to get its span
+                for glyph_instance in &text_item.glyphs {
+                    let (span, _index) = glyph_instance.span; // glyph_instance.span is a (Span, u16) tuple
+                    if let Some(id) = span.id() {
+                        file_ids.insert(id);
+                    }
+                }
+            }
+            typst::layout::FrameItem::Image(_, _, span) => {
+                if let Some(id) = span.id() {
+                    file_ids.insert(id);
+                }
+            }
+            typst::layout::FrameItem::Shape(_, span) => {
+                if let Some(id) = span.id() {
+                    file_ids.insert(id);
+                }
+            }
+            typst::layout::FrameItem::Link(_, _) => { /* Links don't directly have a span ID for source mapping */
+            }
+            typst::layout::FrameItem::Tag(_) => { /* Tags don't directly have a span ID for source mapping */
+            }
+            typst::layout::FrameItem::Group(group_item) => {
+                collect_file_ids_from_frame_recursive(&group_item.frame, file_ids);
+            }
+        }
     }
 }
 
