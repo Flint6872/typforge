@@ -18,3 +18,5 @@ pub use typst_ide::IdeWorld;
 pub use inspector::TypastryJump;
 
 pub use inspector::{CursorContext, TypastryInspector};
+
+

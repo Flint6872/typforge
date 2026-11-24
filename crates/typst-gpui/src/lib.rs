@@ -1,13 +1,17 @@
+use crate::typst_element::{HitMap, TypstElement, TypstRenderState};
 use gpui_kit::component::{StyledExt, scroll::ScrollableElement};
 use gpui_kit::{prelude::FluentBuilder, *};
 use parking_lot::Mutex;
 use std::{sync::Arc, time::Duration};
+use typastry::spellcheck::{
+    Dictionary, TextDiagnostic, checker::check_source, dictionary::DictionaryManager,
+    extractor::detect_document_language,
+};
 use typst_layout::PagedDocument;
 
 pub mod canvas_input;
 pub mod caret_geometry;
 pub mod typst_element;
-use crate::typst_element::{HitMap, TypstElement, TypstRenderState};
 
 /// Trait defining what the PreviewPanel needs from a Typst World.
 pub trait TypstGpuiWorld: typst::World + Send + Sync + 'static {
@@ -58,6 +62,12 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     _blink_task: Option<Task<()>>,
     compile_task: Option<Task<()>>,
 
+    // --- NEW SPELLCHECK & DIAGNOSTICS STATE FIELDS ---
+    pub diagnostics: Vec<TextDiagnostic>,
+    spellcheck_task: Option<Task<()>>,
+    pub dictionary_manager: Arc<Mutex<DictionaryManager>>,
+    cached_dictionary: Option<(String, Arc<Dictionary>)>,
+
     // --- NEW WYSIWYG STATE FIELDS Visual editing & context menu---
     pub pending_transaction: Option<typastry::wysiwyg::MutationTransaction>,
     pub visual_edit_error: Option<String>,
@@ -103,6 +113,12 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             },
         );
 
+        let dict_dir = std::env::current_dir()
+            .unwrap_or_default()
+            .join("assets")
+            .join("dictionaries");
+        let dictionary_manager = Arc::new(Mutex::new(DictionaryManager::new(dict_dir))); // Local variable
+
         Self {
             world,
             document: None,
@@ -122,6 +138,12 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             is_hovering_link: false,
             _blink_task: Some(blink_task),
             compile_task: None,
+
+            diagnostics: Vec::new(),
+            spellcheck_task: None,
+            dictionary_manager,
+            cached_dictionary: None,
+
             pending_transaction: None,
             visual_edit_error: None,
             inspected_element: None,
@@ -161,6 +183,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         self.last_text_len = source.len();
         self.world.lock().set_source(source);
         self.compile(cx);
+        self.schedule_spellcheck(cx); // <-- ADDED
         cx.notify();
     }
 
@@ -508,6 +531,81 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                 .set_offset(Point::new(Pixels::ZERO, scroll_offset));
             cx.notify();
         }
+    }
+
+    pub fn diagnostics_at_offset(&self, offset: usize) -> Vec<&TextDiagnostic> {
+        self.diagnostics
+            .iter()
+            .filter(|d| d.range.start <= offset && offset <= d.range.end)
+            .collect()
+    }
+
+    /// Adds a word to the user ignore list and re-runs spellcheck.
+    pub fn ignore_word(&mut self, word: &str, cx: &mut Context<Self>) {
+        self.dictionary_manager.lock().add_ignored_word(word);
+        self.schedule_spellcheck(cx);
+    }
+
+    /// Asynchronously runs spell/grammar checks on GPUI's background executor.
+    pub fn schedule_spellcheck(&mut self, cx: &mut Context<Self>) {
+        let text = self.source.clone();
+        if text.is_empty() {
+            self.diagnostics.clear();
+            cx.notify();
+            return;
+        }
+
+        // Cancel any pending spellcheck task to debounce fast typing
+        self.spellcheck_task = None;
+
+        let dict_mgr_arc = self.dictionary_manager.clone();
+        let cached_dict = self.cached_dictionary.clone();
+        let handle = cx.weak_entity();
+
+        self.spellcheck_task = Some(cx.spawn(|_view, spawned_async_cx: &mut AsyncApp| {
+            let mut async_cx = spawned_async_cx.clone();
+            async move {
+                // 300ms debounce during continuous keystrokes
+                async_cx
+                    .background_executor()
+                    .timer(Duration::from_millis(300))
+                    .await;
+
+                // Heavy AST prose extraction and dictionary checking on background thread
+                let (diags, new_cached_dict) = async_cx
+                    .background_executor()
+                    .spawn(async move {
+                        let source = typst_syntax::Source::detached(&text);
+                        let lang = detect_document_language(&source);
+
+                        let mgr = dict_mgr_arc.lock();
+
+                        // Load/cache dictionary if language changed
+                        let dict_arc = match cached_dict {
+                            Some((ref cached_lang, ref dict)) if cached_lang == &lang => {
+                                Some(dict.clone())
+                            }
+                            _ => mgr.load_dictionary(&lang).ok(),
+                        };
+
+                        let new_cache = dict_arc.as_ref().map(|d| (lang, d.clone()));
+                        let results =
+                            check_source(&source, dict_arc.as_deref(), mgr.ignored_words());
+
+                        (results, new_cache)
+                    })
+                    .await;
+
+                // Update UI on main thread
+                let _ = handle.update(&mut async_cx, |panel, cx| {
+                    panel.diagnostics = diags;
+                    if let Some(cache) = new_cached_dict {
+                        panel.cached_dictionary = Some(cache);
+                    }
+                    cx.notify();
+                });
+            }
+        }));
     }
 }
 

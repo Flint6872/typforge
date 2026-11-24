@@ -6,6 +6,9 @@ pub mod dictionary;
 #[cfg(feature = "spellcheck")]
 pub mod checker;
 
+#[cfg(feature = "spellcheck")]
+pub use spellbook::Dictionary;
+
 use crate::edit::TextEdit;
 use std::ops::Range;
 
