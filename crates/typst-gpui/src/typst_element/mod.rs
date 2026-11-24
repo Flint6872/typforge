@@ -4,9 +4,6 @@ mod typst_curve;
 mod typst_point;
 mod utils;
 
-use typst_curve::TypstCurveExt;
-use typst_point::TypstPointExt;
-
 use crate::PreviewPanelEvent;
 use gpui_kit::{
     App, Bounds, Element, ElementId, EventEmitter, LayoutId, Pixels, Point, TransformationMatrix,
@@ -19,12 +16,14 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
     time::Instant,
 };
-
+use typastry::spellcheck::TextDiagnostic;
 use typst::{
     layout::{Frame, FrameItem},
     syntax::Span,
 };
+use typst_curve::TypstCurveExt;
 use typst_layout::PagedDocument;
+use typst_point::TypstPointExt;
 
 const DPI: f32 = 96.0;
 const PT_TO_PX: f32 = DPI / 72.0;
@@ -123,6 +122,7 @@ pub struct TypstElement {
     on_hit_map_updated: Option<Arc<Mutex<dyn FnMut(HitMap, &mut App) + Send + Sync + 'static>>>,
     show_cursor: bool,
     pub span_resolver: Option<Arc<dyn Fn(Span, u16) -> usize + Send + Sync + 'static>>,
+    diagnostics: Vec<TextDiagnostic>,
 }
 
 // Manual implementation of Debug for TypstElement
@@ -396,6 +396,28 @@ impl Element for TypstElement {
                 }
             }
         }
+
+        // --- Draw Diagnostic Underlines ---
+        for diag in &self.diagnostics {
+            let color = match diag.severity {
+                typastry::spellcheck::DiagnosticSeverity::Error => gpui_kit::rgb(0xFF4D4D), // Red for spelling
+                _ => gpui_kit::rgb(0xFFA500), // Amber for grammar
+            };
+
+            for glyph_info in &generated_hit_map.glyphs {
+                let glyph_end = glyph_info.byte_offset + glyph_info.byte_len;
+                if glyph_end > diag.range.start && glyph_info.byte_offset < diag.range.end {
+                    let underline_bounds = gpui_kit::Bounds {
+                        origin: gpui_kit::point(
+                            glyph_info.bounds.left(),
+                            glyph_info.bounds.bottom() - gpui_kit::px(1.0),
+                        ),
+                        size: gpui_kit::size(glyph_info.bounds.size.width, gpui_kit::px(1.5)),
+                    };
+                    window.paint_quad(gpui_kit::fill(underline_bounds, color));
+                }
+            }
+        }
     }
 }
 
@@ -425,6 +447,7 @@ impl TypstElement {
             on_hit_map_updated,
             show_cursor,
             span_resolver,
+            diagnostics: Vec::new(),
         }
     }
 

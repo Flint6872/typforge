@@ -68,6 +68,8 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     pub dictionary_manager: Arc<Mutex<DictionaryManager>>,
     cached_dictionary: Option<(String, Arc<Dictionary>)>,
 
+    pub active_menu_diagnostics: Vec<TextDiagnostic>, // how is this differnt than     pub diagnostics: Vec<TextDiagnostic>,
+
     // --- NEW WYSIWYG STATE FIELDS Visual editing & context menu---
     pub pending_transaction: Option<typastry::wysiwyg::MutationTransaction>,
     pub visual_edit_error: Option<String>,
@@ -144,6 +146,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             dictionary_manager,
             cached_dictionary: None,
 
+            active_menu_diagnostics: Vec::new(),
             pending_transaction: None,
             visual_edit_error: None,
             inspected_element: None,
@@ -607,6 +610,18 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             }
         }));
     }
+
+    pub fn show_context_menu(
+        &mut self,
+        props: Option<typastry::wysiwyg::ElementProperties>,
+        diagnostics: Vec<TextDiagnostic>,
+        _point: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.inspected_element = props;
+        self.active_menu_diagnostics = diagnostics;
+        cx.notify();
+    }
 }
 
 impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
@@ -718,11 +733,18 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                         let source = typst_syntax::Source::detached(&text);
                         let root = typst_syntax::LinkedNode::new(source.root());
 
-                        if let Some(leaf) = root.leaf_at(byte_offset, typst_syntax::Side::Before) {
-                            if let Some(props) = typastry::wysiwyg::inspect_element(leaf) {
-                                this.show_wysiwyg_context_menu(props, event.position, cx);
-                            }
-                        }
+                        // Query spell/grammar diagnostics at the clicked position
+                        let active_diags: Vec<TextDiagnostic> = this
+                            .diagnostics_at_offset(byte_offset)
+                            .into_iter()
+                            .cloned()
+                            .collect();
+
+                        let props = root
+                            .leaf_at(byte_offset, typst_syntax::Side::Before)
+                            .and_then(typastry::wysiwyg::inspect_element);
+
+                        this.show_context_menu(props, active_diags, event.position, cx);
                     }
                     cx.stop_propagation();
                 }),
@@ -861,152 +883,87 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                 None
             })
             // ==========================================
-            // PILLAR 3: INTROSPECTED CONTEXT MENU OVERLAY
+            // CONTEXT MENU OVERLAY (DIAGNOSTICS + INSPECTOR)
             // ==========================================
-            .children(if let Some(ref props) = self.inspected_element {
-                let element_type_title = props.element_type.to_uppercase();
-                Some(
-                    div()
-                        .id("wysiwyg-context-menu")
-                        .absolute()
-                        .top(px(20.0))
-                        .right(px(20.0))
-                        .w(px(280.0))
-                        .bg(rgb(0x2d2d2d))
-                        .border_1()
-                        .border_color(rgb(0x444444))
-                        .shadow_md()
-                        .rounded_md()
-                        .p_3()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .flex()
-                                .justify_between()
-                                .items_center()
-                                .border_b_1()
-                                .border_color(rgb(0x444444))
-                                .pb_1()
-                                .child(
-                                    div()
-                                        .text_color(rgb(0xffffff))
-                                        .font_semibold()
-                                        .child(format!("{} Component", element_type_title)),
-                                )
-                                .child(
-                                    div()
-                                        .id("close-context-menu")
-                                        .cursor(CursorStyle::PointingHand)
-                                        .text_color(rgb(0x888888))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.inspected_element = None;
-                                            cx.notify();
-                                        }))
-                                        .child("✕"),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .text_color(rgb(0xaaaaaa))
-                                .text_size(px(11.0))
-                                .child("Active Properties:"),
-                        )
-                        .children(
-                            props
-                                .active_args
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, (name, val))| {
-                                    let name_clone = name.clone();
-                                    let val_clone = val.clone();
-                                    div()
-                                        .id(ElementId::from(format!("active-arg-{}", idx)))
-                                        .flex()
-                                        .justify_between()
-                                        .items_center()
-                                        .text_color(rgb(0xdddddd))
-                                        .text_size(px(12.0))
-                                        .child(format!("{}:", name))
-                                        .child(
-                                            div()
-                                                .id(ElementId::from(format!("toggle-arg-{}", idx)))
-                                                .bg(rgb(0x3d3d3d))
-                                                .rounded_sm()
-                                                .px_2()
-                                                .py_0p5()
-                                                .cursor(CursorStyle::PointingHand)
-                                                .text_color(rgb(0x4a90e2))
-                                                .on_click(cx.listener(
-                                                    move |this, _, window, cx| {
-                                                        let next_val = match val_clone.as_str() {
-                                                            "red" => "blue",
-                                                            "blue" => "green",
-                                                            "green" => "red",
-                                                            "10pt" => "12pt",
-                                                            "12pt" => "14pt",
-                                                            "14pt" => "10pt",
-                                                            _ => "red",
-                                                        };
-                                                        this.apply_visual_edit(
-                                                            &name_clone,
-                                                            next_val,
-                                                            window,
-                                                            cx,
-                                                        );
-                                                    },
-                                                ))
-                                                .child(val.clone()),
-                                        )
-                                }),
-                        )
-                        .child(
-                            div()
-                                .text_color(rgb(0xaaaaaa))
-                                .text_size(px(11.0))
-                                .child("Add Properties (Schema):"),
-                        )
-                        .children(props.available_properties.iter().enumerate().map(
-                            |(idx, prop)| {
-                                let prop_clone = prop.clone();
+            .children(
+                if !self.active_menu_diagnostics.is_empty() || self.inspected_element.is_some() {
+                    Some(
+                        div()
+                            .id("wysiwyg-context-menu")
+                            .absolute()
+                            .top(px(20.0))
+                            .right(px(20.0))
+                            .w(px(280.0))
+                            .bg(rgb(0x2d2d2d))
+                            .border_1()
+                            .border_color(rgb(0x444444))
+                            .shadow_md()
+                            .rounded_md()
+                            .p_3()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            // 1. SPELL / GRAMMAR SUGGESTIONS SECTION
+                            .children(self.active_menu_diagnostics.iter().map(|diag| {
+                                let diag_clone = diag.clone();
                                 div()
-                                    .id(ElementId::from(format!("add-prop-{}", idx)))
-                                    .cursor(CursorStyle::PointingHand)
-                                    .bg(rgb(0x3a3a3a))
-                                    .hover(|style| style.bg(rgb(0x4a4a4a)))
-                                    .rounded_sm()
-                                    .px_2()
-                                    .py_1()
-                                    .text_color(rgb(0xdddddd))
-                                    .text_size(px(12.0))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        let default_val = match prop_clone.as_str() {
-                                            "fill" => "red",
-                                            "stroke" => "1pt",
-                                            "width" => "50pt",
-                                            "height" => "50pt",
-                                            "radius" => "4pt",
-                                            "size" => "11pt",
-                                            "font" => "\"Libertinus Serif\"",
-                                            "weight" => "\"bold\"",
-                                            "style" => "\"italic\"",
-                                            _ => "10pt",
-                                        };
-                                        this.apply_visual_edit(
-                                            &prop_clone,
-                                            default_val,
-                                            window,
-                                            cx,
-                                        );
+                                    .id("active-menu")
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0xff6b6b))
+                                            .font_semibold()
+                                            .text_size(px(11.0))
+                                            .child(diag.message.clone()),
+                                    )
+                                    .children(diag.suggestions.iter().take(4).map(|sugg| {
+                                        let sugg_str = sugg.clone();
+                                        let diag_for_click = diag_clone.clone();
+                                        div()
+                                            .id("suggestions")
+                                            .cursor(CursorStyle::PointingHand)
+                                            .bg(rgb(0x3a3a3a))
+                                            .hover(|style| style.bg(rgb(0x4a4a4a)))
+                                            .rounded_sm()
+                                            .px_2()
+                                            .py_1()
+                                            .text_color(rgb(0xffffff))
+                                            .text_size(px(12.0))
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                let edit = diag_for_click.to_text_edit(&sugg_str);
+                                                let mut new_text = this.source.clone();
+                                                new_text.replace_range(edit.range, &edit.new_text);
+                                                this.set_source(new_text.clone(), window, cx);
+                                                cx.emit(PreviewPanelEvent::SourceChanged(new_text));
+                                                this.active_menu_diagnostics.clear();
+                                                cx.notify();
+                                            }))
+                                            .child(format!("Replace with '{}'", sugg))
                                     }))
-                                    .child(format!("+ {}", prop))
-                            },
-                        )),
-                )
-            } else {
-                None
-            })
+                                    .child(
+                                        div()
+                                            .id("flagged-text")
+                                            .cursor(CursorStyle::PointingHand)
+                                            .text_color(rgb(0x888888))
+                                            .text_size(px(11.0))
+                                            .px_2()
+                                            .py_0p5()
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                let word = diag_clone.flagged_text.clone();
+                                                this.ignore_word(&word, cx);
+                                                this.active_menu_diagnostics.clear();
+                                                cx.notify();
+                                            }))
+                                            .child("➕ Add to Ignore List"),
+                                    )
+                            })), // ... Rest of the Inspector context menu ...
+                    )
+                } else {
+                    None
+                },
+            )
     }
 }
 
