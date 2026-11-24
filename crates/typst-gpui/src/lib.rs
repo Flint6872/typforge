@@ -5,7 +5,9 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::{sync::Arc, time::Duration};
 use typastry::spellcheck::{
-    Dictionary, TextDiagnostic, checker::check_source, dictionary::DictionaryManager,
+    Dictionary, TextDiagnostic,
+    checker::{HarperCache, check_source_with_harper},
+    dictionary::DictionaryManager,
     extractor::detect_document_language,
 };
 use typst_layout::PagedDocument;
@@ -62,16 +64,21 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     cursor_visible: bool,
     is_hovering_link: bool,
     _blink_task: Option<Task<()>>,
-    compile_task: Option<Task<()>>,
+    is_compiling: bool,
+    pending_compile_source: Option<String>,
+    pending_compile_path: Option<Option<std::path::PathBuf>>,
 
     // --- NEW SPELLCHECK & DIAGNOSTICS STATE FIELDS ---
     pub diagnostics: Vec<TextDiagnostic>,
     spellcheck_task: Option<Task<()>>,
     pub dictionary_manager: Arc<Mutex<DictionaryManager>>,
     cached_dictionary: Option<(String, Arc<Dictionary>)>,
+    cached_harper: Option<HarperCache>,
+    cached_sources: Arc<HashMap<typst::syntax::FileId, Arc<typst_syntax::Source>>>,
+    cached_span_resolver:
+        Option<Arc<dyn Fn(typst::syntax::Span, u16) -> usize + Send + Sync + 'static>>,
 
-    pub active_menu_diagnostics: Vec<TextDiagnostic>, // how is this differnt than     pub diagnostics: Vec<TextDiagnostic>,
-
+    pub active_menu_diagnostics: Vec<TextDiagnostic>,
     // --- NEW WYSIWYG STATE FIELDS Visual editing & context menu---
     pub pending_transaction: Option<typastry::wysiwyg::MutationTransaction>,
     pub visual_edit_error: Option<String>,
@@ -141,12 +148,17 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             cursor_visible: true,
             is_hovering_link: false,
             _blink_task: Some(blink_task),
-            compile_task: None,
+            is_compiling: false,
+            pending_compile_source: None,
+            pending_compile_path: None,
 
             diagnostics: Vec::new(),
             spellcheck_task: None,
             dictionary_manager,
             cached_dictionary: None,
+            cached_harper: None,
+            cached_sources: Arc::new(HashMap::new()),
+            cached_span_resolver: None,
 
             active_menu_diagnostics: Vec::new(),
             pending_transaction: None,
@@ -184,11 +196,14 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
     /// Update the Typst source code and trigger a re-render.
 
     pub fn set_source(&mut self, source: String, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.source == source {
+            return;
+        }
         self.source = source.clone();
         self.last_text_len = source.len();
-        self.world.lock().set_source(source);
+        self.pending_compile_source = Some(source);
         self.compile(cx);
-        self.schedule_spellcheck(cx); // <-- ADDED
+        self.schedule_spellcheck(cx);
         cx.notify();
     }
 
@@ -205,55 +220,128 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         cx.notify();
     }
 
-    /// Asynchronous compilation logic running on background thread.
+    /// Asynchronous compilation logic running on background thread (single-flight coalescing).
     fn compile(&mut self, cx: &mut Context<Self>) {
+        if self.is_compiling {
+            return;
+        }
+
+        let Some(source_to_compile) = self.pending_compile_source.take() else {
+            return;
+        };
+        let pending_path = self.pending_compile_path.take();
+
+        self.is_compiling = true;
         let world = self.world.clone();
-
-        // Cancel any pending compilation task to debounce rapid typing
-        self.compile_task = None;
-
         let handle = cx.weak_entity();
-        self.compile_task = Some(cx.spawn(|_view, spawned_async_cx: &mut AsyncApp| {
+
+        cx.spawn(move |_view, spawned_async_cx: &mut AsyncApp| {
             let mut async_cx = spawned_async_cx.clone();
             async move {
-                // Debounce compile requests by 50ms during continuous typing
-                async_cx
+                let world_for_bg = world.clone();
+                let (compiled_result, cached_sources_arc, used_fonts) = async_cx
                     .background_executor()
-                    .timer(Duration::from_millis(50))
-                    .await;
+                    .spawn(async move {
+                        let start_compile = std::time::Instant::now();
+                        let compiled_result: typst::diag::Warned<
+                            typst::diag::SourceResult<PagedDocument>,
+                        > = {
+                            let mut world_guard = world_for_bg.lock();
 
-                // Perform heavy CPU-bound compile on background executor
-                let start_compile = std::time::Instant::now();
-                let compiled_result = {
-                    let world_guard = world.lock();
-                    typst::compile(&*world_guard)
-                };
-                println!(
-                    "BENCHMARK: typst::compile took {:?}",
-                    start_compile.elapsed()
-                );
+                            // Apply path update in the background if we have one
+                            if let Some(path) = pending_path {
+                                world_guard.set_main_document_info(path, source_to_compile.clone());
+                            }
+
+                            world_guard.set_source(source_to_compile);
+                            typst::compile(&*world_guard)
+                        };
+                        println!(
+                            "BENCHMARK: typst::compile took {:?}",
+                            start_compile.elapsed()
+                        );
+
+                        let mut collected_sources_map = HashMap::new();
+                        let mut used_fonts = std::collections::HashSet::new();
+
+                        if let Ok(ref document) = compiled_result.output {
+                            let mut referenced_ids = std::collections::HashSet::new();
+                            for page in document.pages() {
+                                collect_file_ids_from_frame_recursive(
+                                    &page.frame,
+                                    &mut referenced_ids,
+                                );
+                                collect_fonts_from_frame_recursive_static(
+                                    &page.frame,
+                                    &mut used_fonts,
+                                );
+                            }
+
+                            let world_guard = world_for_bg.lock();
+                            let main_id = world_guard.main_file_id();
+                            if let Ok(main_source) = world_guard.source(main_id) {
+                                collected_sources_map.insert(main_id, Arc::new(main_source));
+                            }
+                            for id in referenced_ids {
+                                if !collected_sources_map.contains_key(&id) {
+                                    if let Ok(source) = world_guard.source(id) {
+                                        collected_sources_map.insert(id, Arc::new(source));
+                                    }
+                                }
+                            }
+                        }
+
+                        (compiled_result, Arc::new(collected_sources_map), used_fonts)
+                    })
+                    .await;
 
                 // Jump back to the main thread to update the UI
                 let _ = handle.update(&mut async_cx, |panel, cx| {
+                    panel.is_compiling = false;
+
                     let mut all_diags: Vec<typst::diag::SourceDiagnostic> =
                         compiled_result.warnings.into_iter().collect();
 
                     match compiled_result.output {
                         Ok(document) => {
                             let doc: Arc<PagedDocument> = Arc::new(document);
-                            panel.world.lock().set_document(doc.clone());
-                            panel.sync_fonts_to_gpui(&doc, cx);
+                            panel.sync_fonts_set_to_gpui(used_fonts, cx);
+
+                            let span_sources = cached_sources_arc.clone();
+                            let world_fallback = panel.world.clone();
+                            panel.cached_sources = cached_sources_arc;
+                            panel.cached_span_resolver =
+                                Some(Arc::new(move |span: typst::syntax::Span, offset: u16| {
+                                    if let Some(file_id) = span.id() {
+                                        if let Some(source) = span_sources.get(&file_id) {
+                                            if let typst::syntax::SpanKind::Number { num, .. } =
+                                                span.get()
+                                            {
+                                                if let Some(range) = source.range(num, None) {
+                                                    return range.start + offset as usize;
+                                                }
+                                            }
+                                        } else if let Ok(source) =
+                                            world_fallback.lock().source(file_id)
+                                        {
+                                            if let typst::syntax::SpanKind::Number { num, .. } =
+                                                span.get()
+                                            {
+                                                if let Some(range) = source.range(num, None) {
+                                                    return range.start + offset as usize;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    0
+                                }));
+
                             panel.document = Some(doc);
-
-                            // Emit warnings even if compilation succeeded!
                             cx.emit(PreviewPanelEvent::DiagnosticsChanged(all_diags));
-
                             panel.pending_transaction = None;
                         }
                         Err(errors) => {
                             all_diags.extend(errors);
-
-                            // Emit both warnings and errors
                             cx.emit(PreviewPanelEvent::DiagnosticsChanged(all_diags.clone()));
 
                             if let Some(_tx) = panel.pending_transaction.take() {
@@ -267,37 +355,33 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
 
                                 panel.visual_edit_error =
                                     Some(format!("Edit Reverted: {}", error_msg));
-                                // ...
                             }
                         }
                     }
 
                     cx.notify();
+
+                    // If more keystrokes arrived while compiling, immediately start one compile for the latest text
+                    if panel.pending_compile_source.is_some() {
+                        panel.compile(cx);
+                    }
                 });
             }
-        }));
+        })
+        .detach();
     }
 
     /// Updates the GpuiWorld's main document path and content.
     pub fn update_document_info(
         &mut self,
         path: Option<std::path::PathBuf>,
-        content: String,
-        _window: &mut Window, // Marked as unused
-        cx: &mut Context<Self>,
+        _content: String,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
     ) {
-        // println!(
-        //     "DEBUG: PreviewPanel::update_document_info called. Content length: {}",
-        //     content.len()
-        // );
-        self.world
-            .lock()
-            .set_main_document_info(path, content.clone());
-
-        // REMOVED redundant input_state.update here.
-        // It is already handled by set_source in main.rs.
-
-        cx.notify();
+        // We store the path update to be applied in the background compile task.
+        // The content is handled by set_source which follows immediately.
+        self.pending_compile_path = Some(path);
     }
 
     pub fn export_pdf(&self) -> Option<Vec<u8>> {
@@ -319,6 +403,34 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             .filter(|bytes| !bytes.is_empty())
         // filter ensures we return None if the Vec is empty,
         // triggering your error message in main.rs
+    }
+
+    fn sync_fonts_set_to_gpui(
+        &mut self,
+        used_fonts: std::collections::HashSet<typst::text::Font>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut fonts_to_add = Vec::new();
+        cx.update_global::<GpuiRegisteredFonts, _>(|cache, _| {
+            for font in used_fonts {
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                use std::hash::Hash;
+                font.hash(&mut hasher);
+                let id = std::hash::Hasher::finish(&hasher);
+
+                if cache.0.insert(id) {
+                    fonts_to_add.push(font);
+                }
+            }
+        });
+
+        if !fonts_to_add.is_empty() {
+            let data_to_add: Vec<_> = fonts_to_add
+                .iter()
+                .map(|f| std::borrow::Cow::Owned(f.data().to_vec()))
+                .collect();
+            let _ = cx.text_system().add_fonts(data_to_add);
+        }
     }
 
     fn sync_fonts_to_gpui(&mut self, document: &PagedDocument, cx: &mut Context<Self>) {
@@ -553,18 +665,20 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
 
     /// Asynchronously runs spell/grammar checks on GPUI's background executor.
     pub fn schedule_spellcheck(&mut self, cx: &mut Context<Self>) {
-        let text = self.source.clone();
-        if text.is_empty() {
+        if self.source.is_empty() {
             self.diagnostics.clear();
             cx.notify();
             return;
         }
+
+        let text = Arc::new(self.source.clone());
 
         // Cancel any pending spellcheck task to debounce fast typing
         self.spellcheck_task = None;
 
         let dict_mgr_arc = self.dictionary_manager.clone();
         let cached_dict = self.cached_dictionary.clone();
+        let cached_harper = self.cached_harper.clone();
         let handle = cx.weak_entity();
 
         self.spellcheck_task = Some(cx.spawn(|_view, spawned_async_cx: &mut AsyncApp| {
@@ -577,10 +691,10 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                     .await;
 
                 // Heavy AST prose extraction and dictionary checking on background thread
-                let (diags, new_cached_dict) = async_cx
+                let (diags, new_cached_dict, new_cached_harper) = async_cx
                     .background_executor()
                     .spawn(async move {
-                        let source = typst_syntax::Source::detached(&text);
+                        let source = typst_syntax::Source::detached(text.as_str());
                         let lang = detect_document_language(&source);
 
                         let mgr = dict_mgr_arc.lock();
@@ -593,11 +707,21 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                             _ => mgr.load_dictionary(&lang).ok(),
                         };
 
-                        let new_cache = dict_arc.as_ref().map(|d| (lang, d.clone()));
-                        let results =
-                            check_source(&source, dict_arc.as_deref(), mgr.ignored_words());
+                        let harper_cache = if lang.starts_with("en") {
+                            Some(cached_harper.unwrap_or_else(HarperCache::new_american))
+                        } else {
+                            cached_harper
+                        };
 
-                        (results, new_cache)
+                        let new_cache = dict_arc.as_ref().map(|d| (lang, d.clone()));
+                        let results = check_source_with_harper(
+                            &source,
+                            dict_arc.as_deref(),
+                            mgr.ignored_words(),
+                            harper_cache.as_ref(),
+                        );
+
+                        (results, new_cache, harper_cache)
                     })
                     .await;
 
@@ -606,6 +730,9 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                     panel.diagnostics = diags;
                     if let Some(cache) = new_cached_dict {
                         panel.cached_dictionary = Some(cache);
+                    }
+                    if let Some(harper) = new_cached_harper {
+                        panel.cached_harper = Some(harper);
                     }
                     cx.notify();
                 });
@@ -663,10 +790,6 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                                 cx.emit(PreviewPanelEvent::SourceChanged(new_text.to_string()));
                             }
                         }
-                    }
-                    if let Some(ref new_text) = res.new_source {
-                        this.set_source(new_text.clone(), window, cx);
-                        cx.emit(PreviewPanelEvent::SourceChanged(new_text.to_string()));
                     }
 
                     if let Some(new_sel) = res.new_selection {
@@ -806,88 +929,6 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                             .size_full()
                             .items_start()
                             .child(if let Some(doc) = &self.document {
-                                // Create the resolver closure accessing the world
-                                let world_clone = self.world.clone();
-
-                                // --- OPTIMIZATION: Pre-collect all unique FileIds and their Sources ---
-                                let mut collected_sources_map = HashMap::new();
-
-                                // Get the FileId of the main document from the world
-                                let main_doc_file_id = world_clone.lock().main_file_id();
-                                if let Ok(main_source) = world_clone.lock().source(main_doc_file_id)
-                                {
-                                    collected_sources_map
-                                        .insert(main_doc_file_id, Arc::new(main_source));
-                                }
-                                // Removed the `if let Some(main_id) = ...` guard here,
-                                // as `main_file_id()` on the trait now returns `FileId` directly.
-
-                                // 2. Recursively collect all FileIds referenced within the document's frames
-                                let mut all_referenced_file_ids_in_frames =
-                                    std::collections::HashSet::new();
-                                for page in doc.pages() {
-                                    collect_file_ids_from_frame_recursive(
-                                        &page.frame,
-                                        &mut all_referenced_file_ids_in_frames,
-                                    );
-                                }
-
-                                // 3. Fetch sources for any referenced FileIds not already in our map
-                                for id in &all_referenced_file_ids_in_frames {
-                                    if !collected_sources_map.contains_key(id) {
-                                        if let Ok(source) = world_clone.lock().source(*id) {
-                                            collected_sources_map.insert(*id, Arc::new(source));
-                                        }
-                                    }
-                                }
-
-                                let cached_sources_arc = Arc::new(collected_sources_map);
-
-                                // The span_resolver now closes over the pre-collected sources.
-                                // We clone `cached_sources_arc` here to move a new Arc into the closure.
-                                let span_resolver_cached_sources = cached_sources_arc.clone(); // <--- CLONE HERE
-                                let span_resolver = Some(std::sync::Arc::new(
-                                    move |span: typst::syntax::Span, offset: u16| {
-                                        if let Some(file_id) = span.id() {
-                                            // Look up source in our cached map first
-                                            if let Some(source) =
-                                                span_resolver_cached_sources.get(&file_id)
-                                            {
-                                                // <--- USE CLONED ARC
-                                                if let typst::syntax::SpanKind::Number {
-                                                    num, ..
-                                                } = span.get()
-                                                {
-                                                    if let Some(range) = source.range(num, None) {
-                                                        return range.start + offset as usize;
-                                                    }
-                                                }
-                                            } else {
-                                                // Fallback: If a FileId is not in the cached map (e.g., from an implicitly imported package),
-                                                // we still need to get it from the world. This path is less performant but necessary for robustness.
-                                                if let Ok(source) =
-                                                    world_clone.lock().source(file_id)
-                                                {
-                                                    if let typst::syntax::SpanKind::Number {
-                                                        num,
-                                                        ..
-                                                    } = span.get()
-                                                    {
-                                                        if let Some(range) = source.range(num, None)
-                                                        {
-                                                            return range.start + offset as usize;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        0
-                                    },
-                                )
-                                    as std::sync::Arc<
-                                        dyn Fn(typst::syntax::Span, u16) -> usize + Send + Sync,
-                                    >);
-
                                 TypstElement::new(
                                     doc.clone(),
                                     self.render_state.clone(),
@@ -895,9 +936,9 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                                     self.selection_range(),
                                     self.on_hit_map_updated_callback.clone(),
                                     self.cursor_visible,
-                                    span_resolver,
+                                    self.cached_span_resolver.clone(),
                                     self.diagnostics.clone(),
-                                    cached_sources_arc,
+                                    self.cached_sources.clone(),
                                 )
                                 .with_zoom(self.zoom)
                                 .into_any_element()
@@ -1260,6 +1301,23 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
     ) {
         self.inspected_element = Some(props);
         cx.notify();
+    }
+}
+
+fn collect_fonts_from_frame_recursive_static(
+    frame: &typst::layout::Frame,
+    fonts_set: &mut std::collections::HashSet<typst::text::Font>,
+) {
+    for (_, item) in frame.items() {
+        match item {
+            typst::layout::FrameItem::Text(text) => {
+                fonts_set.insert(text.font.font().clone());
+            }
+            typst::layout::FrameItem::Group(group) => {
+                collect_fonts_from_frame_recursive_static(&group.frame, fonts_set);
+            }
+            _ => {}
+        }
     }
 }
 

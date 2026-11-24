@@ -38,6 +38,7 @@ pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> {
     pub active_selection: Option<std::ops::Range<usize>>,
     pub current_screen_class: crate::workspace::render::ScreenClass,
     pub show_mobile_menu: bool,
+    ribbon_inspect_task: Option<Task<()>>,
 }
 
 impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
@@ -275,79 +276,76 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                             });
                         }
                     }
-                    PreviewPanelEvent::CursorMoved { offset, selection } => {
-                        // 1. Store the active selection on TypstNoteView
-                        this_note_view.active_selection = selection.clone();
+                                        PreviewPanelEvent::CursorMoved { offset, selection } => {
+                                            // 1. Store the active selection on TypstNoteView immediately
+                                            this_note_view.active_selection = selection.clone();
 
-                        // 2. Get active document text
-                        let content = this_note_view
-                            .editor_panel
-                            .read(cx_for_note_view)
-                            .active_file_path
-                            .as_ref()
-                            .and_then(|path| {
-                                this_note_view
-                                    .editor_panel
-                                    .read(cx_for_note_view)
-                                    .open_files
-                                    .iter()
-                                    .find(|f| &f.path == path)
-                                    .map(|f| {
-                                        f.editor_state.read(cx_for_note_view).text().to_string()
-                                    })
-                            });
+                                            // 2. Read active document text and editor cursor
+                                            let editor = this_note_view.editor_panel.read(cx_for_note_view);
+                                            let active_info = editor.active_file_path.as_ref().and_then(|path| {
+                                                editor.open_files.iter().find(|f| &f.path == path).map(|f| {
+                                                    let state = f.editor_state.read(cx_for_note_view);
+                                                    (state.text().to_string(), state.cursor())
+                                                })
+                                            });
 
-                        if let Some(source_code) = content {
-                            // Use selection start/end or cursor offset to detect properties
-                            let target_offset =
-                                selection.as_ref().map(|r| r.start).unwrap_or(*offset);
-                            let active_props = typastry::edit::detect_properties_at_offset(
-                                &source_code,
-                                target_offset,
-                            );
+                                            if let Some((source_code, editor_cursor)) = active_info {
+                                                let target_offset =
+                                                    selection.as_ref().map(|r| r.start).unwrap_or(*offset);
+                                                let window_handle = this_note_view.window_handle.clone();
+                                                let ribbon_panel_handle = this_note_view.ribbon_panel.clone();
 
-                            // Clone the necessary values to move into the nested closure
-                            let props_for_ribbon = active_props.clone();
-                            let ribbon_cursor_context =
-                                this_note_view // Use the existing cursor_context field
-                                    .editor_panel
-                                    .read(cx_for_note_view)
-                                    .open_files
-                                    .iter()
-                                    .find(|f| {
-                                        &f.path
-                                            == this_note_view
-                                                .editor_panel
-                                                .read(cx_for_note_view)
-                                                .active_file_path
-                                                .as_ref()
-                                                .unwrap()
-                                    })
-                                    .map(|f| f.editor_state.read(cx_for_note_view).cursor())
-                                    .map(|cursor| {
-                                        let source = typst::syntax::Source::detached(&source_code);
-                                        typastry::inspector::TypastryInspector::inspect_cursor(
-                                            &source, cursor,
-                                        )
-                                    })
-                                    .unwrap_or(typastry::inspector::CursorContext::InMarkup);
+                                                this_note_view.ribbon_inspect_task = None;
+                                                this_note_view.ribbon_inspect_task = Some(cx_for_note_view.spawn(
+                                                    move |_, spawned_async_cx: &mut AsyncApp| {
+                                                        let mut async_cx = spawned_async_cx.clone();
+                                                        async move {
+                                                            async_cx
+                                                                .background_executor()
+                                                                .timer(std::time::Duration::from_millis(60))
+                                                                .await;
 
-                            let window_handle = this_note_view.window_handle.clone();
-                            let ribbon_panel_handle = this_note_view.ribbon_panel.clone();
+                                                            let (props_for_ribbon, ribbon_cursor_context) = async_cx
+                                                                .background_executor()
+                                                                .spawn(async move {
+                                                                    let active_props =
+                                                                        typastry::edit::detect_properties_at_offset(
+                                                                            &source_code,
+                                                                            target_offset,
+                                                                        );
+                                                                    let source =
+                                                                        typst::syntax::Source::detached(&source_code);
+                                                                    let ctx =
+                                                                        typastry::inspector::TypastryInspector::inspect_cursor(
+                                                                            &source,
+                                                                            editor_cursor,
+                                                                        );
+                                                                    (active_props, ctx)
+                                                                })
+                                                                .await;
 
-                            let _ =
-                                window_handle.update(cx_for_note_view, move |_, window, app_cx| {
-                                    ribbon_panel_handle.update(app_cx, |ribbon, ribbon_cx| {
-                                        ribbon.update_active_properties(
-                                            &props_for_ribbon,      // Use the cloned variable
-                                            &ribbon_cursor_context, // Use the cloned variable
-                                            window,
-                                            ribbon_cx, // Use ribbon_cx here, not cx
-                                        );
-                                    });
-                                });
-                        }
-                    }
+                                                            let _ = window_handle.update(
+                                                                &mut async_cx,
+                                                                move |_, window, app_cx| {
+                                                                    ribbon_panel_handle.update(
+                                                                        app_cx,
+                                                                        |ribbon, ribbon_cx| {
+                                                                            ribbon.update_active_properties(
+                                                                                &props_for_ribbon,
+                                                                                &ribbon_cursor_context,
+                                                                                window,
+                                                                                ribbon_cx,
+                                                                            );
+                                                                        },
+                                                                    );
+                                                                },
+                                                            );
+                                                        }
+                                                    },
+                                                ));
+                                            }
+                                        }
+
                     PreviewPanelEvent::UndoRequested => {
                         let editor_panel_handle = this_note_view.editor_panel.clone();
                         let window_handle = this_note_view.window_handle.clone();
@@ -478,6 +476,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
             has_diagnostics: false, // Initial state
             current_screen_class: initial_screen_class,
             show_mobile_menu: false,
+            ribbon_inspect_task: None,
         };
 
         note_view.update_dock_layout(window, cx);

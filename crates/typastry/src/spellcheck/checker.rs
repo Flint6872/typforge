@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use harper_core::Document;
 use harper_core::linting::{LintGroup, Linter};
@@ -11,32 +11,60 @@ use typst_syntax::Source;
 use super::extractor::{ProseBlock, detect_document_language, extract_prose_blocks};
 use super::{DiagnosticSeverity, DiagnosticSource, TextDiagnostic};
 
+#[derive(Clone)]
+pub struct HarperCache {
+    pub dict: Arc<FstDictionary>,
+    pub linter: Arc<Mutex<LintGroup>>,
+}
+
+impl HarperCache {
+    pub fn new_american() -> Self {
+        let dict = FstDictionary::curated();
+        let linter = LintGroup::new_curated(dict.clone(), harper_core::Dialect::American);
+        Self {
+            dict,
+            linter: Arc::new(Mutex::new(linter)),
+        }
+    }
+}
+
 pub fn check_source(
     source: &Source,
     spellbook_dict: Option<&Dictionary>,
     ignored_words: &HashSet<String>,
 ) -> Vec<TextDiagnostic> {
     let lang = detect_document_language(source);
+    let harper = if lang.starts_with("en") {
+        Some(HarperCache::new_american())
+    } else {
+        None
+    };
+    check_source_with_harper(source, spellbook_dict, ignored_words, harper.as_ref())
+}
+
+pub fn check_source_with_harper(
+    source: &Source,
+    spellbook_dict: Option<&Dictionary>,
+    ignored_words: &HashSet<String>,
+    harper: Option<&HarperCache>,
+) -> Vec<TextDiagnostic> {
+    let lang = detect_document_language(source);
     let is_english = lang.starts_with("en");
     let blocks = extract_prose_blocks(source);
     let mut diagnostics = Vec::new();
 
-    let harper_dict: Option<Arc<FstDictionary>> = if is_english {
-        Some(FstDictionary::curated())
+    let mut harper_guard = if is_english {
+        harper.and_then(|h| h.linter.lock().ok().map(|g| (&h.dict, g)))
     } else {
         None
     };
-
-    let mut harper_linter = harper_dict
-        .as_ref()
-        .map(|dict| LintGroup::new_curated(dict.clone(), harper_core::Dialect::American));
 
     for block in &blocks {
         if let Some(dict) = spellbook_dict {
             check_spellbook_block(block, dict, ignored_words, source.text(), &mut diagnostics);
         }
 
-        if let (Some(dict), Some(linter)) = (&harper_dict, &mut harper_linter) {
+        if let Some((dict, linter)) = harper_guard.as_mut() {
             check_harper_block(block, dict, linter, source.text(), &mut diagnostics);
         }
     }

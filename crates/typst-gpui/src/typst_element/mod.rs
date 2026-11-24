@@ -95,6 +95,7 @@ pub struct TypstRenderState {
     pub animation_cache: Mutex<HashMap<gpui_kit::ImageId, AnimationState>>,
     pub has_active_animations: AtomicBool,
     pub gradient_cache: Mutex<HashMap<GradientCacheKey, Arc<gpui_kit::Image>>>, // <-- ADDED
+    pub hit_map_layout_key: Mutex<Option<(usize, u32, i32, i32)>>,
 }
 
 impl Default for TypstRenderState {
@@ -104,10 +105,10 @@ impl Default for TypstRenderState {
             animation_cache: Mutex::new(HashMap::new()),
             has_active_animations: AtomicBool::new(false),
             gradient_cache: Mutex::new(HashMap::new()), // <-- ADDED
+            hit_map_layout_key: Mutex::new(None),
         }
     }
 }
-
 // Our custom GPUI element for rendering Typst content.
 pub struct TypstElement {
     id: ElementId,
@@ -237,6 +238,22 @@ impl Element for TypstElement {
         let mut generated_hit_map: HitMap = HitMap::default();
         let page_margin_px = gpui_kit::px(self.page_margin * self.zoom);
 
+        let layout_key = (
+            Arc::as_ptr(&self.document) as usize,
+            self.zoom.to_bits(),
+            (bounds.origin.x.as_f32() * 10.0) as i32,
+            (bounds.origin.y.as_f32() * 10.0) as i32,
+        );
+        let layout_changed = {
+            let mut key_guard = self.render_state.hit_map_layout_key.lock();
+            if *key_guard != Some(layout_key) {
+                *key_guard = Some(layout_key);
+                true
+            } else {
+                false
+            }
+        };
+
         let mut current_page_screen_y = bounds.origin.y; // For actual painting
         let mut y_offset_from_top = Pixels::ZERO; // For STABLE hit-mapping
 
@@ -248,12 +265,14 @@ impl Element for TypstElement {
             let page_height = Pixels::from(page.frame.height().to_pt() as f32 * scale_factor);
             let page_bottom_screen_y = current_page_screen_y + page_height;
 
-            self.collect_anchors_recursive(
-                &page.frame,
-                y_offset_from_top,
-                scale_factor,
-                &mut generated_hit_map,
-            );
+            if layout_changed {
+                self.collect_anchors_recursive(
+                    &page.frame,
+                    y_offset_from_top,
+                    scale_factor,
+                    &mut generated_hit_map,
+                );
+            }
 
             // 2. CHECK INTERSECTION: Is this page inside the visible screen area?
             let is_visible =
@@ -305,10 +324,11 @@ impl Element for TypstElement {
         }
         // Immutable borrow of self.document.pages ends here.
 
-        if let Some(callback_mutex) = &self.on_hit_map_updated {
-            // Lock the mutex to get mutable access to the FnMut closure
-            let mut locked_callback = callback_mutex.lock();
-            locked_callback(generated_hit_map.clone(), cx); // Now you can call it
+        if layout_changed {
+            if let Some(callback_mutex) = &self.on_hit_map_updated {
+                let mut locked_callback = callback_mutex.lock();
+                locked_callback(generated_hit_map.clone(), cx);
+            }
         }
 
         // --- Draw Selection Highlight ---
