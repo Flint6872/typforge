@@ -73,6 +73,7 @@ impl GpuiWorld {
     }
 
     pub fn set_main_document_info(&mut self, document_path: Option<PathBuf>, content: String) {
+        // <--- KEEP THIS AS set_main_document_info
         let is_switching = document_path != self.current_document_physical_path;
         self.source_text = content;
 
@@ -114,6 +115,7 @@ impl GpuiWorld {
 
     /// Helper to resolve a Typst FileId to a physical path on disk.
     fn resolve(&self, id: FileId) -> FileResult<PathBuf> {
+        // ... existing resolve logic ...
         match id.root() {
             VirtualRoot::Project => Ok(self.root.join(id.vpath().get_without_slash())),
             VirtualRoot::Package(spec) => {
@@ -311,6 +313,10 @@ impl TypstGpuiWorld for GpuiWorld {
 
     fn set_main_document_info(&mut self, path: Option<std::path::PathBuf>, content: String) {
         self.set_main_document_info(path, content);
+    }
+
+    fn main_file_id(&self) -> FileId {
+        self.main_file_id
     }
 }
 

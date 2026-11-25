@@ -1,5 +1,7 @@
 pub mod edit;
 pub mod inspector;
+#[cfg(feature = "spellcheck")]
+pub mod spellcheck;
 pub mod syntax;
 pub mod wysiwyg;
 
@@ -16,3 +18,5 @@ pub use typst_ide::IdeWorld;
 pub use inspector::TypastryJump;
 
 pub use inspector::{CursorContext, TypastryInspector};
+
+pub use typst_syntax::Source;

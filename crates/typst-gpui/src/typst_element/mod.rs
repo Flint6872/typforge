@@ -4,9 +4,6 @@ mod typst_curve;
 mod typst_point;
 mod utils;
 
-use typst_curve::TypstCurveExt;
-use typst_point::TypstPointExt;
-
 use crate::PreviewPanelEvent;
 use gpui_kit::{
     App, Bounds, Element, ElementId, EventEmitter, LayoutId, Pixels, Point, TransformationMatrix,
@@ -19,12 +16,14 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
     time::Instant,
 };
-
+use typastry::spellcheck::TextDiagnostic;
 use typst::{
     layout::{Frame, FrameItem},
-    syntax::Span,
+    syntax::{FileId, Span},
 };
+use typst_curve::TypstCurveExt;
 use typst_layout::PagedDocument;
+use typst_point::TypstPointExt;
 
 const DPI: f32 = 96.0;
 const PT_TO_PX: f32 = DPI / 72.0;
@@ -96,6 +95,7 @@ pub struct TypstRenderState {
     pub animation_cache: Mutex<HashMap<gpui_kit::ImageId, AnimationState>>,
     pub has_active_animations: AtomicBool,
     pub gradient_cache: Mutex<HashMap<GradientCacheKey, Arc<gpui_kit::Image>>>, // <-- ADDED
+    pub hit_map_layout_key: Mutex<Option<(usize, u32, i32, i32)>>,
 }
 
 impl Default for TypstRenderState {
@@ -105,10 +105,10 @@ impl Default for TypstRenderState {
             animation_cache: Mutex::new(HashMap::new()),
             has_active_animations: AtomicBool::new(false),
             gradient_cache: Mutex::new(HashMap::new()), // <-- ADDED
+            hit_map_layout_key: Mutex::new(None),
         }
     }
 }
-
 // Our custom GPUI element for rendering Typst content.
 pub struct TypstElement {
     id: ElementId,
@@ -123,6 +123,8 @@ pub struct TypstElement {
     on_hit_map_updated: Option<Arc<Mutex<dyn FnMut(HitMap, &mut App) + Send + Sync + 'static>>>,
     show_cursor: bool,
     pub span_resolver: Option<Arc<dyn Fn(Span, u16) -> usize + Send + Sync + 'static>>,
+    diagnostics: Vec<TextDiagnostic>,
+    cached_sources: Arc<HashMap<FileId, Arc<typst_syntax::Source>>>,
 }
 
 // Manual implementation of Debug for TypstElement
@@ -236,6 +238,22 @@ impl Element for TypstElement {
         let mut generated_hit_map: HitMap = HitMap::default();
         let page_margin_px = gpui_kit::px(self.page_margin * self.zoom);
 
+        let layout_key = (
+            Arc::as_ptr(&self.document) as usize,
+            self.zoom.to_bits(),
+            (bounds.origin.x.as_f32() * 10.0) as i32,
+            (bounds.origin.y.as_f32() * 10.0) as i32,
+        );
+        let layout_changed = {
+            let mut key_guard = self.render_state.hit_map_layout_key.lock();
+            if *key_guard != Some(layout_key) {
+                *key_guard = Some(layout_key);
+                true
+            } else {
+                false
+            }
+        };
+
         let mut current_page_screen_y = bounds.origin.y; // For actual painting
         let mut y_offset_from_top = Pixels::ZERO; // For STABLE hit-mapping
 
@@ -247,12 +265,14 @@ impl Element for TypstElement {
             let page_height = Pixels::from(page.frame.height().to_pt() as f32 * scale_factor);
             let page_bottom_screen_y = current_page_screen_y + page_height;
 
-            self.collect_anchors_recursive(
-                &page.frame,
-                y_offset_from_top,
-                scale_factor,
-                &mut generated_hit_map,
-            );
+            if layout_changed {
+                self.collect_anchors_recursive(
+                    &page.frame,
+                    y_offset_from_top,
+                    scale_factor,
+                    &mut generated_hit_map,
+                );
+            }
 
             // 2. CHECK INTERSECTION: Is this page inside the visible screen area?
             let is_visible =
@@ -304,10 +324,11 @@ impl Element for TypstElement {
         }
         // Immutable borrow of self.document.pages ends here.
 
-        if let Some(callback_mutex) = &self.on_hit_map_updated {
-            // Lock the mutex to get mutable access to the FnMut closure
-            let mut locked_callback = callback_mutex.lock();
-            locked_callback(generated_hit_map.clone(), cx); // Now you can call it
+        if layout_changed {
+            if let Some(callback_mutex) = &self.on_hit_map_updated {
+                let mut locked_callback = callback_mutex.lock();
+                locked_callback(generated_hit_map.clone(), cx);
+            }
         }
 
         // --- Draw Selection Highlight ---
@@ -396,6 +417,28 @@ impl Element for TypstElement {
                 }
             }
         }
+
+        // --- Draw Diagnostic Underlines ---
+        for diag in &self.diagnostics {
+            let color = match diag.severity {
+                typastry::spellcheck::DiagnosticSeverity::Error => gpui_kit::rgb(0xFF4D4D), // Red for spelling
+                _ => gpui_kit::rgb(0xFFA500), // Amber for grammar
+            };
+
+            for glyph_info in &generated_hit_map.glyphs {
+                let glyph_end = glyph_info.byte_offset + glyph_info.byte_len;
+                if glyph_end > diag.range.start && glyph_info.byte_offset < diag.range.end {
+                    let underline_bounds = gpui_kit::Bounds {
+                        origin: gpui_kit::point(
+                            glyph_info.bounds.left(),
+                            glyph_info.bounds.bottom() - gpui_kit::px(1.0),
+                        ),
+                        size: gpui_kit::size(glyph_info.bounds.size.width, gpui_kit::px(1.5)),
+                    };
+                    window.paint_quad(gpui_kit::fill(underline_bounds, color));
+                }
+            }
+        }
     }
 }
 
@@ -411,6 +454,8 @@ impl TypstElement {
         on_hit_map_updated: Option<Arc<Mutex<dyn FnMut(HitMap, &mut App) + Send + Sync + 'static>>>,
         show_cursor: bool,
         span_resolver: Option<Arc<dyn Fn(Span, u16) -> usize + Send + Sync + 'static>>, // Add this
+        diagnostics: Vec<TextDiagnostic>,
+        cached_sources: Arc<HashMap<FileId, Arc<typst_syntax::Source>>>,
     ) -> Self {
         Self {
             id: gpui_kit::ElementId::from(0),
@@ -425,6 +470,8 @@ impl TypstElement {
             on_hit_map_updated,
             show_cursor,
             span_resolver,
+            diagnostics,
+            cached_sources,
         }
     }
 

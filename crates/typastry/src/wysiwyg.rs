@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use typst_syntax::{LinkedNode, Side, Source, SyntaxKind, ast, ast::AstNode};
+use typst_syntax::{LinkedNode, Side, Source, SyntaxKind, ast};
 
 // ==========================================
 // PILLAR 1: AST MUTATION ENGINE (DISCRETE VISUAL EDITS)

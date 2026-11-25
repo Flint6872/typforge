@@ -107,23 +107,88 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                 .any(|c| c.is_alphanumeric() || c == '_' || c == '.')
     }
 
+    // AFTER:
     fn completions(
         &self,
         rope: &Rope,
         offset: usize,
         _trigger: CompletionContext,
         _window: &mut Window,
-        _cx: &mut gpui_kit::App,
+        cx: &mut gpui_kit::App,
     ) -> Task<anyhow::Result<CompletionResponse>> {
-        let world = self.shared_world.clone();
-
+        let world_mutex = self.shared_world.clone();
         let content = rope.to_string();
-        {
-            let mut world_lock = world.lock();
-            world_lock.set_source(content);
-        }
+        let rope_clone = rope.clone();
 
-        Task::ready(Ok(self.fetch_completions(world, rope, offset)))
+        cx.background_executor().spawn(async move {
+            // Perform source update and completion calculation on background thread
+            {
+                let mut world_lock = world_mutex.lock();
+                world_lock.set_source(content);
+            }
+
+            // We move fetch_completions into this background block to avoid
+            // blocking the UI thread with get_enhanced_completions logic.
+            let items = {
+                let world = world_mutex.lock();
+                let main_id = world.main();
+
+                if let Ok(source) = world.source(main_id) {
+                    let resp = get_enhanced_completions(&*world, None, &source, offset);
+
+                    let rope_str = rope_clone.to_string();
+                    let start_pos = offset_to_lsp_position(&rope_clone, resp.replace_range.start);
+                    let end_pos = offset_to_lsp_position(&rope_clone, offset);
+
+                    resp.items
+                        .into_iter()
+                        .map(|c| {
+                            let kind = match c.kind {
+                                CompletionKind::Func => CompletionItemKind::FUNCTION,
+                                CompletionKind::Type => CompletionItemKind::CLASS,
+                                CompletionKind::Param => CompletionItemKind::PROPERTY,
+                                CompletionKind::Constant => CompletionItemKind::CONSTANT,
+                                CompletionKind::Symbol => CompletionItemKind::VALUE,
+                                CompletionKind::Unit => CompletionItemKind::UNIT,
+                                CompletionKind::Package => CompletionItemKind::MODULE,
+                                CompletionKind::Text => CompletionItemKind::TEXT,
+                            };
+
+                            let replacement_text = if c.kind == CompletionKind::Package {
+                                let has_closing_quote =
+                                    rope_str.as_bytes().get(offset) == Some(&b'"');
+                                if has_closing_quote {
+                                    c.apply.clone()
+                                } else {
+                                    format!("{}\"", c.apply)
+                                }
+                            } else {
+                                c.apply
+                            };
+
+                            CompletionItem {
+                                label: c.label,
+                                kind: Some(kind),
+                                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                                    range: Range {
+                                        start: start_pos,
+                                        end: end_pos,
+                                    },
+                                    new_text: replacement_text,
+                                })),
+                                insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+                                detail: c.detail,
+                                ..Default::default()
+                            }
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            };
+
+            Ok(CompletionResponse::Array(items))
+        })
     }
 }
 
