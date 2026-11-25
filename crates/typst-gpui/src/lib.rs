@@ -202,9 +202,10 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         self.source = source.clone();
         self.last_text_len = source.len();
         self.pending_compile_source = Some(source);
+
         self.compile(cx);
-        self.schedule_spellcheck(cx);
-        cx.notify();
+        // REMOVED: self.schedule_spellcheck(cx); // We'll move this to compile finish
+        // REMOVED: cx.notify(); // Don't repaint until compile is done
     }
 
     pub fn set_selection(
@@ -232,30 +233,33 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         let pending_path = self.pending_compile_path.take();
 
         self.is_compiling = true;
-        let world = self.world.clone();
+        let world_clone = self.world.clone(); // Clone world for the outer async move closure
+        let zoom_for_calc = self.zoom; // Capture zoom for the inner background task
         let handle = cx.weak_entity();
 
         cx.spawn(move |_view, spawned_async_cx: &mut AsyncApp| {
             let mut async_cx = spawned_async_cx.clone();
             async move {
-                let world_for_bg = world.clone();
-                let (compiled_result, cached_sources_arc, used_fonts) = async_cx
+                // Clone world_for_bg_inner for the background spawn block
+                let world_for_bg_inner = world_clone.clone();
+
+                let (compiled_result, cached_sources_arc, used_fonts, anchors) = async_cx
                     .background_executor()
                     .spawn(async move {
                         let start_compile = std::time::Instant::now();
+                        let mut world_guard = world_for_bg_inner.lock(); // Use the inner clone here
+
+                        // 1. Sync world state
+                        if let Some(path) = pending_path {
+                            world_guard.set_main_document_info(path, source_to_compile.clone());
+                        }
+                        world_guard.set_source(source_to_compile);
+
+                        // 2. Perform Compile
                         let compiled_result: typst::diag::Warned<
                             typst::diag::SourceResult<PagedDocument>,
-                        > = {
-                            let mut world_guard = world_for_bg.lock();
+                        > = typst::compile(&*world_guard);
 
-                            // Apply path update in the background if we have one
-                            if let Some(path) = pending_path {
-                                world_guard.set_main_document_info(path, source_to_compile.clone());
-                            }
-
-                            world_guard.set_source(source_to_compile);
-                            typst::compile(&*world_guard)
-                        };
                         println!(
                             "BENCHMARK: typst::compile took {:?}",
                             start_compile.elapsed()
@@ -263,10 +267,15 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
 
                         let mut collected_sources_map = HashMap::new();
                         let mut used_fonts = std::collections::HashSet::new();
+                        let mut anchors = Vec::new();
 
                         if let Ok(ref document) = compiled_result.output {
+                            let scale_factor = (96.0 / 72.0) * zoom_for_calc; // zoom_for_calc is in scope
+                            let page_margin_px = Pixels::from(20.0 * zoom_for_calc); // zoom_for_calc is in scope
+                            let mut y_offset = Pixels::ZERO;
+
                             let mut referenced_ids = std::collections::HashSet::new();
-                            for page in document.pages() {
+                            for (i, page) in document.pages().iter().enumerate() {
                                 collect_file_ids_from_frame_recursive(
                                     &page.frame,
                                     &mut referenced_ids,
@@ -275,9 +284,26 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                                     &page.frame,
                                     &mut used_fonts,
                                 );
+
+                                // Pre-collect Anchors (Avoids walking the frame tree during paint)
+                                collect_anchors_recursive_static(
+                                    &page.frame,
+                                    y_offset,
+                                    scale_factor,
+                                    &mut anchors,
+                                );
+
+                                let page_h =
+                                    Pixels::from(page.frame.height().to_pt() as f32 * scale_factor);
+                                y_offset += page_h
+                                    + if i < document.pages().len() - 1 {
+                                        page_margin_px
+                                    } else {
+                                        Pixels::ZERO
+                                    };
                             }
 
-                            let world_guard = world_for_bg.lock();
+                            // Cache necessary sources
                             let main_id = world_guard.main_file_id();
                             if let Ok(main_source) = world_guard.source(main_id) {
                                 collected_sources_map.insert(main_id, Arc::new(main_source));
@@ -291,7 +317,12 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                             }
                         }
 
-                        (compiled_result, Arc::new(collected_sources_map), used_fonts)
+                        (
+                            compiled_result,
+                            Arc::new(collected_sources_map),
+                            used_fonts,
+                            anchors,
+                        )
                     })
                     .await;
 
@@ -299,16 +330,16 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                 let _ = handle.update(&mut async_cx, |panel, cx| {
                     panel.is_compiling = false;
 
-                    let mut all_diags: Vec<typst::diag::SourceDiagnostic> =
-                        compiled_result.warnings.into_iter().collect();
-
                     match compiled_result.output {
                         Ok(document) => {
                             let doc: Arc<PagedDocument> = Arc::new(document);
                             panel.sync_fonts_set_to_gpui(used_fonts, cx);
 
+                            // Update local HitMap with pre-calculated anchors
+                            panel.last_hit_map.anchors = anchors;
+
                             let span_sources = cached_sources_arc.clone();
-                            let world_fallback = panel.world.clone();
+                            let world_fallback = world_clone.clone(); // Use world_clone from outer scope
                             panel.cached_sources = cached_sources_arc;
                             panel.cached_span_resolver =
                                 Some(Arc::new(move |span: typst::syntax::Span, offset: u16| {
@@ -337,31 +368,23 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                                 }));
 
                             panel.document = Some(doc);
-                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(all_diags));
-                            panel.pending_transaction = None;
+
+                            // Only trigger notifications and side-effects on a fresh compile
+                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(
+                                compiled_result.warnings.into_iter().collect(),
+                            ));
+                            panel.schedule_spellcheck(cx);
+                            cx.notify();
                         }
                         Err(errors) => {
-                            all_diags.extend(errors);
-                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(all_diags.clone()));
-
-                            if let Some(_tx) = panel.pending_transaction.take() {
-                                let error_msg = all_diags
-                                    .iter()
-                                    .find(|d| d.severity == typst::diag::Severity::Error)
-                                    .map(|d| d.message.to_string())
-                                    .unwrap_or_else(|| {
-                                        "Source edit resulted in compile error.".to_string()
-                                    });
-
-                                panel.visual_edit_error =
-                                    Some(format!("Edit Reverted: {}", error_msg));
-                            }
+                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(
+                                errors.into_iter().collect(),
+                            ));
+                            cx.notify();
                         }
                     }
 
-                    cx.notify();
-
-                    // If more keystrokes arrived while compiling, immediately start one compile for the latest text
+                    // Check for coalesced keystrokes
                     if panel.pending_compile_source.is_some() {
                         panel.compile(cx);
                     }
@@ -1353,6 +1376,29 @@ fn collect_file_ids_from_frame_recursive(
             typst::layout::FrameItem::Group(group_item) => {
                 collect_file_ids_from_frame_recursive(&group_item.frame, file_ids);
             }
+        }
+    }
+}
+
+fn collect_anchors_recursive_static(
+    frame: &typst::layout::Frame,
+    y_offset_from_top: Pixels,
+    scale_factor: f32,
+    anchors: &mut Vec<crate::typst_element::AnchorInfo>,
+) {
+    for (pos, item) in frame.items() {
+        let item_y = y_offset_from_top + Pixels::from(pos.y.to_pt() as f32 * scale_factor);
+        match item {
+            typst::layout::FrameItem::Tag(tag) => {
+                anchors.push(crate::typst_element::AnchorInfo {
+                    location: tag.location(),
+                    position: Point::new(Pixels::ZERO, item_y),
+                });
+            }
+            typst::layout::FrameItem::Group(group) => {
+                collect_anchors_recursive_static(&group.frame, item_y, scale_factor, anchors);
+            }
+            _ => {}
         }
     }
 }

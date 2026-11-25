@@ -19,4 +19,4 @@ pub use inspector::TypastryJump;
 
 pub use inspector::{CursorContext, TypastryInspector};
 
-
+pub use typst_syntax::Source;
