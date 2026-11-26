@@ -29,7 +29,7 @@ pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> {
     pub menu_bar: Option<Entity<AppMenuBar>>,
     pub ribbon_panel: Entity<RibbonPanel>,
     pub editor_panel: Entity<EditorPanel<W>>,
-    pub diagnostics_panel: Entity<DiagnosticsPanel<W>>,
+    pub diagnostics_panel: Entity<DiagnosticsPanel>,
     pub has_diagnostics: bool,
     pub preview_panel: Entity<PreviewPanel<W>>,
     pub files_panel: Entity<FilesPanel>,
@@ -53,8 +53,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
         let files_panel = cx.new(|cx| FilesPanel::new(window, cx));
         let editor_panel_entity =
             cx.new(|cx| EditorPanel::new(shared_world_arc.clone(), window, cx));
-        let diagnostics_panel =
-            cx.new(|cx| DiagnosticsPanel::new(shared_world_arc.clone(), window, cx));
+        let diagnostics_panel = cx.new(|cx| DiagnosticsPanel::new(window, cx));
 
         let font_families: Vec<String> = {
             let world = shared_world_arc.lock();
@@ -234,24 +233,24 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                         ));
                     }
                     PreviewPanelEvent::DiagnosticsChanged(diags) => {
-                        // Filter diagnostics to only include those from Typst files.
                         let typst_diags: Vec<typst::diag::SourceDiagnostic> = diags
                             .iter()
                             .filter(|diag| {
-                                if let Some(file_id) = diag.span.id() {
-                                    file_id.vpath().extension() == Some("typ")
-                                } else {
-                                    // If no file ID, it's not associated with a file,
-                                    // so we assume it's not a typst file for this context.
-                                    false
-                                }
+                                diag.span
+                                    .id()
+                                    .is_some_and(|id| id.vpath().extension() == Some("typ"))
                             })
-                            .cloned() // Clone to create a new Vec from filtered references
+                            .cloned()
                             .collect();
 
                         let has_errors = !typst_diags.is_empty();
+                        let cached_sources = this_note_view
+                            .preview_panel
+                            .read(cx_for_note_view)
+                            .cached_sources()
+                            .clone();
 
-                        // 1. Send diagnostics to editor (squiggles)
+                        // 1. Send diagnostics to editor (squiggles) without locking shared_world
                         this_note_view
                             .editor_panel
                             .update(cx_for_note_view, |panel, cx| {
@@ -261,9 +260,18 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                                     {
                                         file.diagnostics = diags.clone();
 
-                                        let world = panel.shared_world.lock();
+                                        // Find the matching source from cached_sources
+                                        let source_opt = cached_sources
+                                            .values()
+                                            .find(|s| {
+                                                let binding = s.id();
+                                                let vpath = binding.vpath().get_without_slash();
+                                                active_path.ends_with(vpath)
+                                                    || vpath == "__main__.typ"
+                                            })
+                                            .cloned();
 
-                                        if let Ok(source) = world.source(world.main_file_id()) {
+                                        if let Some(source) = source_opt {
                                             file.code_editor_entity.update(cx, |editor, cx| {
                                                 editor.set_diagnostics(diags.clone(), &source, cx);
                                             });
@@ -275,7 +283,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                         this_note_view
                             .diagnostics_panel
                             .update(cx_for_note_view, |panel, cx| {
-                                panel.set_diagnostics(diags.clone(), cx);
+                                panel.set_diagnostics(&cached_sources, diags.clone(), cx);
                             });
 
                         if this_note_view.has_diagnostics != has_errors {

@@ -93,7 +93,7 @@ fn main() -> Result<()> {
                 std::collections::HashSet::new(),
             ));
 
-            let fonts = load_fonts(cx);
+            let fonts = Arc::new(load_fonts(cx));
             let mut world = GpuiWorld::new(fonts);
             world.set_source(String::new()); // Initialize empty source
 

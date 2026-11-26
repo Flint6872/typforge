@@ -12,6 +12,9 @@ use typastry::spellcheck::{
 };
 use typst_layout::PagedDocument;
 
+// Import typforge-core components
+use typforge_core::CompilerHost; // ADD THIS IMPORT
+
 pub mod canvas_input;
 pub mod caret_geometry;
 pub mod typst_element;
@@ -26,12 +29,32 @@ pub trait TypstGpuiWorld: typst::World + Send + Sync + 'static {
     }
     fn set_document(&mut self, _doc: std::sync::Arc<PagedDocument>) {}
     fn main_file_id(&self) -> typst::syntax::FileId;
+
+    fn create_compiler_host(&self) -> Option<typforge_core::CompilerHost> {
+        None
+    }
+}
+
+impl TypstGpuiWorld for typforge_core::ProjectWorld {
+    fn set_source(&mut self, source: String) {
+        self.set_source(source);
+    }
+
+    fn set_main_document_info(&mut self, path: Option<std::path::PathBuf>, content: String) {
+        self.set_main_document_info(path, content);
+    }
+
+    fn main_file_id(&self) -> typst::syntax::FileId {
+        self.main_file_id()
+    }
+
+    fn create_compiler_host(&self) -> Option<typforge_core::CompilerHost> {
+        Some(typforge_core::CompilerHost::new(self.clone_shared()))
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum PreviewPanelEvent {
-    // For Phase 1, we'll only handle appending a single character.
-    // This will evolve in later phases for more complex edits (deletion, insertion at cursor, etc.).
     SourceChanged(String),
     DiagnosticsChanged(Vec<typst::diag::SourceDiagnostic>),
     CursorMoved {
@@ -49,10 +72,10 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     pub render_state: Arc<TypstRenderState>,
 
     focus_handle: FocusHandle,
-    zoom: f32, // Add zoom field
+    zoom: f32,
     pub source: String,
 
-    pub suppressing_events: bool, // NEW: Flag to control event emission
+    pub suppressing_events: bool,
     pub last_text_len: usize,
     last_hit_map: HitMap,
     scroll_handle: ScrollHandle,
@@ -67,6 +90,8 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     is_compiling: bool,
     pending_compile_source: Option<String>,
     pending_compile_path: Option<Option<std::path::PathBuf>>,
+    pub compiler_host: Option<CompilerHost>, // ADD THIS FIELD
+    pub current_path: Option<std::path::PathBuf>, // ADD THIS FIELD
 
     // --- NEW SPELLCHECK & DIAGNOSTICS STATE FIELDS ---
     pub diagnostics: Vec<TextDiagnostic>,
@@ -90,6 +115,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
     pub fn new(world: Arc<Mutex<W>>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
 
+        let compiler_host = world.lock().create_compiler_host(); // This line was correct
         let preview_panel_entity_for_callback = cx.entity().clone();
         let on_hit_map_updated_callback_arc =
             Arc::new(Mutex::new(move |hit_map_data: HitMap, app_cx: &mut App| {
@@ -128,7 +154,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             .unwrap_or_default()
             .join("assets")
             .join("dictionaries");
-        let dictionary_manager = Arc::new(Mutex::new(DictionaryManager::new(dict_dir))); // Local variable
+        let dictionary_manager = Arc::new(Mutex::new(DictionaryManager::new(dict_dir)));
 
         Self {
             world,
@@ -151,6 +177,8 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             is_compiling: false,
             pending_compile_source: None,
             pending_compile_path: None,
+            compiler_host,      // INITIALIZE NEW FIELD
+            current_path: None, // INITIALIZE NEW FIELD
 
             diagnostics: Vec::new(),
             spellcheck_task: None,
@@ -194,7 +222,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
     }
 
     /// Update the Typst source code and trigger a re-render.
-
     pub fn set_source(&mut self, source: String, _window: &mut Window, cx: &mut Context<Self>) {
         if self.source == source {
             return;
@@ -204,8 +231,12 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         self.pending_compile_source = Some(source);
 
         self.compile(cx);
-        // REMOVED: self.schedule_spellcheck(cx); // We'll move this to compile finish
-        // REMOVED: cx.notify(); // Don't repaint until compile is done
+    }
+
+    pub fn cached_sources(
+        &self,
+    ) -> &Arc<HashMap<typst::syntax::FileId, Arc<typst_syntax::Source>>> {
+        &self.cached_sources
     }
 
     pub fn set_selection(
@@ -221,177 +252,127 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         cx.notify();
     }
 
-    /// Asynchronous compilation logic running on background thread (single-flight coalescing).
     fn compile(&mut self, cx: &mut Context<Self>) {
-        if self.is_compiling {
-            return;
-        }
-
         let Some(source_to_compile) = self.pending_compile_source.take() else {
             return;
         };
-        let pending_path = self.pending_compile_path.take();
+        let path = self
+            .pending_compile_path
+            .take()
+            .unwrap_or_else(|| self.current_path.clone());
 
-        self.is_compiling = true;
-        let world_clone = self.world.clone(); // Clone world for the outer async move closure
-        let zoom_for_calc = self.zoom; // Capture zoom for the inner background task
+        if let Some(ref mut host) = self.compiler_host {
+            host.request_compile(path, source_to_compile);
+
+            if !self.is_compiling {
+                self.is_compiling = true;
+                self.await_compile_output(cx);
+            }
+        }
+    }
+
+    fn await_compile_output(&mut self, cx: &mut Context<Self>) {
+        let Some(ref host) = self.compiler_host else {
+            self.is_compiling = false;
+            return;
+        };
+        let rx_arc = host.output_receiver();
         let handle = cx.weak_entity();
 
         cx.spawn(move |_view, spawned_async_cx: &mut AsyncApp| {
             let mut async_cx = spawned_async_cx.clone();
             async move {
-                // Clone world_for_bg_inner for the background spawn block
-                let world_for_bg_inner = world_clone.clone();
-
-                let (compiled_result, cached_sources_arc, used_fonts, anchors) = async_cx
+                let first_output = async_cx
                     .background_executor()
-                    .spawn(async move {
-                        let start_compile = std::time::Instant::now();
-                        let mut world_guard = world_for_bg_inner.lock(); // Use the inner clone here
-
-                        // 1. Sync world state
-                        if let Some(path) = pending_path {
-                            world_guard.set_main_document_info(path, source_to_compile.clone());
-                        }
-                        world_guard.set_source(source_to_compile);
-
-                        // 2. Perform Compile
-                        let compiled_result: typst::diag::Warned<
-                            typst::diag::SourceResult<PagedDocument>,
-                        > = typst::compile(&*world_guard);
-
-                        println!(
-                            "BENCHMARK: typst::compile took {:?}",
-                            start_compile.elapsed()
-                        );
-
-                        let mut collected_sources_map = HashMap::new();
-                        let mut used_fonts = std::collections::HashSet::new();
-                        let mut anchors = Vec::new();
-
-                        if let Ok(ref document) = compiled_result.output {
-                            let scale_factor = (96.0 / 72.0) * zoom_for_calc; // zoom_for_calc is in scope
-                            let page_margin_px = Pixels::from(20.0 * zoom_for_calc); // zoom_for_calc is in scope
-                            let mut y_offset = Pixels::ZERO;
-
-                            let mut referenced_ids = std::collections::HashSet::new();
-                            for (i, page) in document.pages().iter().enumerate() {
-                                collect_file_ids_from_frame_recursive(
-                                    &page.frame,
-                                    &mut referenced_ids,
-                                );
-                                collect_fonts_from_frame_recursive_static(
-                                    &page.frame,
-                                    &mut used_fonts,
-                                );
-
-                                // Pre-collect Anchors (Avoids walking the frame tree during paint)
-                                collect_anchors_recursive_static(
-                                    &page.frame,
-                                    y_offset,
-                                    scale_factor,
-                                    &mut anchors,
-                                );
-
-                                let page_h =
-                                    Pixels::from(page.frame.height().to_pt() as f32 * scale_factor);
-                                y_offset += page_h
-                                    + if i < document.pages().len() - 1 {
-                                        page_margin_px
-                                    } else {
-                                        Pixels::ZERO
-                                    };
-                            }
-
-                            // Cache necessary sources
-                            let main_id = world_guard.main_file_id();
-                            if let Ok(main_source) = world_guard.source(main_id) {
-                                collected_sources_map.insert(main_id, Arc::new(main_source));
-                            }
-                            for id in referenced_ids {
-                                if !collected_sources_map.contains_key(&id) {
-                                    if let Ok(source) = world_guard.source(id) {
-                                        collected_sources_map.insert(id, Arc::new(source));
-                                    }
-                                }
-                            }
-                        }
-
-                        (
-                            compiled_result,
-                            Arc::new(collected_sources_map),
-                            used_fonts,
-                            anchors,
-                        )
-                    })
+                    .spawn(async move { rx_arc.lock().recv().ok() })
                     .await;
 
-                // Jump back to the main thread to update the UI
                 let _ = handle.update(&mut async_cx, |panel, cx| {
-                    panel.is_compiling = false;
+                    let Some(mut latest_output) = first_output else {
+                        panel.is_compiling = false;
+                        return;
+                    };
 
-                    match compiled_result.output {
-                        Ok(document) => {
-                            let doc: Arc<PagedDocument> = Arc::new(document);
-                            panel.sync_fonts_set_to_gpui(used_fonts, cx);
-
-                            // Update local HitMap with pre-calculated anchors
-                            panel.last_hit_map.anchors = anchors;
-
-                            let span_sources = cached_sources_arc.clone();
-                            let world_fallback = world_clone.clone(); // Use world_clone from outer scope
-                            panel.cached_sources = cached_sources_arc;
-                            panel.cached_span_resolver =
-                                Some(Arc::new(move |span: typst::syntax::Span, offset: u16| {
-                                    if let Some(file_id) = span.id() {
-                                        if let Some(source) = span_sources.get(&file_id) {
-                                            if let typst::syntax::SpanKind::Number { num, .. } =
-                                                span.get()
-                                            {
-                                                if let Some(range) = source.range(num, None) {
-                                                    return range.start + offset as usize;
-                                                }
-                                            }
-                                        } else if let Ok(source) =
-                                            world_fallback.lock().source(file_id)
-                                        {
-                                            if let typst::syntax::SpanKind::Number { num, .. } =
-                                                span.get()
-                                            {
-                                                if let Some(range) = source.range(num, None) {
-                                                    return range.start + offset as usize;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    0
-                                }));
-
-                            panel.document = Some(doc);
-
-                            // Only trigger notifications and side-effects on a fresh compile
-                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(
-                                compiled_result.warnings.into_iter().collect(),
-                            ));
-                            panel.schedule_spellcheck(cx);
-                            cx.notify();
-                        }
-                        Err(errors) => {
-                            cx.emit(PreviewPanelEvent::DiagnosticsChanged(
-                                errors.into_iter().collect(),
-                            ));
-                            cx.notify();
+                    // Drain any newer outputs that finished while we were waking up
+                    if let Some(ref host) = panel.compiler_host {
+                        while let Some(newer) = host.try_recv() {
+                            latest_output = newer;
                         }
                     }
 
-                    // Check for coalesced keystrokes
-                    if panel.pending_compile_source.is_some() {
-                        panel.compile(cx);
+                    let output_rev = latest_output.revision;
+                    panel.apply_compile_output(latest_output, cx);
+
+                    let pending_rev = panel
+                        .compiler_host
+                        .as_ref()
+                        .map(|h| h.current_revision())
+                        .unwrap_or(0);
+
+                    if output_rev < pending_rev {
+                        panel.await_compile_output(cx);
+                    } else {
+                        panel.is_compiling = false;
                     }
                 });
             }
         })
         .detach();
+    }
+
+    fn apply_compile_output(
+        &mut self,
+        output: typforge_core::CompileOutput,
+        cx: &mut Context<Self>,
+    ) {
+        let mut all_diags = output.warnings;
+        all_diags.extend(output.errors);
+
+        if let Some(doc) = output.document {
+            self.sync_fonts_set_to_gpui(output.used_fonts, cx);
+
+            // Compute layout anchors for the current zoom
+            let scale_factor = (96.0 / 72.0) * self.zoom;
+            let page_margin_px = Pixels::from(20.0 * self.zoom);
+            let mut y_offset = Pixels::ZERO;
+            let mut anchors = Vec::new();
+            for (i, page) in doc.pages().iter().enumerate() {
+                collect_anchors_recursive_static(&page.frame, y_offset, scale_factor, &mut anchors);
+                let page_h = Pixels::from(page.frame.height().to_pt() as f32 * scale_factor);
+                y_offset += page_h
+                    + if i < doc.pages().len() - 1 {
+                        page_margin_px
+                    } else {
+                        Pixels::ZERO
+                    };
+            }
+            self.last_hit_map.anchors = anchors;
+
+            let sources_arc = Arc::new(output.sources);
+            let span_sources = sources_arc.clone();
+            self.cached_sources = sources_arc;
+            self.cached_span_resolver =
+                Some(Arc::new(move |span: typst::syntax::Span, offset: u16| {
+                    if let Some(file_id) = span.id() {
+                        if let Some(source) = span_sources.get(&file_id) {
+                            if let typst::syntax::SpanKind::Number { num, .. } = span.get() {
+                                if let Some(range) = source.range(num, None) {
+                                    return range.start + offset as usize;
+                                }
+                            }
+                        }
+                    }
+                    0
+                }));
+
+            self.document = Some(doc);
+            cx.emit(PreviewPanelEvent::DiagnosticsChanged(all_diags));
+            self.schedule_spellcheck(cx);
+            cx.notify();
+        } else {
+            cx.emit(PreviewPanelEvent::DiagnosticsChanged(all_diags));
+            cx.notify();
+        }
     }
 
     /// Updates the GpuiWorld's main document path and content.
@@ -402,8 +383,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) {
-        // We store the path update to be applied in the background compile task.
-        // The content is handled by set_source which follows immediately.
+        self.current_path = path.clone();
         self.pending_compile_path = Some(path);
     }
 
@@ -424,8 +404,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                 typsdocx::docx(doc, &options)
             })
             .filter(|bytes| !bytes.is_empty())
-        // filter ensures we return None if the Vec is empty,
-        // triggering your error message in main.rs
     }
 
     fn sync_fonts_set_to_gpui(
@@ -459,7 +437,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
     fn sync_fonts_to_gpui(&mut self, document: &PagedDocument, cx: &mut Context<Self>) {
         let mut used_fonts = std::collections::HashSet::new();
 
-        // Directly call the recursive helper for each page
         for page in document.pages() {
             self.collect_fonts_from_frame_recursive(&page.frame, &mut used_fonts);
         }
@@ -491,8 +468,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         }
     }
 
-    // New private helper for recursive calls, if you want to keep the recursion pattern.
-    // If not, simply inline the group handling too.
     fn collect_fonts_from_frame_recursive(
         &self,
         frame: &typst::layout::Frame,
@@ -520,7 +495,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             return None;
         }
 
-        // 1. Find the minimum vertical distance from our cursor Y to any glyph's line span.
         let mut min_v_dist = f32::MAX;
         for glyph_info in &self.last_hit_map.glyphs {
             let bounds = glyph_info.bounds;
@@ -529,14 +503,13 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             } else if point_px.y > bounds.bottom() {
                 (point_px.y - bounds.bottom()).as_f32()
             } else {
-                0.0 // Mouse is vertically inside this line
+                0.0
             };
             if v_dist < min_v_dist {
                 min_v_dist = v_dist;
             }
         }
 
-        // 2. Collect all glyphs that belong to this closest vertical line (within a 5px threshold).
         let mut line_glyphs = Vec::new();
         for glyph_info in &self.last_hit_map.glyphs {
             let bounds = glyph_info.bounds;
@@ -557,7 +530,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             return None;
         }
 
-        // 3. Find the horizontally closest glyph on this specific line.
         let mut closest_glyph = None;
         let mut min_h_dist = f32::MAX;
 
@@ -568,7 +540,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             } else if point_px.x > bounds.right() {
                 (point_px.x - bounds.right()).as_f32()
             } else {
-                0.0 // Mouse is horizontally inside this character
+                0.0
             };
 
             if h_dist < min_h_dist {
@@ -577,15 +549,12 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             }
         }
 
-        // 4. Return the correct offset (before or after the character)
         if let Some(glyph) = closest_glyph {
             let bounds = glyph.bounds;
             let center_x = bounds.left() + bounds.size.width / 2.0;
             if point_px.x > center_x {
-                // If clicked on the right half of the character, place cursor after it
                 Some(glyph.byte_offset + glyph.byte_len)
             } else {
-                // If clicked on the left half, place cursor before it
                 Some(glyph.byte_offset)
             }
         } else {
@@ -593,7 +562,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         }
     }
 
-    /// Returns the active selection range normalized (min..max) if one exists.
     pub fn selection_range(&self) -> Option<std::ops::Range<usize>> {
         self.selection_anchor.and_then(|anchor| {
             if anchor == self.cursor_offset {
@@ -603,8 +571,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             }
         })
     }
-
-    /// Explicitly updates the selection anchor and cursor position, syncing the underlying InputState.
 
     fn handle_link_click(&mut self, point: Point<Pixels>, cx: &mut Context<Self>) -> bool {
         for link in &self.last_hit_map.links {
@@ -656,17 +622,10 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
 
     fn scroll_to_location(&mut self, loc: typst::introspection::Location, cx: &mut Context<Self>) {
         if let Some(anchor) = self.last_hit_map.anchors.iter().find(|a| a.location == loc) {
-            // This is now the physical distance in pixels from the start of the file.
             let target_document_y = anchor.position.y;
-
-            // Breathing room: subtract 20px so the heading isn't touching the window edge.
             let padding = Pixels::from(20.0 * self.zoom);
-
-            // To show the target at the top, we set a NEGATIVE offset.
             let scroll_offset = -(target_document_y - padding).max(Pixels::ZERO);
-
             println!("STABLE JUMP TO: {}", scroll_offset);
-
             self.scroll_handle
                 .set_offset(Point::new(Pixels::ZERO, scroll_offset));
             cx.notify();
@@ -695,10 +654,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         }
 
         let text = Arc::new(self.source.clone());
-
-        // Cancel any pending spellcheck task to debounce fast typing
         self.spellcheck_task = None;
-
         let dict_mgr_arc = self.dictionary_manager.clone();
         let cached_dict = self.cached_dictionary.clone();
         let cached_harper = self.cached_harper.clone();
@@ -707,13 +663,11 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         self.spellcheck_task = Some(cx.spawn(|_view, spawned_async_cx: &mut AsyncApp| {
             let mut async_cx = spawned_async_cx.clone();
             async move {
-                // 300ms debounce during continuous keystrokes
                 async_cx
                     .background_executor()
                     .timer(Duration::from_millis(300))
                     .await;
 
-                // Heavy AST prose extraction and dictionary checking on background thread
                 let (diags, new_cached_dict, new_cached_harper) = async_cx
                     .background_executor()
                     .spawn(async move {
@@ -722,7 +676,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
 
                         let mgr = dict_mgr_arc.lock();
 
-                        // Load/cache dictionary if language changed
                         let dict_arc = match cached_dict {
                             Some((ref cached_lang, ref dict)) if cached_lang == &lang => {
                                 Some(dict.clone())
@@ -748,7 +701,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                     })
                     .await;
 
-                // Update UI on main thread
                 let _ = handle.update(&mut async_cx, |panel, cx| {
                     panel.diagnostics = diags;
                     if let Some(cache) = new_cached_dict {
@@ -828,7 +780,7 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                 this.cursor(CursorStyle::PointingHand)
             })
             .when(is_focused, |this| {
-                this.border_2().border_color(rgb(0x4a90e2)) // Blue border when focused
+                this.border_2().border_color(rgb(0x4a90e2))
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -870,9 +822,6 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                     cx.stop_propagation();
                 }),
             )
-            // ==========================================
-            // PILLAR 3: RIGHT CLICK INTROSPECTION TRIGGER
-            // ==========================================
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, _window, cx| {
@@ -881,7 +830,6 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                         let source = typst_syntax::Source::detached(&text);
                         let root = typst_syntax::LinkedNode::new(source.root());
 
-                        // Query spell/grammar diagnostics at the clicked position
                         let active_diags: Vec<TextDiagnostic> = this
                             .diagnostics_at_offset(byte_offset)
                             .into_iter()
@@ -937,14 +885,12 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                 }),
             )
             .child(
-                // Stationary wrapper that hosts the scrollbar so it stays in place
                 gpui_kit::div()
                     .id("preview-scroll-wrapper")
                     .relative()
                     .h_5_6()
                     .vertical_scrollbar(&self.scroll_handle)
                     .child(
-                        // The actual scrolling container that handles the viewport and tracking
                         gpui_kit::div()
                             .id("preview-scroll-container")
                             .overflow_scroll()
@@ -977,9 +923,6 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                             }),
                     ),
             )
-            // ==========================================
-            // PILLAR 1: VISUAL EDITING ROLLBACK NOTIFIER
-            // ==========================================
             .children(if let Some(ref err) = self.visual_edit_error {
                 Some(
                     div()
@@ -1007,9 +950,6 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
             } else {
                 None
             })
-            // ==========================================
-            // CONTEXT MENU OVERLAY (DIAGNOSTICS + INSPECTOR)
-            // ==========================================
             .children(
                 if !self.active_menu_diagnostics.is_empty() || self.inspected_element.is_some() {
                     Some(
@@ -1028,7 +968,6 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                             .flex()
                             .flex_col()
                             .gap_2()
-                            // 1. SPELL / GRAMMAR SUGGESTIONS SECTION
                             .children(self.active_menu_diagnostics.iter().map(|diag| {
                                 let diag_clone = diag.clone();
                                 div()
@@ -1083,7 +1022,7 @@ impl<W: TypstGpuiWorld> Render for PreviewPanel<W> {
                                             }))
                                             .child("➕ Add to Ignore List"),
                                     )
-                            })), // ... Rest of the Inspector context menu ...
+                            })),
                     )
                 } else {
                     None

@@ -12,10 +12,12 @@ members = [
     "crates/typsdocx",      #typst document to MS word export
     "crates/typst-gpui",    #renderer for typst to gpui
     "crates/typastry",      #holds the AST info
+    "crates/typforge-core", #holds the World
 ]
 
 
 [workspace.dependencies]
+typforge-core = { path = "crates/typforge-core" }
 gpui-kit = { version = "0.9.1", features = ["tree-sitter"] }
 
 tree-sitter = "0.26.13"

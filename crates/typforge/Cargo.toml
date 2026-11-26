@@ -5,10 +5,11 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-chrono.workspace = true
+typforge-core.workspace = true
 gpui-kit = { workspace = true, features = ["tree-sitter"] }
 
 
+chrono.workspace = true
 gpui_util = "0.2.2"
 # gpui-component.workspace = true
 # gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }

@@ -1,0 +1,23 @@
+[package]
+name = "typforge-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+typst.workspace = true
+typst-syntax.workspace = true
+typst-layout.workspace = true
+chrono.workspace = true
+parking_lot.workspace = true
+
+typst-kit = { version = "0.15", features = [
+    "scan-fonts",
+    "embedded-fonts",
+    "universe-packages",
+    "system-packages",
+    "system-downloader",
+] }
+
+typastry = { path = "../typastry" }
