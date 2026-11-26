@@ -12,6 +12,7 @@ use typst::text::Font;
 use typst_layout::PagedDocument;
 
 use crate::world::ProjectWorld;
+use parking_lot::Mutex;
 
 /// Compilation request sent to the background compiler worker.
 #[derive(Debug, Clone)]
@@ -32,20 +33,6 @@ pub struct CompileOutput {
     pub sources: HashMap<FileId, Arc<Source>>,
 }
 
-impl CompileOutput {
-    pub fn is_ok(&self) -> bool {
-        self.document.is_some() && self.errors.is_empty()
-    }
-}
-
-/// Headless compiler manager operating on a dedicated background thread.
-/// Coalesces rapid keystrokes automatically by draining pending requests.
-pub struct CompilerHost {
-    tx_request: Sender<CompileRequest>,
-    rx_output: Receiver<CompileOutput>,
-    current_revision: u64,
-}
-
 impl CompilerHost {
     pub fn new(mut world: ProjectWorld) -> Self {
         let (tx_req, rx_req) = channel::<CompileRequest>();
@@ -53,26 +40,24 @@ impl CompilerHost {
 
         thread::spawn(move || {
             while let Ok(mut req) = rx_req.recv() {
-                // Drain any pending requests to always compile the LATEST revision (coalescing)
                 while let Ok(next_req) = rx_req.try_recv() {
                     req = next_req;
                 }
 
                 let output = perform_compile(&mut world, req);
                 if tx_out.send(output).is_err() {
-                    break; // Receiver dropped, worker thread terminates cleanly
+                    break;
                 }
             }
         });
 
         Self {
             tx_request: tx_req,
-            rx_output: rx_out,
+            rx_output: Arc::new(Mutex::new(rx_out)),
             current_revision: 0,
         }
     }
 
-    /// Submit a new document revision for background compilation.
     pub fn request_compile(&mut self, path: Option<PathBuf>, source: String) -> u64 {
         self.current_revision += 1;
         let rev = self.current_revision;
@@ -84,14 +69,25 @@ impl CompilerHost {
         rev
     }
 
-    /// Non-blocking check for finished compilation outputs.
     pub fn try_recv(&self) -> Option<CompileOutput> {
-        self.rx_output.try_recv().ok()
+        self.rx_output.lock().try_recv().ok()
+    }
+
+    pub fn output_receiver(&self) -> Arc<Mutex<Receiver<CompileOutput>>> {
+        Arc::clone(&self.rx_output)
     }
 
     pub fn current_revision(&self) -> u64 {
         self.current_revision
     }
+}
+
+/// Headless compiler manager operating on a dedicated background thread.
+/// Coalesces rapid keystrokes automatically by draining pending requests.
+pub struct CompilerHost {
+    tx_request: Sender<CompileRequest>,
+    rx_output: Arc<Mutex<Receiver<CompileOutput>>>,
+    current_revision: u64,
 }
 
 fn perform_compile(world: &mut ProjectWorld, req: CompileRequest) -> CompileOutput {
