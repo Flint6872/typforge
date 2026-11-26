@@ -1,9 +1,11 @@
 pub mod compiler;
 pub mod diagnostics;
+pub mod session;
 pub mod world;
 
 pub use compiler::{CompileOutput, CompileRequest, CompilerHost};
 pub use diagnostics::{ResolvedDiagnostic, resolve_diagnostics};
+pub use session::{DocumentSession, EditOrigin};
 pub use world::ProjectWorld;
 
 use std::sync::Arc;

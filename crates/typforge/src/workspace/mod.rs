@@ -22,7 +22,8 @@ use gpui_util::ResultExt;
 use parking_lot::Mutex;
 
 use typastry::{Source, edit::apply_edit_action};
-use typst_gpui::{PreviewPanel, PreviewPanelEvent};
+use typforge_core::{DocumentSession, EditOrigin};
+use typst_gpui::{PreviewPanel, PreviewPanelEvent}; // ADD THIS IMPORT
 
 pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> {
     pub dock_area: Entity<DockArea>,
@@ -42,7 +43,13 @@ pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> {
     pub show_mobile_menu: bool,
     ribbon_inspect_task: Option<Task<()>>,
     editor_sync_task: Option<Task<()>>,
+    pub session: DocumentSession, // ADDED: DocumentSession to track canonical state
 }
+
+impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> EventEmitter<FileContentUpdated>
+    for TypstNoteView<W>
+{
+} // ADDED: EventEmitter for FileContentUpdated
 
 impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
     pub fn new(
@@ -92,17 +99,23 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
         // updates the PreviewPanel.
         cx.subscribe(
             &editor_panel_entity,
-            // FIX: Add explicit type annotation for `event`
             move |this, _emitter, event: &FileContentUpdated, cx_for_note_view| {
                 let content = event.content.clone();
                 let path = event.path.clone();
+
+                if this
+                    .session
+                    .update(path.clone(), content.clone(), EditOrigin::Editor)
+                    .is_none()
+                {
+                    return;
+                }
 
                 let _ = this
                     .window_handle
                     .update(cx_for_note_view, |_, window_ref, app_cx_from_handle| {
                         this.preview_panel
                             .update(app_cx_from_handle, |preview, cx_preview| {
-                                // FIX: Pass "".to_string() as content, as it's now ignored by PreviewPanel::update_document_info
                                 preview.update_document_info(
                                     path,
                                     content.clone(),
@@ -131,48 +144,35 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                     .map(|f| f.editor_state.read(cx).text().to_string())
             });
 
-        if let Some(content_from_initial_read) = initial_editor_state_content {
-            let active_file_path_from_initial_read =
-                editor_panel_entity.read(cx).active_file_path.clone();
-
-            let preview_panel_clone = preview_panel.clone();
-
-            let _ = window_handle
-                .clone()
-                .update(cx, move |_, window_ref, app_cx_in_init| {
-                    preview_panel_clone.update(app_cx_in_init, |panel, cx_for_preview| {
-                        // Pass the content and path to the preview panel
-                        // FIX: Pass "".to_string() as content, as it's now ignored by PreviewPanel::update_document_info
-                        panel.update_document_info(
-                            active_file_path_from_initial_read,
-                            "".to_string(),
-                            window_ref,
-                            cx_for_preview,
-                        );
-                        // The source_to_compile in `set_source` will be the initial content
-                        panel.set_source(content_from_initial_read, window_ref, cx_for_preview);
-                    });
-                })
-                .log_err();
+        // Initialize session locally
+        let mut session = DocumentSession::new();
+        let (initial_path, initial_text) = if let Some(content) = initial_editor_state_content {
+            let path = editor_panel_entity.read(cx).active_file_path.clone();
+            (path, content)
         } else {
-            // If no active file, set a default "Hello, Typst!"
-            let preview_panel_clone = preview_panel.clone();
-            let _ = window_handle
-                .clone()
-                .update(cx, move |_, window_ref, app_cx_in_init| {
-                    preview_panel_clone.update(app_cx_in_init, |panel, cx_for_preview| {
-                        // FIX: Pass "".to_string() as content, as it's now ignored by PreviewPanel::update_document_info
-                        panel.update_document_info(
-                            None,
-                            "".to_string(),
-                            window_ref,
-                            cx_for_preview,
-                        );
-                        panel.set_source("Hello, Typst!".to_string(), window_ref, cx_for_preview);
-                    });
-                })
-                .log_err();
-        }
+            (None, "Hello, Typst!".to_string())
+        };
+
+        session.update(initial_path.clone(), initial_text.clone(), EditOrigin::Disk);
+
+        let preview_panel_clone = preview_panel.clone();
+        let path_for_preview = initial_path;
+        let text_for_preview = initial_text;
+
+        let _ = window_handle
+            .clone()
+            .update(cx, move |_, window_ref, app_cx_in_init| {
+                preview_panel_clone.update(app_cx_in_init, |panel, cx_for_preview| {
+                    panel.update_document_info(
+                        path_for_preview,
+                        "".to_string(),
+                        window_ref,
+                        cx_for_preview,
+                    );
+                    panel.set_source(text_for_preview, window_ref, cx_for_preview);
+                });
+            })
+            .log_err();
 
         // --- 4. Preview -> Editor Synchronization (via PreviewPanelEvent) ---
         cx.subscribe(
@@ -181,23 +181,43 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                 match event {
                     PreviewPanelEvent::SourceChanged(new_content) => {
                         let content = new_content.clone();
+                        let active_path = this_note_view
+                            .editor_panel
+                            .read(cx_for_note_view)
+                            .active_file_path
+                            .clone();
+
+                        let Some(target_rev) = this_note_view.session.update(
+                            active_path,
+                            content.clone(),
+                            EditOrigin::Preview,
+                        ) else {
+                            return;
+                        };
+
                         let editor_handle = this_note_view.editor_panel.clone();
                         let window_handle = this_note_view.window_handle.clone();
+                        let note_view_weak = cx_for_note_view.weak_entity();
 
-                        // Cancel any pending debounce task first
                         this_note_view.editor_sync_task = None;
-
-                        // Debounce syncing to editor by 150ms to allow smooth typing in preview
                         this_note_view.editor_sync_task = Some(cx_for_note_view.spawn(
                             move |_, spawned_async_cx: &mut AsyncApp| {
-                                // Clone into an owned `AsyncApp` so `async move` owns its `AsyncApp` across `.await`
                                 let mut async_cx = spawned_async_cx.clone();
-
                                 async move {
                                     async_cx
                                         .background_executor()
                                         .timer(Duration::from_millis(150))
                                         .await;
+
+                                    let is_latest = note_view_weak
+                                        .read_with(&async_cx, |view, _| {
+                                            view.session.revision() == target_rev
+                                        })
+                                        .unwrap_or(false);
+
+                                    if !is_latest {
+                                        return;
+                                    }
 
                                     let _ =
                                         window_handle.update(&mut async_cx, |_, window, app_cx| {
@@ -232,6 +252,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                             },
                         ));
                     }
+
                     PreviewPanelEvent::DiagnosticsChanged(diags) => {
                         let typst_diags: Vec<typst::diag::SourceDiagnostic> = diags
                             .iter()
@@ -328,13 +349,12 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                                             .spawn(async move {
                                                 use typastry::edit::detect_properties_at_offset;
                                                 use typastry::inspector::TypastryInspector;
-                                                // Removed 'use typst_syntax::Source;' here as it's now global
 
                                                 let active_props = detect_properties_at_offset(
                                                     &source_code,
                                                     target_offset,
                                                 );
-                                                let source = Source::detached(&source_code); // Uses global Source
+                                                let source = Source::detached(&source_code);
                                                 let ctx = TypastryInspector::inspect_cursor(
                                                     &source,
                                                     editor_cursor,
@@ -479,7 +499,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
             crate::workspace::render::ScreenClass::from_width(window.viewport_size().width);
 
         // --- 7. Return TypstNoteView instance ---
-        let mut note_view = Self {
+        Self {
             dock_area: dock_area_entity,
             menu_bar,
             ribbon_panel,
@@ -492,24 +512,27 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
             recent_picker_selected_index: None,
             recent_picker_focus_handle: cx.focus_handle(),
             active_selection: None,
-            has_diagnostics: false, // Initial state
+            has_diagnostics: false,
             current_screen_class: initial_screen_class,
             show_mobile_menu: false,
             ribbon_inspect_task: None,
             editor_sync_task: None,
-        };
-
-        note_view.update_dock_layout(window, cx);
-
-        note_view
+            session, // <--- Uses the local variable
+        }
     }
 
     /// Orchestrates formatting actions triggered from either the Editor or Preview Panel.
     pub fn handle_ribbon_action(&mut self, action: &RibbonAction, cx: &mut Context<Self>) {
         let editor_panel = self.editor_panel.clone();
-        let preview_panel = self.preview_panel.clone();
         let window_handle = self.window_handle.clone();
         let active_selection = self.active_selection.clone();
+
+        // 1. Cancel pending syncs
+        self.editor_sync_task = None;
+
+        // 2. Read the latest session text
+        let session_text = self.session.text().to_string();
+        let session_has_text = !session_text.is_empty();
 
         let _ = window_handle
             .update(cx, |_, window, app_cx| {
@@ -518,17 +541,18 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                         if let Some(file) = editor
                             .open_files
                             .iter_mut()
-                            .find(|f| &f.path == active_path)
+                            .find(|f| f.path == *active_path)
                         {
-                            let mut final_new_selection = None;
-
-                            // 1. Mutate editor text buffer using saved active_selection or current editor selection
                             file.editor_state.update(editor_cx, |state, input_cx| {
+                                // Sync editor with session if stale (e.g. from preview typing)
+                                if session_has_text && state.text().to_string() != session_text {
+                                    state.set_value(session_text.clone(), window, input_cx);
+                                }
+
                                 let content = state.text().to_string();
                                 let selection = active_selection
                                     .clone()
                                     .unwrap_or_else(|| state.selected_range());
-
                                 let edit = apply_edit_action(&content, selection, &action.into());
 
                                 state.replace_range_with_history(
@@ -537,25 +561,19 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                                     window,
                                     input_cx,
                                 );
-
                                 state.set_selected_range(edit.new_selection.clone(), input_cx);
-                                final_new_selection = Some(edit.new_selection);
                             });
 
                             file.has_unsaved_changes = true;
+                            let updated_content =
+                                file.editor_state.read(editor_cx).text().to_string();
 
-                            // 2. Sync visual highlights & refocus Preview Panel so selection is preserved!
-                            if let Some(ref new_sel) = final_new_selection {
-                                preview_panel.update(editor_cx, |preview, preview_cx| {
-                                    preview.set_selection(new_sel.clone(), window, preview_cx);
-                                });
-                            }
-
-                            // 3. Trigger recompilation
-                            let content = file.editor_state.read(editor_cx).text().to_string();
+                            // 3. Emit from editor_cx.
+                            // NoteView's subscription will catch this, update the session,
+                            // and update the PreviewPanel automatically.
                             editor_cx.emit(FileContentUpdated {
                                 path: Some(active_path.clone()),
-                                content,
+                                content: updated_content,
                             });
                         }
                     }
@@ -563,8 +581,8 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
             })
             .log_err();
 
-        // 4. Update stored active_selection to the newly adjusted selection
-        if let Some(ref sel) = self
+        // Update stored selection for NoteView tracking
+        if let Some(sel) = self
             .editor_panel
             .read(cx)
             .active_file_path
@@ -578,7 +596,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
                     .map(|f| f.editor_state.read(cx).selected_range())
             })
         {
-            self.active_selection = Some(sel.clone());
+            self.active_selection = Some(sel);
         }
     }
 

@@ -40,3 +40,17 @@ Spellchecking (Harper), Typst diagnostics filtering, and AST inspection (typastr
 These belong in typforge-core behind a unified, non-GPUI CompilationHost or Workspace engine that produces clean diagnostic events.
 Arc<Mutex<W>> Threading Model:
 Typst’s World requires immutable access (&self) during compilation, but mutating sources requires &mut self. Holding a long-lived parking_lot::Mutex across UI and background threads makes lock inversion and UI stalls inevitable.
+
+
+
+11/26/26
+Current Status
+✅ Lock-free Compilation: typst::compile no longer blocks the UI thread.
+✅ Safe Bi-directional Sync: Revision IDs prevent stale text from clobbering new edits.
+✅ Headless Diagnostics: Diagnostics resolve without locking the World Mutex.
+What’s Left
+Stateless Preview Panel: Currently, PreviewPanel still “owns” the CompilerHost. If the preview is hidden or closed, compilation logic hitches. We should move the CompilerHost ownership up to the TypstNoteView (the controller) and make PreviewPanel a pure document renderer.
+IDE Performance: EditorPanel and Completions still use a Mutex<World> on the UI thread for tooltips and autocomplete.
+Spellcheck Migration: Move the Harper spellcheck logic into typforge-core.
+Phase 4: Promote Compiler to Workspace Controller
+We will move the CompilerHost into TypstNoteView. This makes the PreviewPanel a “stateless” reactive view—it simply renders whatever Arc<PagedDocument> the workspace gives it.
