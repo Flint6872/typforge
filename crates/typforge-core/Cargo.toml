@@ -20,4 +20,5 @@ typst-kit = { version = "0.15", features = [
     "system-downloader",
 ] }
 
-typastry = { path = "../typastry" }
+
+typastry = { path = "../typastry", features = ["spellcheck"] }

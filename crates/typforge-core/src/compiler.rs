@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 
+use typastry::spellcheck::{TextDiagnostic, checker::check_source_with_harper};
 use typst::World;
 use typst::diag::SourceDiagnostic;
 use typst::layout::{Frame, FrameItem};
@@ -32,6 +33,7 @@ pub struct CompileOutput {
     pub used_fonts: HashSet<Font>,
     pub sources: HashMap<FileId, Arc<Source>>,
     pub main_file_id: FileId,
+    pub spell_diagnostics: Vec<TextDiagnostic>,
 }
 
 impl CompilerHost {
@@ -97,6 +99,12 @@ fn perform_compile(world: &mut ProjectWorld, req: CompileRequest) -> CompileOutp
     let warned = typst::compile::<PagedDocument>(world);
     let warnings: Vec<_> = warned.warnings.into_iter().collect();
 
+    let mut spell_diagnostics = Vec::new();
+    // Run spellcheck on the background thread
+    if let Ok(main_src) = world.source(world.main_file_id()) {
+        spell_diagnostics = check_source_with_harper(&main_src, None, &HashSet::new(), None);
+    }
+
     match warned.output {
         Ok(doc) => {
             let doc_arc = Arc::new(doc);
@@ -130,6 +138,7 @@ fn perform_compile(world: &mut ProjectWorld, req: CompileRequest) -> CompileOutp
                 used_fonts,
                 sources: sources_map,
                 main_file_id: world.main_file_id(),
+                spell_diagnostics,
             }
         }
         Err(errors) => CompileOutput {
@@ -140,6 +149,7 @@ fn perform_compile(world: &mut ProjectWorld, req: CompileRequest) -> CompileOutp
             used_fonts: HashSet::new(),
             sources: HashMap::new(),
             main_file_id: world.main_file_id(),
+            spell_diagnostics,
         },
     }
 }

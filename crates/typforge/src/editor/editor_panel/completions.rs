@@ -1,104 +1,25 @@
 use gpui_kit::component::input::CompletionProvider;
-use gpui_kit::{Task, Window};
+use gpui_kit::{App, Task, Window}; // Added App, AsyncApp
 use lsp_types::{
     CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit,
     InsertTextFormat, Position, Range, TextEdit,
 };
-use parking_lot::Mutex;
 use ropey::{LineType, Rope};
-use std::sync::Arc;
 use typastry::intel::{CompletionKind, get_enhanced_completions};
+use typst_gpui::TypstGpuiWorld;
 
-pub struct TypstCompletionProvider<W: typst::World + typastry::IdeWorld + 'static> {
-    shared_world: Arc<Mutex<W>>,
+pub struct TypstCompletionProvider {
+    world: Box<dyn TypstGpuiWorld>,
 }
 
-impl<W: typst::World + typastry::IdeWorld + 'static> TypstCompletionProvider<W> {
-    pub fn new(shared_world: Arc<Mutex<W>>) -> Self {
-        Self { shared_world }
-    }
-
-    fn fetch_completions(
-        &self,
-        world_mutex: Arc<Mutex<W>>,
-        rope: &Rope,
-        cursor: usize,
-    ) -> CompletionResponse {
-        let world = world_mutex.lock();
-        let main_id = world.main();
-
-        let items = if let Ok(source) = world.source(main_id) {
-            // 1. Fetch exact replace range and suggestions directly from typastry
-            let resp = get_enhanced_completions(&*world, None, &source, cursor);
-
-            let rope_str = rope.to_string();
-            let start_pos = offset_to_lsp_position(rope, resp.replace_range.start);
-            let end_pos = offset_to_lsp_position(rope, cursor);
-
-            // 2. Map clean suggestions to LSP completion items
-            let list: Vec<CompletionItem> = resp
-                .items
-                .into_iter()
-                .map(|c| {
-                    let kind = match c.kind {
-                        CompletionKind::Func => CompletionItemKind::FUNCTION,
-                        CompletionKind::Type => CompletionItemKind::CLASS,
-                        CompletionKind::Param => CompletionItemKind::PROPERTY,
-                        CompletionKind::Constant => CompletionItemKind::CONSTANT,
-                        CompletionKind::Symbol => CompletionItemKind::VALUE,
-                        CompletionKind::Unit => CompletionItemKind::UNIT,
-                        CompletionKind::Package => CompletionItemKind::MODULE,
-                        CompletionKind::Text => CompletionItemKind::TEXT,
-                    };
-
-                    let replacement_text = if c.kind == CompletionKind::Package {
-                        let has_closing_quote = rope_str.as_bytes().get(cursor) == Some(&b'"');
-                        if has_closing_quote {
-                            c.apply.clone()
-                        } else {
-                            format!("{}\"", c.apply)
-                        }
-                    } else {
-                        c.apply
-                    };
-
-                    let text_edit = CompletionTextEdit::Edit(TextEdit {
-                        range: Range {
-                            start: start_pos,
-                            end: end_pos,
-                        },
-                        new_text: replacement_text,
-                    });
-
-                    CompletionItem {
-                        label: c.label,
-                        kind: Some(kind),
-                        text_edit: Some(text_edit),
-                        insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
-                        detail: c.detail,
-                        ..Default::default()
-                    }
-                })
-                .collect();
-
-            list
-        } else {
-            Vec::new()
-        };
-
-        CompletionResponse::Array(items)
+impl TypstCompletionProvider {
+    pub fn new(world: Box<dyn TypstGpuiWorld>) -> Self {
+        Self { world }
     }
 }
 
-impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> CompletionProvider
-    for TypstCompletionProvider<W>
-{
-    fn is_completion_trigger(
-        &self,
-        _offset: usize,
-        new_text: &str,
-        _cx: &mut gpui_kit::App,
-    ) -> bool {
+impl CompletionProvider for TypstCompletionProvider {
+    fn is_completion_trigger(&self, _offset: usize, new_text: &str, _cx: &mut App) -> bool {
         new_text == "#"
             || new_text == "("
             || new_text == ","
@@ -107,84 +28,73 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                 .any(|c| c.is_alphanumeric() || c == '_' || c == '.')
     }
 
-    // AFTER:
     fn completions(
         &self,
         rope: &Rope,
         offset: usize,
         _trigger: CompletionContext,
         _window: &mut Window,
-        cx: &mut gpui_kit::App,
+        cx: &mut App,
     ) -> Task<anyhow::Result<CompletionResponse>> {
-        let world_mutex = self.shared_world.clone();
+        // Use try_clone instead of clone()
+        let mut world = self.world.try_clone().expect("World must be clonable");
         let content = rope.to_string();
         let rope_clone = rope.clone();
 
         cx.background_executor().spawn(async move {
-            // Perform source update and completion calculation on background thread
-            {
-                let mut world_lock = world_mutex.lock();
-                world_lock.set_source(content);
-            }
+            world.set_source(content);
+            let main_id = world.main();
 
-            // We move fetch_completions into this background block to avoid
-            // blocking the UI thread with get_enhanced_completions logic.
-            let items = {
-                let world = world_mutex.lock();
-                let main_id = world.main();
+            let items = if let Ok(source) = world.source(main_id) {
+                // world.as_ref() now works because TypstGpuiWorld requires IdeWorld
+                let resp = get_enhanced_completions(world.as_ide(), None, &source, offset);
 
-                if let Ok(source) = world.source(main_id) {
-                    let resp = get_enhanced_completions(&*world, None, &source, offset);
+                let rope_str = rope_clone.to_string();
+                let start_pos = offset_to_lsp_position(&rope_clone, resp.replace_range.start);
+                let end_pos = offset_to_lsp_position(&rope_clone, offset);
 
-                    let rope_str = rope_clone.to_string();
-                    let start_pos = offset_to_lsp_position(&rope_clone, resp.replace_range.start);
-                    let end_pos = offset_to_lsp_position(&rope_clone, offset);
+                resp.items
+                    .into_iter()
+                    .map(|c| {
+                        let kind = match c.kind {
+                            CompletionKind::Func => CompletionItemKind::FUNCTION,
+                            CompletionKind::Type => CompletionItemKind::CLASS,
+                            CompletionKind::Param => CompletionItemKind::PROPERTY,
+                            CompletionKind::Constant => CompletionItemKind::CONSTANT,
+                            CompletionKind::Symbol => CompletionItemKind::VALUE,
+                            CompletionKind::Unit => CompletionItemKind::UNIT,
+                            CompletionKind::Package => CompletionItemKind::MODULE,
+                            CompletionKind::Text => CompletionItemKind::TEXT,
+                        };
 
-                    resp.items
-                        .into_iter()
-                        .map(|c| {
-                            let kind = match c.kind {
-                                CompletionKind::Func => CompletionItemKind::FUNCTION,
-                                CompletionKind::Type => CompletionItemKind::CLASS,
-                                CompletionKind::Param => CompletionItemKind::PROPERTY,
-                                CompletionKind::Constant => CompletionItemKind::CONSTANT,
-                                CompletionKind::Symbol => CompletionItemKind::VALUE,
-                                CompletionKind::Unit => CompletionItemKind::UNIT,
-                                CompletionKind::Package => CompletionItemKind::MODULE,
-                                CompletionKind::Text => CompletionItemKind::TEXT,
-                            };
-
-                            let replacement_text = if c.kind == CompletionKind::Package {
-                                let has_closing_quote =
-                                    rope_str.as_bytes().get(offset) == Some(&b'"');
-                                if has_closing_quote {
-                                    c.apply.clone()
-                                } else {
-                                    format!("{}\"", c.apply)
-                                }
-                            } else {
+                        let replacement_text = if c.kind == CompletionKind::Package {
+                            if rope_str.as_bytes().get(offset) == Some(&b'"') {
                                 c.apply
-                            };
-
-                            CompletionItem {
-                                label: c.label,
-                                kind: Some(kind),
-                                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                                    range: Range {
-                                        start: start_pos,
-                                        end: end_pos,
-                                    },
-                                    new_text: replacement_text,
-                                })),
-                                insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
-                                detail: c.detail,
-                                ..Default::default()
+                            } else {
+                                format!("{}\"", c.apply)
                             }
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                }
+                        } else {
+                            c.apply
+                        };
+
+                        CompletionItem {
+                            label: c.label,
+                            kind: Some(kind),
+                            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                                range: Range {
+                                    start: start_pos,
+                                    end: end_pos,
+                                },
+                                new_text: replacement_text,
+                            })),
+                            insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+                            detail: c.detail,
+                            ..Default::default()
+                        }
+                    })
+                    .collect::<Vec<CompletionItem>>() // Explicit type to help inference
+            } else {
+                Vec::new()
             };
 
             Ok(CompletionResponse::Array(items))

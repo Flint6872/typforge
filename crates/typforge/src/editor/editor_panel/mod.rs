@@ -4,6 +4,7 @@ mod render;
 
 use crate::editor::{CodeEditor, EditorStateExt, FileContentUpdated, OpenedFile};
 use crate::package_manager::{PackageManagerStore, PackageManagerView};
+use gpui_kit::App;
 use gpui_kit::component::{RopeExt, dock::Panel as DockPanel, input::EditorState};
 use gpui_kit::*;
 use parking_lot::Mutex;
@@ -16,11 +17,9 @@ use typastry::format::format_document;
 use typastry::inspector::{CursorContext, TypastryInspector, TypastryJump};
 use typastry::intel::{Tooltip, TypastrySignatureHelp, get_signature_help};
 use typst::syntax::Source;
+use typst_gpui::TypstGpuiWorld;
 
-impl<W: typst::World + typastry::IdeWorld + 'static> EventEmitter<FileContentUpdated>
-    for EditorPanel<W>
-{
-}
+impl EventEmitter<FileContentUpdated> for EditorPanel {}
 
 pub struct EditorSelectionChanged {
     pub is_bold: bool,
@@ -31,17 +30,14 @@ pub struct EditorSelectionChanged {
     pub cursor_context: CursorContext,
 }
 
-impl<W: typst::World + typastry::IdeWorld + 'static> EventEmitter<EditorSelectionChanged>
-    for EditorPanel<W>
-{
-}
+impl EventEmitter<EditorSelectionChanged> for EditorPanel {}
 
-pub struct EditorPanel<W: typst::World + typastry::IdeWorld + 'static> {
+pub struct EditorPanel {
     pub open_files: Vec<OpenedFile>,
     pub active_file_path: Option<PathBuf>,
     focus_handle: FocusHandle,
     pub zoom_level: f32,
-    pub shared_world: Arc<Mutex<W>>,
+    pub world: Box<dyn TypstGpuiWorld>,
 
     pub current_hover_content: Option<Tooltip>,
     pub current_hover_position: Option<Point<Pixels>>,
@@ -51,16 +47,14 @@ pub struct EditorPanel<W: typst::World + typastry::IdeWorld + 'static> {
     pub ribbon_task: Option<Task<()>>,
 }
 
-impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Clone
-    for EditorPanel<W>
-{
+impl Clone for EditorPanel {
     fn clone(&self) -> Self {
         Self {
             open_files: self.open_files.clone(),
             active_file_path: self.active_file_path.clone(),
             focus_handle: self.focus_handle.clone(),
             zoom_level: self.zoom_level,
-            shared_world: self.shared_world.clone(),
+            world: self.world.try_clone().expect("World must be clonable"),
             current_hover_content: self.current_hover_content.clone(),
             current_hover_position: self.current_hover_position.clone(),
             last_hover_request_time: self.last_hover_request_time,
@@ -71,14 +65,18 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
     }
 }
 
-impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> EditorPanel<W> {
-    pub fn new(shared_world: Arc<Mutex<W>>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+impl EditorPanel {
+    pub fn new(
+        world_box: Box<dyn TypstGpuiWorld>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             open_files: Vec::new(),
             active_file_path: None,
             focus_handle: cx.focus_handle(),
             zoom_level: 1.0,
-            shared_world,
+            world: world_box,
             current_hover_content: None,
             current_hover_position: None,
             last_hover_request_time: None,
@@ -100,25 +98,21 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         mouse_pos: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        let tooltip = {
-            let world_lock = self.shared_world.lock();
-            let main_id = world_lock.main();
-
-            if let Ok(source) = world_lock.source(main_id) {
-                let document = world_lock.document();
-                TypastryInspector::tooltip(&*world_lock, document.as_deref(), &source, byte_offset)
-            } else {
-                None
+        let world = self.world.as_ref();
+        if let Ok(source) = world.source(world.main()) {
+            if let Some(tooltip) = TypastryInspector::tooltip(
+                world.as_ide(),
+                world.document().as_deref(),
+                &source,
+                byte_offset,
+            ) {
+                self.current_hover_content = Some(tooltip);
+                self.current_hover_position = Some(mouse_pos);
+                cx.notify();
+                return;
             }
-        };
-
-        if let Some(tooltip) = tooltip {
-            self.current_hover_content = Some(tooltip);
-            self.current_hover_position = Some(mouse_pos);
-            cx.notify();
-        } else {
-            self.clear_hover(cx);
         }
+        self.clear_hover(cx);
     }
 
     // 5. Update update_ribbon_selection to inspect cursor & signature help:
@@ -179,10 +173,8 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         cursor: usize,
         cx: &mut Context<Self>,
     ) {
-        let help = {
-            let world_lock = self.shared_world.lock();
-            get_signature_help(&*world_lock, None, source, cursor)
-        };
+        let world = self.world.as_ref();
+        let help = get_signature_help(world.as_ide(), None, source, cursor); // Use .as_ide()
 
         if self.current_signature_help != help {
             self.current_signature_help = help;
@@ -228,7 +220,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         cx: &mut Context<Self>,
     ) {
         let jump = {
-            let world_lock = self.shared_world.lock();
+            let world_lock = self.world.as_ref();
             let document = world_lock.document();
             if let Some(doc) = document.as_deref() {
                 TypastryInspector::jump_from_click(&*world_lock, doc, page, x_pt, y_pt)
@@ -383,7 +375,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
     }
 }
 
-impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> EditorPanel<W> {
+impl EditorPanel {
     pub fn set_zoom(&mut self, zoom: f32, cx: &mut gpui::Context<Self>) {
         self.zoom_level = zoom.clamp(0.25, 5.0);
         cx.notify();
@@ -409,10 +401,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                 state.focus(window, cx);
             });
 
-            {
-                let mut world = self.shared_world.lock();
-                world.set_source(content.clone());
-            }
+            self.world.set_source(content.clone());
 
             cx.emit(FileContentUpdated {
                 path: Some(path),
@@ -425,7 +414,8 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
         match OpenedFile::new(path.clone(), window, cx) {
             Ok(mut new_file) => {
                 let provider =
-                    completions::TypstCompletionProvider::<W>::new(self.shared_world.clone());
+                    completions::TypstCompletionProvider::new(self.world.try_clone().unwrap());
+
                 new_file.editor_state.update(cx, |state, _| {
                     state.lsp_mut().completion_provider = Some(Rc::new(provider));
                 });
@@ -443,10 +433,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                     cx,
                 );
 
-                {
-                    let mut world = self.shared_world.lock();
-                    world.set_source(content.clone());
-                }
+                self.world.set_source(content.clone());
 
                 cx.emit(FileContentUpdated {
                     path: Some(path),
@@ -482,10 +469,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                         self.open_files.iter().find(|f| f.path == new_active_path)
                     {
                         let content = active_file.editor_state.read(cx).text().to_string();
-                        {
-                            let mut world = self.shared_world.lock();
-                            world.set_source(content.clone());
-                        }
+                        self.world.set_source(content.clone());
 
                         cx.emit(FileContentUpdated {
                             path: Some(new_active_path),
@@ -598,7 +582,7 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
                 .default_value("")
         });
 
-        let provider = completions::TypstCompletionProvider::<W>::new(self.shared_world.clone());
+        let provider = completions::TypstCompletionProvider::new(self.world.try_clone().unwrap());
 
         editor_state.update(cx, |state, _| {
             state.lsp_mut().completion_provider = Some(Rc::new(provider));
@@ -671,28 +655,21 @@ impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static
     }
 }
 
-impl<W: typst::World + typastry::IdeWorld + 'static> Focusable for EditorPanel<W> {
+impl Focusable for EditorPanel {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl<W: typst::World + typastry::IdeWorld + 'static>
-    EventEmitter<gpui_kit::component::dock::PanelEvent> for EditorPanel<W>
-{
-}
+impl EventEmitter<gpui_kit::component::dock::PanelEvent> for EditorPanel {}
 
-impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static>
-    gpui_kit::base::dock::Panel for EditorPanel<W>
-{
+impl gpui_kit::base::dock::Panel for EditorPanel {
     fn panel_name(&self) -> &'static str {
         "EditorPanel"
     }
 }
 
-impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> DockPanel
-    for EditorPanel<W>
-{
+impl DockPanel for EditorPanel {
     fn title(&mut self, _: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div().child("Editor")
     }

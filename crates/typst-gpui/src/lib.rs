@@ -21,16 +21,18 @@ pub mod caret_geometry;
 pub mod typst_element;
 
 /// Trait defining what the PreviewPanel needs from a Typst World.
-pub trait TypstGpuiWorld: typst::World + Send + Sync + 'static {
+pub trait TypstGpuiWorld: typst::World + typastry::IdeWorld + Send + Sync + 'static {
     fn set_source(&mut self, source: String);
     fn set_main_document_info(&mut self, path: Option<std::path::PathBuf>, content: String);
+    fn main_file_id(&self) -> typst::syntax::FileId;
+
+    fn as_ide(&self) -> &dyn typastry::IdeWorld;
+    fn try_clone(&self) -> Option<Box<dyn TypstGpuiWorld>>;
 
     fn document(&self) -> Option<std::sync::Arc<PagedDocument>> {
         None
     }
     fn set_document(&mut self, _doc: std::sync::Arc<PagedDocument>) {}
-    fn main_file_id(&self) -> typst::syntax::FileId;
-
     fn create_compiler_host(&self) -> Option<typforge_core::CompilerHost> {
         None
     }
@@ -47,6 +49,14 @@ impl TypstGpuiWorld for typforge_core::ProjectWorld {
 
     fn main_file_id(&self) -> typst::syntax::FileId {
         self.main_file_id()
+    }
+
+    fn as_ide(&self) -> &dyn typastry::IdeWorld {
+        self
+    }
+
+    fn try_clone(&self) -> Option<Box<dyn TypstGpuiWorld>> {
+        Some(Box::new(self.clone_shared()))
     }
 
     fn create_compiler_host(&self) -> Option<typforge_core::CompilerHost> {
@@ -266,7 +276,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
                 }
                 0
             }));
-
+            self.diagnostics = output.spell_diagnostics;
             self.document = Some(doc);
             self.schedule_spellcheck(cx);
             cx.notify();

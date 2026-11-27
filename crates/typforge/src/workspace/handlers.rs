@@ -216,7 +216,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
         }
 
         self.editor_panel
-            .update(cx, |editor: &mut EditorPanel<W>, editor_cx| {
+            .update(cx, |editor: &mut EditorPanel, editor_cx| {
                 println!("Action: FileSave triggered!");
                 editor.save_active_file(_window, editor_cx);
             });
@@ -408,7 +408,7 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
         cx.notify(); // Or cx.notify() to redraw everything
     }
 
-    fn get_default_save_dir(editor: &EditorPanel<W>, cx: &impl AppContext) -> std::path::PathBuf {
+    fn get_default_save_dir(editor: &EditorPanel, cx: &impl AppContext) -> std::path::PathBuf {
         // 1. If we have an active file path, suggest its parent directory
         if let Some(path) = &editor.active_file_path {
             if let Some(parent) = path.parent() {

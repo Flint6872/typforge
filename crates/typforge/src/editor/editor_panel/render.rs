@@ -10,9 +10,7 @@ use std::time::Duration;
 use std::time::Instant;
 use typastry::intel::Tooltip;
 
-impl<W: typst::World + typastry::IdeWorld + typst_gpui::TypstGpuiWorld + 'static> Render
-    for EditorPanel<W>
-{
+impl Render for EditorPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active_file_path = self.active_file_path.clone();
 

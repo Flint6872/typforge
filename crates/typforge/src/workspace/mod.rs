@@ -30,7 +30,7 @@ pub struct TypstNoteView<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> {
     pub dock_area: Entity<DockArea>,
     pub menu_bar: Option<Entity<AppMenuBar>>,
     pub ribbon_panel: Entity<RibbonPanel>,
-    pub editor_panel: Entity<EditorPanel<W>>,
+    pub editor_panel: Entity<EditorPanel>,
     pub diagnostics_panel: Entity<DiagnosticsPanel>,
     pub has_diagnostics: bool,
     pub preview_panel: Entity<PreviewPanel<W>>,
@@ -61,8 +61,12 @@ impl<W: typst_gpui::TypstGpuiWorld + typastry::IdeWorld> TypstNoteView<W> {
         cx: &mut Context<Self>,
     ) -> Self {
         let files_panel = cx.new(|cx| FilesPanel::new(window, cx));
-        let editor_panel_entity =
-            cx.new(|cx| EditorPanel::new(shared_world_arc.clone(), window, cx));
+
+        let world_for_editor = shared_world_arc
+            .lock()
+            .try_clone()
+            .expect("World must be clonable");
+        let editor_panel_entity = cx.new(|cx| EditorPanel::new(world_for_editor, window, cx));
         let diagnostics_panel = cx.new(|cx| DiagnosticsPanel::new(window, cx));
 
         let compiler_host = shared_world_arc
