@@ -54,3 +54,24 @@ IDE Performance: EditorPanel and Completions still use a Mutex<World> on the UI 
 Spellcheck Migration: Move the Harper spellcheck logic into typforge-core.
 Phase 4: Promote Compiler to Workspace Controller
 We will move the CompilerHost into TypstNoteView. This makes the PreviewPanel a “stateless” reactive view—it simply renders whatever Arc<PagedDocument> the workspace gives it.
+
+
+
+11/26/26
+I am refactoring TypForge to move all heavy logic into a headless `typforge-core` crate.
+**Current State:**
+- `typforge-core` owns `ProjectWorld`, `CompilerHost`, and `DocumentSession`.
+- Compilation runs on a background thread in `CompilerHost`.
+- `TypstNoteView` (in `typforge`) acts as the orchestrator, polling the compiler and syncing state using revision IDs.
+- `PreviewPanel` (in `typst-gpui`) is now a stateless renderer receiving `Arc<PagedDocument>`.
+
+**Goal:**
+- Move Spellcheck (Harper) and IDE intelligence (Tooltips/Completions) from the UI thread into `typforge-core`.
+- The `CompilerHost` should return spellcheck diagnostics and an `IdeService` object in its `CompileOutput`.
+
+**Files to provide in next prompt:**
+- `crates/typforge-core/src/compiler.rs`
+- `crates/typforge-core/src/session.rs`
+- `crates/typst-gpui/src/lib.rs`
+- `crates/typforge/src/workspace/mod.rs`
+- `crates/typforge/src/editor/editor_panel/mod.rs` (for the IDE logic move)

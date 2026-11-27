@@ -31,6 +31,7 @@ pub struct CompileOutput {
     pub errors: Vec<SourceDiagnostic>,
     pub used_fonts: HashSet<Font>,
     pub sources: HashMap<FileId, Arc<Source>>,
+    pub main_file_id: FileId,
 }
 
 impl CompilerHost {
@@ -128,6 +129,7 @@ fn perform_compile(world: &mut ProjectWorld, req: CompileRequest) -> CompileOutp
                 errors: Vec::new(),
                 used_fonts,
                 sources: sources_map,
+                main_file_id: world.main_file_id(),
             }
         }
         Err(errors) => CompileOutput {
@@ -137,6 +139,7 @@ fn perform_compile(world: &mut ProjectWorld, req: CompileRequest) -> CompileOutp
             errors: errors.into_iter().collect(),
             used_fonts: HashSet::new(),
             sources: HashMap::new(),
+            main_file_id: world.main_file_id(),
         },
     }
 }

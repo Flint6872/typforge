@@ -11,6 +11,7 @@ use typastry::spellcheck::{
     extractor::detect_document_language,
 };
 use typst_layout::PagedDocument;
+use typst_syntax::FileId;
 
 // Import typforge-core components
 use typforge_core::CompilerHost; // ADD THIS IMPORT
@@ -70,11 +71,9 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     world: Arc<Mutex<W>>,
     document: Option<std::sync::Arc<PagedDocument>>,
     pub render_state: Arc<TypstRenderState>,
-
     focus_handle: FocusHandle,
     zoom: f32,
     pub source: String,
-
     pub suppressing_events: bool,
     pub last_text_len: usize,
     last_hit_map: HitMap,
@@ -87,13 +86,7 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
     cursor_visible: bool,
     is_hovering_link: bool,
     _blink_task: Option<Task<()>>,
-    is_compiling: bool,
-    pending_compile_source: Option<String>,
-    pending_compile_path: Option<Option<std::path::PathBuf>>,
-    pub compiler_host: Option<CompilerHost>, // ADD THIS FIELD
-    pub current_path: Option<std::path::PathBuf>, // ADD THIS FIELD
 
-    // --- NEW SPELLCHECK & DIAGNOSTICS STATE FIELDS ---
     pub diagnostics: Vec<TextDiagnostic>,
     spellcheck_task: Option<Task<()>>,
     pub dictionary_manager: Arc<Mutex<DictionaryManager>>,
@@ -104,7 +97,6 @@ pub struct PreviewPanel<W: TypstGpuiWorld> {
         Option<Arc<dyn Fn(typst::syntax::Span, u16) -> usize + Send + Sync + 'static>>,
 
     pub active_menu_diagnostics: Vec<TextDiagnostic>,
-    // --- NEW WYSIWYG STATE FIELDS Visual editing & context menu---
     pub pending_transaction: Option<typastry::wysiwyg::MutationTransaction>,
     pub visual_edit_error: Option<String>,
     pub inspected_element: Option<typastry::wysiwyg::ElementProperties>,
@@ -160,8 +152,7 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             world,
             document: None,
             render_state: Arc::new(TypstRenderState::default()),
-
-            focus_handle,
+            focus_handle: cx.focus_handle(),
             zoom: 1.0,
             source: String::new(),
             suppressing_events: false,
@@ -174,11 +165,6 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
             cursor_visible: true,
             is_hovering_link: false,
             _blink_task: Some(blink_task),
-            is_compiling: false,
-            pending_compile_source: None,
-            pending_compile_path: None,
-            compiler_host,      // INITIALIZE NEW FIELD
-            current_path: None, // INITIALIZE NEW FIELD
 
             diagnostics: Vec::new(),
             spellcheck_task: None,
@@ -222,15 +208,118 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
     }
 
     /// Update the Typst source code and trigger a re-render.
-    pub fn set_source(&mut self, source: String, _window: &mut Window, cx: &mut Context<Self>) {
+    pub fn set_source(&mut self, source: String, _window: &mut Window, _cx: &mut Context<Self>) {
         if self.source == source {
             return;
         }
         self.source = source.clone();
         self.last_text_len = source.len();
-        self.pending_compile_source = Some(source);
+    }
 
-        self.compile(cx);
+    pub fn apply_compilation_result(
+        &mut self,
+        output: typforge_core::CompileOutput,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(doc) = output.document {
+            if let Some(main_source) = output.sources.get(&output.main_file_id) {
+                self.source = main_source.text().to_string();
+                self.last_text_len = self.source.len();
+
+                let len = self.source.len();
+                self.cursor_offset = self.cursor_offset.min(len);
+                if let Some(ref mut anchor) = self.selection_anchor {
+                    *anchor = (*anchor).min(len);
+                }
+            }
+            self.sync_fonts_set_to_gpui(output.used_fonts, cx);
+
+            let scale_factor = (96.0 / 72.0) * self.zoom;
+            let page_margin_px = Pixels::from(20.0 * self.zoom);
+            let mut y_offset = Pixels::ZERO;
+            let mut anchors = Vec::new();
+            for (i, page) in doc.pages().iter().enumerate() {
+                collect_anchors_recursive_static(&page.frame, y_offset, scale_factor, &mut anchors);
+                let page_h = Pixels::from(page.frame.height().to_pt() as f32 * scale_factor);
+                y_offset += page_h
+                    + if i < doc.pages().len() - 1 {
+                        page_margin_px
+                    } else {
+                        Pixels::ZERO
+                    };
+            }
+            self.last_hit_map.anchors = anchors;
+
+            let sources_arc = Arc::new(output.sources);
+            let span_sources = sources_arc.clone();
+            self.cached_sources = sources_arc;
+            self.cached_span_resolver = Some(Arc::new(move |span, offset| {
+                if let Some(file_id) = span.id() {
+                    if let Some(source) = span_sources.get(&file_id) {
+                        if let typst::syntax::SpanKind::Number { num, .. } = span.get() {
+                            return source
+                                .range(num, None)
+                                .map(|r| r.start + offset as usize)
+                                .unwrap_or(0);
+                        }
+                    }
+                }
+                0
+            }));
+
+            self.document = Some(doc);
+            self.schedule_spellcheck(cx);
+            cx.notify();
+        }
+    }
+
+    pub fn update_render_data(
+        &mut self,
+        document: Arc<PagedDocument>,
+        sources: Arc<HashMap<FileId, Arc<typst_syntax::Source>>>,
+        used_fonts: std::collections::HashSet<typst::text::Font>,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_fonts_set_to_gpui(used_fonts, cx);
+
+        // Recalculate anchors for the new document
+        let scale_factor = (96.0 / 72.0) * self.zoom;
+        let page_margin_px = Pixels::from(20.0 * self.zoom);
+        let mut y_offset = Pixels::ZERO;
+        let mut anchors = Vec::new();
+        for (i, page) in document.pages().iter().enumerate() {
+            collect_anchors_recursive_static(&page.frame, y_offset, scale_factor, &mut anchors);
+            let page_h = Pixels::from(page.frame.height().to_pt() as f32 * scale_factor);
+            y_offset += page_h
+                + if i < document.pages().len() - 1 {
+                    page_margin_px
+                } else {
+                    Pixels::ZERO
+                };
+        }
+
+        self.last_hit_map.anchors = anchors;
+        self.cached_sources = sources.clone();
+
+        // Re-bind the span resolver
+        let span_sources = sources;
+        self.cached_span_resolver = Some(Arc::new(move |span, offset| {
+            if let Some(file_id) = span.id() {
+                if let Some(src) = span_sources.get(&file_id) {
+                    if let typst::syntax::SpanKind::Number { num, .. } = span.get() {
+                        return src
+                            .range(num, None)
+                            .map(|r| r.start + offset as usize)
+                            .unwrap_or(0);
+                    }
+                }
+            }
+            0
+        }));
+
+        self.document = Some(document);
+        self.schedule_spellcheck(cx);
+        cx.notify();
     }
 
     pub fn cached_sources(
@@ -252,73 +341,73 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
         cx.notify();
     }
 
-    fn compile(&mut self, cx: &mut Context<Self>) {
-        let Some(source_to_compile) = self.pending_compile_source.take() else {
-            return;
-        };
-        let path = self
-            .pending_compile_path
-            .take()
-            .unwrap_or_else(|| self.current_path.clone());
-
-        if let Some(ref mut host) = self.compiler_host {
-            host.request_compile(path, source_to_compile);
-
-            if !self.is_compiling {
-                self.is_compiling = true;
-                self.await_compile_output(cx);
-            }
-        }
-    }
-
-    fn await_compile_output(&mut self, cx: &mut Context<Self>) {
-        let Some(ref host) = self.compiler_host else {
-            self.is_compiling = false;
-            return;
-        };
-        let rx_arc = host.output_receiver();
-        let handle = cx.weak_entity();
-
-        cx.spawn(move |_view, spawned_async_cx: &mut AsyncApp| {
-            let mut async_cx = spawned_async_cx.clone();
-            async move {
-                let first_output = async_cx
-                    .background_executor()
-                    .spawn(async move { rx_arc.lock().recv().ok() })
-                    .await;
-
-                let _ = handle.update(&mut async_cx, |panel, cx| {
-                    let Some(mut latest_output) = first_output else {
-                        panel.is_compiling = false;
-                        return;
-                    };
-
-                    // Drain any newer outputs that finished while we were waking up
-                    if let Some(ref host) = panel.compiler_host {
-                        while let Some(newer) = host.try_recv() {
-                            latest_output = newer;
-                        }
-                    }
-
-                    let output_rev = latest_output.revision;
-                    panel.apply_compile_output(latest_output, cx);
-
-                    let pending_rev = panel
-                        .compiler_host
-                        .as_ref()
-                        .map(|h| h.current_revision())
-                        .unwrap_or(0);
-
-                    if output_rev < pending_rev {
-                        panel.await_compile_output(cx);
-                    } else {
-                        panel.is_compiling = false;
-                    }
-                });
-            }
-        })
-        .detach();
-    }
+    //     fn compile(&mut self, cx: &mut Context<Self>) {
+    //         let Some(source_to_compile) = self.pending_compile_source.take() else {
+    //             return;
+    //         };
+    //         let path = self
+    //             .pending_compile_path
+    //             .take()
+    //             .unwrap_or_else(|| self.current_path.clone());
+    //
+    //         if let Some(ref mut host) = self.compiler_host {
+    //             host.request_compile(path, source_to_compile);
+    //
+    //             if !self.is_compiling {
+    //                 self.is_compiling = true;
+    //                 self.await_compile_output(cx);
+    //             }
+    //         }
+    //     }
+    //
+    //     fn await_compile_output(&mut self, cx: &mut Context<Self>) {
+    //         let Some(ref host) = self.compiler_host else {
+    //             self.is_compiling = false;
+    //             return;
+    //         };
+    //         let rx_arc = host.output_receiver();
+    //         let handle = cx.weak_entity();
+    //
+    //         cx.spawn(move |_view, spawned_async_cx: &mut AsyncApp| {
+    //             let mut async_cx = spawned_async_cx.clone();
+    //             async move {
+    //                 let first_output = async_cx
+    //                     .background_executor()
+    //                     .spawn(async move { rx_arc.lock().recv().ok() })
+    //                     .await;
+    //
+    //                 let _ = handle.update(&mut async_cx, |panel, cx| {
+    //                     let Some(mut latest_output) = first_output else {
+    //                         panel.is_compiling = false;
+    //                         return;
+    //                     };
+    //
+    //                     // Drain any newer outputs that finished while we were waking up
+    //                     if let Some(ref host) = panel.compiler_host {
+    //                         while let Some(newer) = host.try_recv() {
+    //                             latest_output = newer;
+    //                         }
+    //                     }
+    //
+    //                     let output_rev = latest_output.revision;
+    //                     panel.apply_compile_output(latest_output, cx);
+    //
+    //                     let pending_rev = panel
+    //                         .compiler_host
+    //                         .as_ref()
+    //                         .map(|h| h.current_revision())
+    //                         .unwrap_or(0);
+    //
+    //                     if output_rev < pending_rev {
+    //                         panel.await_compile_output(cx);
+    //                     } else {
+    //                         panel.is_compiling = false;
+    //                     }
+    //                 });
+    //             }
+    //         })
+    //         .detach();
+    //     }
 
     fn apply_compile_output(
         &mut self,
@@ -376,16 +465,16 @@ impl<W: TypstGpuiWorld> PreviewPanel<W> {
     }
 
     /// Updates the GpuiWorld's main document path and content.
-    pub fn update_document_info(
-        &mut self,
-        path: Option<std::path::PathBuf>,
-        _content: String,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) {
-        self.current_path = path.clone();
-        self.pending_compile_path = Some(path);
-    }
+    // pub fn update_document_info(
+    //     &mut self,
+    //     path: Option<std::path::PathBuf>,
+    //     _content: String,
+    //     _window: &mut Window,
+    //     _cx: &mut Context<Self>,
+    // ) {
+    //     self.current_path = path.clone();
+    //     self.pending_compile_path = Some(path);
+    // }
 
     pub fn export_pdf(&self) -> Option<Vec<u8>> {
         self.document.as_ref().and_then(|doc| {

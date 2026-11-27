@@ -76,11 +76,17 @@ impl CanvasInputHandler {
     pub fn handle_key_down(
         event: &KeyDownEvent,
         current_source: &str,
-        cursor_offset: usize,
+        mut cursor_offset: usize,
         selection: Option<std::ops::Range<usize>>,
         hit_map: &HitMap,
         cx: &mut App,
     ) -> CanvasInputResult {
+        // --- ADD BOUNDS SAFETY ---
+        let len = current_source.len();
+        cursor_offset = cursor_offset.min(len);
+        let selection = selection.map(|r| r.start.min(len)..r.end.min(len));
+        // -------------------------
+
         let key = event.keystroke.key.as_str();
         let key_lower = key.to_lowercase();
         let is_cmd = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
